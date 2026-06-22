@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wellbeing"
+  short_description: "Track wellbeing and capacity"
+  default_prompt: "Use $wellbeing to record or inspect daily wellbeing."

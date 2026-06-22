@@ -1,0 +1,4 @@
+interface:
+  display_name: "Todo"
+  short_description: "Manage tasks and day planning"
+  default_prompt: "Use $todo to manage tasks or create a practical day plan."

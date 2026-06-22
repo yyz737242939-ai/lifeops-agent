@@ -1,0 +1,4 @@
+interface:
+  display_name: "Activity"
+  short_description: "Recommend suitable activities"
+  default_prompt: "Use $activity to recommend activities under user constraints."

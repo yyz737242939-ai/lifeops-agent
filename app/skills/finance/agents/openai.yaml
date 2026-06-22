@@ -1,0 +1,4 @@
+interface:
+  display_name: "Finance"
+  short_description: "Track spending and budgets"
+  default_prompt: "Use $finance to work with expenses and budgets."
