@@ -1,0 +1,118 @@
+import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from app.agents.agent import Agent
+from app.tools.capability_builder import COMMON_TOOL_NAMES, SKILL_TOOL_NAMES
+
+
+def _tool_names(call) -> set[str]:
+    return {schema["name"] for schema in call.kwargs["tools"]}
+
+
+class AgentSkillStateTests(unittest.TestCase):
+    @patch("app.agents.agent.log_raw_event")
+    @patch("app.agents.agent.log_event")
+    @patch("app.agents.agent.client.responses.create")
+    def test_todo_followup_inherits_skill_and_capabilities(
+        self,
+        create_response,
+        log_event,
+        _log_raw_event,
+    ) -> None:
+        create_response.return_value = SimpleNamespace(output=[], output_text="done")
+        agent = Agent()
+
+        agent.chat("列出我的待办任务")
+        agent.chat("完成第一个")
+
+        first_tools = _tool_names(create_response.call_args_list[0])
+        second_tools = _tool_names(create_response.call_args_list[1])
+        expected = set(COMMON_TOOL_NAMES | SKILL_TOOL_NAMES["todo"])
+        self.assertEqual(first_tools, expected)
+        self.assertEqual(second_tools, expected)
+        self.assertEqual(agent.active_skills, ("todo",))
+
+        routing_events = [
+            call.kwargs
+            for call in log_event.call_args_list
+            if call.args == ("skill_routing",)
+        ]
+        followup = routing_events[1]
+        self.assertEqual(followup["directly_selected"], [])
+        self.assertEqual(followup["inherited_skills"], ["todo"])
+        self.assertEqual(followup["loaded_skills"], ["todo"])
+        self.assertTrue(followup["inheritance_used"])
+
+    @patch("app.agents.agent.log_raw_event")
+    @patch("app.agents.agent.log_event")
+    @patch("app.agents.agent.client.responses.create")
+    def test_explicit_switch_replaces_old_skill_and_chat_clears_it(
+        self,
+        create_response,
+        log_event,
+        _log_raw_event,
+    ) -> None:
+        create_response.return_value = SimpleNamespace(output=[], output_text="done")
+        agent = Agent()
+
+        agent.chat("列出我的待办任务")
+        agent.chat("检查本周餐饮预算")
+        agent.chat("你好，介绍一下自己")
+
+        finance_tools = _tool_names(create_response.call_args_list[1])
+        fallback_tools = _tool_names(create_response.call_args_list[2])
+        self.assertEqual(
+            finance_tools,
+            set(COMMON_TOOL_NAMES | SKILL_TOOL_NAMES["finance"]),
+        )
+        self.assertTrue(finance_tools.isdisjoint(SKILL_TOOL_NAMES["todo"]))
+        self.assertEqual(fallback_tools, set(COMMON_TOOL_NAMES))
+        self.assertEqual(agent.active_skills, ())
+
+        routing_events = [
+            call.kwargs
+            for call in log_event.call_args_list
+            if call.args == ("skill_routing",)
+        ]
+        self.assertEqual(routing_events[1]["directly_selected"], ["finance"])
+        self.assertEqual(routing_events[1]["inherited_skills"], [])
+        self.assertTrue(routing_events[2]["state_cleared"])
+
+    @patch("app.agents.agent.log_raw_event")
+    @patch("app.agents.agent.log_event")
+    @patch("app.agents.agent.client.responses.create")
+    def test_ref_turn_uses_common_tools_but_preserves_topic_for_next_followup(
+        self,
+        create_response,
+        log_event,
+        _log_raw_event,
+    ) -> None:
+        create_response.return_value = SimpleNamespace(output=[], output_text="done")
+        agent = Agent()
+
+        agent.chat("列出最近的消费记录")
+        agent.chat("把刚才引用的完整结果展开")
+        self.assertEqual(agent.active_skills, ("finance",))
+        agent.chat("继续")
+
+        ref_tools = _tool_names(create_response.call_args_list[1])
+        continued_tools = _tool_names(create_response.call_args_list[2])
+        self.assertEqual(ref_tools, set(COMMON_TOOL_NAMES))
+        self.assertEqual(
+            continued_tools,
+            set(COMMON_TOOL_NAMES | SKILL_TOOL_NAMES["finance"]),
+        )
+
+        routing_events = [
+            call.kwargs
+            for call in log_event.call_args_list
+            if call.args == ("skill_routing",)
+        ]
+        self.assertEqual(routing_events[1]["state_resolution"], "context_ref_only")
+        self.assertEqual(routing_events[1]["loaded_skills"], [])
+        self.assertEqual(routing_events[2]["inherited_skills"], ["finance"])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -69,7 +69,7 @@ app/skills/activity/SKILL.md
 
 每个案例确认：
 
-- `selected_skills` 只包含需要的领域。
+- `directly_selected` 只包含当前输入直接匹配的领域，`loaded_skills` 包含本轮最终领域。
 - `reasons` 能解释命中的意图。
 - `fallback_used` 为 `false`。
 - Raw 日志中的 instructions 不包含其他 Skill 的 `Loaded skill:` 标记。

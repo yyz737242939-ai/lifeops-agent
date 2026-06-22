@@ -789,7 +789,12 @@ def get_tool_schemas() -> list[dict[str, Any]]:
 TOOL_SCHEMAS = get_tool_schemas()
 
 
-def call_tool(name: str, arguments: dict[str, Any]) -> str:
+def call_tool(
+    name: str,
+    arguments: dict[str, Any],
+    *,
+    allowed_tool_names: frozenset[str],
+) -> str:
     tool = TOOLS.get(name)
 
     if tool is None:
@@ -797,6 +802,17 @@ def call_tool(name: str, arguments: dict[str, Any]) -> str:
             "ok": False,
             "action": name,
             "error": "tool_not_found",
+        }
+        return json.dumps(result, ensure_ascii=False)
+
+    if name not in allowed_tool_names:
+        result = {
+            "ok": False,
+            "action": name,
+            "error": "tool_not_allowed",
+            "allowed_tools": [
+                tool_name for tool_name in TOOLS if tool_name in allowed_tool_names
+            ],
         }
         return json.dumps(result, ensure_ascii=False)
 

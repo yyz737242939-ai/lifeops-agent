@@ -13,8 +13,10 @@ from app.runtime.context_manager import (
 )
 from app.runtime.conversation_logger import log_event, log_raw_event
 from app.skills.skill_loader import discover_skills
-from app.tools.tool import call_tool
-from app.tools.tool_schema import TOOL_SCHEMAS
+from app.skills.skill_router import route_skills
+from app.skills.skill_state import resolve_skill_state
+from app.tools.capability_builder import build_capabilities
+from app.tools.tool import TOOLS, call_tool
 from app.utils.llm import client
 
 
@@ -105,20 +107,52 @@ class Agent:
     def __init__(self) -> None:
         self.messages: list[Any] = []
         self.skills = discover_skills()
+        self.active_skills: tuple[str, ...] = ()
 
     def chat(self, user_input: str) -> str:
         log_event("user_input", role="user", content=user_input)
 
-        prompt_result = build_system_prompt(user_input, self.skills)
-        routing = prompt_result.routing
+        routing = route_skills(user_input, self.skills)
+        skill_state = resolve_skill_state(
+            user_input,
+            routing.selected,
+            self.active_skills,
+        )
+        self.active_skills = skill_state.next_active_skills
+        prompt_result = build_system_prompt(
+            self.skills,
+            skill_state.loaded_skills,
+        )
+        capability_result = build_capabilities(prompt_result.loaded_skills)
         log_event(
             "skill_routing",
             available_skills=list(self.skills),
-            selected_skills=list(prompt_result.loaded_skills),
+            directly_selected=list(skill_state.directly_selected),
+            inherited_skills=list(skill_state.inherited_skills),
+            loaded_skills=list(skill_state.loaded_skills),
+            previous_active_skills=list(skill_state.previous_active_skills),
+            next_active_skills=list(skill_state.next_active_skills),
+            inheritance_used=skill_state.inheritance_used,
+            state_cleared=skill_state.state_cleared,
+            state_resolution=skill_state.resolution,
             scores=routing.scores,
             reasons={name: list(items) for name, items in routing.reasons.items()},
-            fallback_used=routing.fallback_used,
+            direct_fallback_used=routing.fallback_used,
             prompt_chars=prompt_result.prompt_chars,
+        )
+        log_event(
+            "capability_build",
+            loaded_skills=list(prompt_result.loaded_skills),
+            visible_tool_names=[
+                schema["name"] for schema in capability_result.tool_schemas
+            ],
+            capability_sources={
+                name: list(sources)
+                for name, sources in capability_result.capability_sources.items()
+            },
+            tool_schema_count=capability_result.schema_count,
+            tool_schema_chars=capability_result.schema_chars,
+            fallback_used=capability_result.fallback_used,
         )
 
         self.messages.append(
@@ -140,7 +174,7 @@ class Agent:
                 loop=loop_index + 1,
                 model=LLM_MODEL,
                 instructions=prompt_result.instructions,
-                tools=TOOL_SCHEMAS,
+                tools=capability_result.tool_schemas,
                 input=_serialize_output(self.messages),
             )
 
@@ -149,7 +183,7 @@ class Agent:
                     model=LLM_MODEL,
                     instructions=prompt_result.instructions,
                     input=self.messages,
-                    tools=TOOL_SCHEMAS,
+                    tools=list(capability_result.tool_schemas),
                     temperature=LLM_TEMPERATURE,
                     max_output_tokens=LLM_MAX_OUTPUT_TOKENS,
                 )
@@ -212,7 +246,27 @@ class Agent:
                     tool_call_arguments=arguments,
                 )
 
-                tool_result = call_tool(tool_name, arguments)
+                if (
+                    tool_name in TOOLS
+                    and tool_name not in capability_result.allowed_tool_names
+                ):
+                    log_event(
+                        "tool_denied",
+                        tool_call_name=tool_name,
+                        tool_call_arguments=arguments,
+                        loaded_skills=list(prompt_result.loaded_skills),
+                        allowed_tool_names=[
+                            schema["name"]
+                            for schema in capability_result.tool_schemas
+                        ],
+                        error="tool_not_allowed",
+                    )
+
+                tool_result = call_tool(
+                    tool_name,
+                    arguments,
+                    allowed_tool_names=capability_result.allowed_tool_names,
+                )
                 compacted_tool_result, compaction = compact_tool_output(
                     tool_name,
                     tool_result,

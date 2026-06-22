@@ -2,6 +2,7 @@ import unittest
 
 from app.prompts.prompt_builder import build_system_prompt
 from app.skills.skill_loader import discover_skills
+from app.skills.skill_router import route_skills
 
 
 class PromptBuilderTests(unittest.TestCase):
@@ -10,7 +11,8 @@ class PromptBuilderTests(unittest.TestCase):
         cls.skills = discover_skills()
 
     def test_loads_only_selected_skill_body(self) -> None:
-        result = build_system_prompt("列出我的待办任务", self.skills)
+        routing = route_skills("列出我的待办任务", self.skills)
+        result = build_system_prompt(self.skills, routing.selected)
 
         self.assertEqual(result.loaded_skills, ("todo",))
         self.assertIn("Loaded skill: todo", result.instructions)
@@ -18,14 +20,16 @@ class PromptBuilderTests(unittest.TestCase):
         self.assertIn("Available skills (metadata only):", result.instructions)
 
     def test_core_fallback_still_exposes_ref_behavior(self) -> None:
-        result = build_system_prompt("把刚才引用的明细展开", self.skills)
+        routing = route_skills("把刚才引用的明细展开", self.skills)
+        result = build_system_prompt(self.skills, routing.selected)
 
         self.assertEqual(result.loaded_skills, ())
-        self.assertTrue(result.routing.fallback_used)
+        self.assertTrue(routing.fallback_used)
         self.assertIn("Call read_context_ref", result.instructions)
 
     def test_finance_skill_adds_domain_ref_guidance(self) -> None:
-        result = build_system_prompt("列出所有消费明细", self.skills)
+        routing = route_skills("列出所有消费明细", self.skills)
+        result = build_system_prompt(self.skills, routing.selected)
 
         self.assertEqual(result.loaded_skills, ("finance",))
         self.assertIn("exact dates, descriptions, ids", result.instructions)
