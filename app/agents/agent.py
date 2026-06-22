@@ -12,6 +12,13 @@ from app.runtime.context_manager import (
     summarize_context_messages,
 )
 from app.runtime.conversation_logger import log_event, log_raw_event
+from app.runtime.run_state import (
+    ActionRecord,
+    ActionStatus,
+    LoopLimits,
+    RunState,
+    StopReason,
+)
 from app.skills.skill_loader import discover_skills
 from app.skills.skill_router import route_skills
 from app.skills.skill_state import resolve_skill_state
@@ -20,7 +27,7 @@ from app.tools.tool import TOOLS, call_tool
 from app.utils.llm import client
 
 
-MAX_TOOL_CALL_LOOPS = 3
+DEFAULT_LOOP_LIMITS = LoopLimits()
 
 
 def _serialize_output(output: Any) -> Any:
@@ -103,14 +110,44 @@ def _response_summary(output: list[Any]) -> list[dict[str, Any]]:
     return summaries
 
 
+def _parse_result_object(result: str) -> dict[str, Any] | None:
+    try:
+        parsed = json.loads(result)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _runtime_stop_answer(run_state: RunState) -> str:
+    reason_messages = {
+        StopReason.LLM_BUDGET_EXHAUSTED: "模型调用轮数已达到限制。",
+        StopReason.TOOL_BUDGET_EXHAUSTED: "工具调用数量已达到限制。",
+        StopReason.LLM_REQUEST_FAILED: "模型请求失败。",
+    }
+    reason = reason_messages.get(run_state.stop_reason, "Agent 执行已停止。")
+    if run_state.completed_actions:
+        return f"{reason}已保留 {len(run_state.completed_actions)} 个成功的工具结果。"
+    return reason
+
+
 class Agent:
-    def __init__(self) -> None:
+    def __init__(self, *, loop_limits: LoopLimits | None = None) -> None:
         self.messages: list[Any] = []
         self.skills = discover_skills()
         self.active_skills: tuple[str, ...] = ()
+        self.loop_limits = loop_limits or DEFAULT_LOOP_LIMITS
+        self.last_run_state: RunState | None = None
 
     def chat(self, user_input: str) -> str:
-        log_event("user_input", role="user", content=user_input)
+        run_state = RunState()
+        self.last_run_state = run_state
+        run_id = run_state.run_id
+        log_event(
+            "run_started",
+            run_id=run_id,
+            limits=self.loop_limits.to_dict(),
+        )
+        log_event("user_input", run_id=run_id, role="user", content=user_input)
 
         routing = route_skills(user_input, self.skills)
         skill_state = resolve_skill_state(
@@ -126,6 +163,7 @@ class Agent:
         capability_result = build_capabilities(prompt_result.loaded_skills)
         log_event(
             "skill_routing",
+            run_id=run_id,
             available_skills=list(self.skills),
             directly_selected=list(skill_state.directly_selected),
             inherited_skills=list(skill_state.inherited_skills),
@@ -142,6 +180,7 @@ class Agent:
         )
         log_event(
             "capability_build",
+            run_id=run_id,
             loaded_skills=list(prompt_result.loaded_skills),
             visible_tool_names=[
                 schema["name"] for schema in capability_result.tool_schemas
@@ -162,16 +201,20 @@ class Agent:
             }
         )
 
-        for loop_index in range(MAX_TOOL_CALL_LOOPS):
+        while run_state.can_start_llm_round(self.loop_limits):
+            loop_number = run_state.start_llm_round(self.loop_limits)
             log_event(
                 "llm_request",
-                loop=loop_index + 1,
+                run_id=run_id,
+                loop=loop_number,
                 model=LLM_MODEL,
                 context=_context_summary(self.messages),
+                run_state=run_state.to_dict(include_actions=False),
             )
             log_raw_event(
                 "llm_request",
-                loop=loop_index + 1,
+                run_id=run_id,
+                loop=loop_number,
                 model=LLM_MODEL,
                 instructions=prompt_result.instructions,
                 tools=capability_result.tool_schemas,
@@ -189,18 +232,26 @@ class Agent:
                 )
             except Exception as e:
                 error_message = f"LLM request failed: {e}"
-                log_event("error", error_message=error_message)
+                run_state.fail(StopReason.LLM_REQUEST_FAILED)
+                log_event(
+                    "run_stopped",
+                    run_id=run_id,
+                    error_message=error_message,
+                    run_state=run_state.to_dict(),
+                )
                 return error_message
 
             raw_output = _serialize_output(response.output)
             log_event(
                 "llm_response",
-                loop=loop_index + 1,
+                run_id=run_id,
+                loop=loop_number,
                 output=_response_summary(response.output),
             )
             log_raw_event(
                 "llm_response",
-                loop=loop_index + 1,
+                run_id=run_id,
+                loop=loop_number,
                 output=raw_output,
                 output_text=response.output_text,
             )
@@ -213,19 +264,101 @@ class Agent:
 
             if not function_calls:
                 answer = response.output_text
-                log_event("final_answer", role="assistant", content=answer)
+                run_state.complete()
+                log_event(
+                    "final_answer",
+                    run_id=run_id,
+                    role="assistant",
+                    content=answer,
+                )
+                log_event(
+                    "run_completed",
+                    run_id=run_id,
+                    run_state=run_state.to_dict(),
+                )
                 return answer
 
-            for function_call in function_calls:
+            calls_started_this_round = 0
+            for call_index, function_call in enumerate(function_calls):
                 tool_name = function_call.name
                 raw_arguments = function_call.arguments
+
+                if not run_state.can_start_tool_call(
+                    self.loop_limits,
+                    calls_started_this_round=calls_started_this_round,
+                ):
+                    for skipped_call in function_calls[call_index:]:
+                        skipped_result = json.dumps(
+                            {
+                                "ok": False,
+                                "action": skipped_call.name,
+                                "error": "tool_budget_exhausted",
+                            },
+                            ensure_ascii=False,
+                        )
+                        run_state.add_action(
+                            ActionRecord(
+                                call_id=skipped_call.call_id,
+                                tool_name=skipped_call.name,
+                                arguments=skipped_call.arguments,
+                                status=ActionStatus.SKIPPED,
+                                result=skipped_result,
+                                error="tool_budget_exhausted",
+                            )
+                        )
+                        self.messages.append(
+                            {
+                                "type": "function_call_output",
+                                "call_id": skipped_call.call_id,
+                                "output": skipped_result,
+                            }
+                        )
+                        log_event(
+                            "tool_skipped",
+                            run_id=run_id,
+                            loop=loop_number,
+                            tool_call_name=skipped_call.name,
+                            tool_call_arguments=skipped_call.arguments,
+                            error="tool_budget_exhausted",
+                        )
+                    run_state.stop(
+                        StopReason.TOOL_BUDGET_EXHAUSTED,
+                        partial=bool(run_state.completed_actions),
+                    )
+                    break
+
+                run_state.start_tool_call(
+                    self.loop_limits,
+                    calls_started_this_round=calls_started_this_round,
+                )
+                calls_started_this_round += 1
 
                 try:
                     arguments = json.loads(raw_arguments)
                 except json.JSONDecodeError as e:
-                    tool_result = f"Error: invalid JSON arguments for {tool_name}: {e}"
+                    tool_result = json.dumps(
+                        {
+                            "ok": False,
+                            "action": tool_name,
+                            "error": "invalid_json_arguments",
+                            "message": str(e),
+                        },
+                        ensure_ascii=False,
+                    )
+                    run_state.add_action(
+                        ActionRecord(
+                            call_id=function_call.call_id,
+                            tool_name=tool_name,
+                            arguments=raw_arguments,
+                            status=ActionStatus.FAILED,
+                            result=tool_result,
+                            error="invalid_json_arguments",
+                        )
+                    )
                     log_event(
                         "tool_error",
+                        run_id=run_id,
+                        loop=loop_number,
                         tool_call_name=tool_name,
                         tool_call_arguments=raw_arguments,
                         tool_result=tool_result,
@@ -242,6 +375,8 @@ class Agent:
 
                 log_event(
                     "tool_call",
+                    run_id=run_id,
+                    loop=loop_number,
                     tool_call_name=tool_name,
                     tool_call_arguments=arguments,
                 )
@@ -252,6 +387,8 @@ class Agent:
                 ):
                     log_event(
                         "tool_denied",
+                        run_id=run_id,
+                        loop=loop_number,
                         tool_call_name=tool_name,
                         tool_call_arguments=arguments,
                         loaded_skills=list(prompt_result.loaded_skills),
@@ -271,8 +408,34 @@ class Agent:
                     tool_name,
                     tool_result,
                 )
+                parsed_result = _parse_result_object(tool_result)
+                action_succeeded = bool(
+                    parsed_result is not None and parsed_result.get("ok") is True
+                )
+                action_error = None
+                if not action_succeeded:
+                    if parsed_result is not None:
+                        action_error = str(parsed_result.get("error") or "tool_failed")
+                    else:
+                        action_error = "invalid_tool_result"
+                run_state.add_action(
+                    ActionRecord(
+                        call_id=function_call.call_id,
+                        tool_name=tool_name,
+                        arguments=arguments,
+                        status=(
+                            ActionStatus.COMPLETED
+                            if action_succeeded
+                            else ActionStatus.FAILED
+                        ),
+                        result=compacted_tool_result,
+                        error=action_error,
+                    )
+                )
                 log_event(
                     "tool_result",
+                    run_id=run_id,
+                    loop=loop_number,
                     role="tool",
                     tool_call_name=tool_name,
                     tool_call_arguments=arguments,
@@ -281,6 +444,8 @@ class Agent:
                 )
                 log_raw_event(
                     "tool_result",
+                    run_id=run_id,
+                    loop=loop_number,
                     role="tool",
                     tool_call_name=tool_name,
                     tool_call_arguments=arguments,
@@ -297,10 +462,25 @@ class Agent:
                     }
                 )
 
-        final_answer = "工具调用次数过多，已停止。"
+            if run_state.stop_reason is not None:
+                answer = _runtime_stop_answer(run_state)
+                log_event(
+                    "run_stopped",
+                    run_id=run_id,
+                    final_answer=answer,
+                    run_state=run_state.to_dict(),
+                )
+                return answer
+
+        run_state.stop(
+            StopReason.LLM_BUDGET_EXHAUSTED,
+            partial=bool(run_state.completed_actions),
+        )
+        final_answer = _runtime_stop_answer(run_state)
         log_event(
-            "error",
-            error_message="Exceeded maximum tool call loop count",
+            "run_stopped",
+            run_id=run_id,
             final_answer=final_answer,
+            run_state=run_state.to_dict(),
         )
         return final_answer
