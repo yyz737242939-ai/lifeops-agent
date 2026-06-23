@@ -16,6 +16,7 @@ from app.runtime.context_ref_store import read_context_ref as load_context_ref
 from app.runtime.errors import classify_tool_exception, normalize_tool_result
 from app.runtime.idempotency_store import get_result as get_idempotent_result
 from app.runtime.idempotency_store import save_result as save_idempotent_result
+from app.utils.serialization import json_safe
 
 
 ToolParameters = dict[str, Any]
@@ -83,20 +84,6 @@ def register_tool(
         return function
 
     return decorator
-
-
-def _json_safe(value: Any) -> Any:
-    if hasattr(value, "model_dump"):
-        return _json_safe(value.model_dump(mode="json"))
-    if isinstance(value, dict):
-        return {str(key): _json_safe(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_json_safe(item) for item in value]
-    if isinstance(value, tuple):
-        return [_json_safe(item) for item in value]
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return repr(value)
 
 
 def _empty_parameters() -> ToolParameters:
@@ -880,7 +867,7 @@ def call_tool(
                 "key": idempotency_key,
                 "replayed": True,
             }
-            return json.dumps(_json_safe(replayed), ensure_ascii=False)
+            return json.dumps(json_safe(replayed), ensure_ascii=False)
 
     try:
         future = _TOOL_EXECUTOR.submit(tool.function, **arguments)
@@ -909,4 +896,4 @@ def call_tool(
         save_idempotent_result(idempotency_key, stored_result)
         result = stored_result
 
-    return json.dumps(_json_safe(result), ensure_ascii=False)
+    return json.dumps(json_safe(result), ensure_ascii=False)

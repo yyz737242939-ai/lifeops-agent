@@ -8,7 +8,6 @@ from app.config import (
     LLM_TEMPERATURE,
 )
 from app.observability import app_log, events, llm_io
-from app.observability.serialization import json_safe
 from app.prompts.prompt_builder import build_system_prompt
 from app.runtime.context_manager import (
     compact_tool_output,
@@ -34,7 +33,9 @@ from app.skills.skill_router import route_skills
 from app.skills.skill_state import resolve_skill_state
 from app.tools.capability_builder import build_capabilities
 from app.tools.tool import TOOLS, ToolEffect, call_tool
+from app.utils.json_file import parse_json_object
 from app.utils.llm import client
+from app.utils.serialization import json_safe
 
 
 DEFAULT_LOOP_LIMITS = LoopLimits()
@@ -109,11 +110,7 @@ def _response_summary(output: list[Any]) -> list[dict[str, Any]]:
 
 
 def _parse_result_object(result: str) -> dict[str, Any] | None:
-    try:
-        parsed = json.loads(result)
-    except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
+    return parse_json_object(result)
 
 
 def _runtime_stop_answer(run_state: RunState) -> str:

@@ -8,6 +8,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+from app.utils.json_file import read_json_file
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SESSION_DIR = PROJECT_ROOT / "logs" / "sessions"
@@ -25,7 +27,7 @@ NEW_LOG_FILES = {
 
 
 def _read_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return read_json_file(path, dict)
 
 
 def _read_jsonl(path: Path) -> list[dict]:

@@ -85,6 +85,9 @@ uv run python -m unittest discover -s tests -v
 | `app/memory/daily_log_store.py` | Wellbeing 状态与 JSON 持久化 |
 | `app/memory/expense_store.py` | 消费、预算与 JSON 持久化 |
 | `app/memory/activity_catalog.py` | 本地活动目录与推荐逻辑 |
+| `app/utils/json_file.py` | JSON 容器校验、原子写入和 Pydantic 列表持久化 |
+| `app/utils/serialization.py` | SDK、Pydantic 和 Runtime 对象的 JSON 安全转换 |
+| `app/utils/time.py` | 业务记录使用的统一本地时间字符串 |
 | `log_viewer.py`、`app/log_viewer/*` | 三类日志的本地查看 UI，并兼容旧 Trace/Raw 文件 |
 
 手动学习测试位于：

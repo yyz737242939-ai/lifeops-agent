@@ -204,6 +204,14 @@ Trace 逐步增加：
 - 所有对外日志方法使用 `log_` 前缀，并按 run、routing、LLM、tool 分类。
 - Viewer 支持三类日志，同时兼容历史 Trace/Raw 文件。
 
+### 公共 Utils 整理
+
+- Memory Store 共享 JSON 文件校验、Pydantic 列表加载与保存。
+- JSON 文件使用同目录临时文件加原子替换，降低写入中断造成半文件的风险。
+- Context Ref 与幂等存储共享相同的 JSON object 读写规则。
+- 工具、Agent 与日志系统共享 JSON 安全序列化和 object 解析。
+- 时间字符串集中到轻量 time utils；业务 Store 仍保留各自的领域 CRUD。
+
 ## 阶段四：长期 Context 生命周期
 
 Agent Loop v0.1 核心可靠性完成后，将长期 Context 提前到最小 Memory 之前研究，解决

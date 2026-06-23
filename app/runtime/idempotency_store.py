@@ -1,6 +1,7 @@
-import json
 from pathlib import Path
 from typing import Any
+
+from app.utils.json_file import read_json_file, write_json_file
 
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
@@ -10,13 +11,7 @@ IDEMPOTENCY_FILE = DATA_DIR / "idempotency.json"
 def _load() -> dict[str, dict[str, Any]]:
     if not IDEMPOTENCY_FILE.exists():
         return {}
-    try:
-        payload = json.loads(IDEMPOTENCY_FILE.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
-        raise ValueError(f"Invalid JSON in {IDEMPOTENCY_FILE}") from error
-    if not isinstance(payload, dict):
-        raise ValueError(f"{IDEMPOTENCY_FILE} must contain a JSON object")
-    return payload
+    return read_json_file(IDEMPOTENCY_FILE, dict)
 
 
 def get_result(key: str) -> dict[str, Any] | None:
@@ -25,10 +20,6 @@ def get_result(key: str) -> dict[str, Any] | None:
 
 
 def save_result(key: str, result: dict[str, Any]) -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
     entries = _load()
     entries[key] = result
-    IDEMPOTENCY_FILE.write_text(
-        json.dumps(entries, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    write_json_file(IDEMPOTENCY_FILE, entries)
