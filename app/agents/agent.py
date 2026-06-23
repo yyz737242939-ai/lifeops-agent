@@ -1,5 +1,6 @@
 import json
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from app.config import (
@@ -39,6 +40,26 @@ from app.utils.serialization import json_safe
 
 
 DEFAULT_LOOP_LIMITS = LoopLimits()
+
+
+@dataclass(frozen=True)
+class TurnContext:
+    """Prompt and capability snapshot that stays fixed during one user turn."""
+
+    instructions: str
+    tool_schemas: tuple[dict[str, Any], ...]
+    allowed_tool_names: frozenset[str]
+    loaded_skills: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ToolExecutionResult:
+    """Result of all runtime attempts for one model-requested tool action."""
+
+    content: str
+    parsed: dict[str, Any] | None
+    error: ExecutionError | None
+    attempt_count: int
 
 
 def _preview_text(value: Any, max_length: int = 240) -> str:
@@ -155,6 +176,8 @@ def _error_json(
 
 
 class Agent:
+    """Coordinate skill routing, LLM rounds, tools, and per-request RunState."""
+
     def __init__(self, *, loop_limits: LoopLimits | None = None) -> None:
         self.messages: list[Any] = []
         self.skills = discover_skills()
@@ -163,6 +186,7 @@ class Agent:
         self.last_run_state: RunState | None = None
 
     def cancel_current_run(self) -> bool:
+        """Request cooperative cancellation at the next runtime checkpoint."""
         if self.last_run_state is None:
             return False
         if self.last_run_state.status != RunStatus.RUNNING:
@@ -171,12 +195,18 @@ class Agent:
         return True
 
     def chat(self, user_input: str) -> str:
+        """Execute one user turn and return either an answer or stop summary."""
         run_state = RunState()
         self.last_run_state = run_state
         events.log_run_started(run_state, self.loop_limits.to_dict())
         events.log_user_input(run_state, user_input)
         app_log.log_info("Run %s started", run_state.run_id)
 
+        turn = self._prepare_turn(user_input, run_state)
+        return self._run_agent_loop(run_state, turn)
+
+    def _prepare_turn(self, user_input: str, run_state: RunState) -> TurnContext:
+        """Resolve skills and freeze the prompt/tool boundary for this turn."""
         routing = route_skills(user_input, self.skills)
         skill_state = resolve_skill_state(
             user_input,
@@ -197,14 +227,16 @@ class Agent:
             prompt_chars=prompt_result.prompt_chars,
         )
         events.log_capabilities_built(run_state, capability_result, TOOLS)
-
-        self.messages.append(
-            {
-                "role": "user",
-                "content": user_input,
-            }
+        self.messages.append({"role": "user", "content": user_input})
+        return TurnContext(
+            instructions=prompt_result.instructions,
+            tool_schemas=capability_result.tool_schemas,
+            allowed_tool_names=capability_result.allowed_tool_names,
+            loaded_skills=prompt_result.loaded_skills,
         )
 
+    def _run_agent_loop(self, run_state: RunState, turn: TurnContext) -> str:
+        """Run sequential LLM/tool rounds until completion or a controlled stop."""
         while run_state.can_start_llm_round(self.loop_limits):
             if run_state.cancel_requested:
                 run_state.stop(
@@ -217,8 +249,8 @@ class Agent:
             response = self._request_llm(
                 run_state=run_state,
                 loop_number=loop_number,
-                instructions=prompt_result.instructions,
-                tool_schemas=capability_result.tool_schemas,
+                instructions=turn.instructions,
+                tool_schemas=turn.tool_schemas,
             )
             if response is None:
                 return self._stopped_answer(run_state)
@@ -246,28 +278,18 @@ class Agent:
                 run_state=run_state,
                 loop_number=loop_number,
                 function_calls=function_calls,
-                allowed_tool_names=capability_result.allowed_tool_names,
-                loaded_skills=prompt_result.loaded_skills,
+                allowed_tool_names=turn.allowed_tool_names,
+                loaded_skills=turn.loaded_skills,
             )
 
             if run_state.stop_reason is not None:
-                answer = _runtime_stop_answer(run_state)
-                events.log_run_stopped(run_state, answer)
-                app_log.log_warning(
-                    "Run %s stopped: %s", run_state.run_id, run_state.stop_reason
-                )
-                return answer
+                return self._stopped_answer(run_state)
 
         run_state.stop(
             StopReason.LLM_BUDGET_EXHAUSTED,
             partial=bool(run_state.completed_actions),
         )
-        final_answer = _runtime_stop_answer(run_state)
-        events.log_run_stopped(run_state, final_answer)
-        app_log.log_warning(
-            "Run %s stopped: %s", run_state.run_id, run_state.stop_reason
-        )
-        return final_answer
+        return self._stopped_answer(run_state)
 
     def _request_llm(
         self,
@@ -277,6 +299,7 @@ class Agent:
         instructions: str,
         tool_schemas: tuple[dict[str, Any], ...],
     ) -> Any | None:
+        """Call the model with explicit retry accounting and boundary logs."""
         events.log_llm_requested(
             run_state, loop_number, _context_summary(self.messages)
         )
@@ -315,32 +338,53 @@ class Agent:
                     max_output_tokens=LLM_MAX_OUTPUT_TOKENS,
                 )
             except Exception as exception:
-                execution_error = classify_llm_exception(exception)
-                events.log_llm_failed(
-                    run_state, loop_number, attempt_number, execution_error
-                )
-                app_log.log_error(
-                    "LLM attempt %s failed for run %s: %s",
-                    attempt_number,
-                    run_state.run_id,
-                    execution_error.code,
-                )
-                can_retry = (
-                    execution_error.retryable
-                    and retry_index < self.loop_limits.max_llm_retries
-                )
-                if not can_retry:
-                    if run_state.completed_actions:
-                        run_state.stop(StopReason.LLM_REQUEST_FAILED, partial=True)
-                    else:
-                        run_state.fail(StopReason.LLM_REQUEST_FAILED)
+                if not self._handle_llm_failure(
+                    run_state=run_state,
+                    loop_number=loop_number,
+                    attempt_number=attempt_number,
+                    retry_index=retry_index,
+                    exception=exception,
+                ):
                     return None
-                retry_count = run_state.record_retry(f"llm:{loop_number}")
-                events.log_llm_retry_scheduled(
-                    run_state, loop_number, retry_count, execution_error
-                )
                 time.sleep(self.loop_limits.retry_backoff_seconds)
         return None
+
+    def _handle_llm_failure(
+        self,
+        *,
+        run_state: RunState,
+        loop_number: int,
+        attempt_number: int,
+        retry_index: int,
+        exception: Exception,
+    ) -> bool:
+        """Classify one LLM failure and decide whether the loop may retry."""
+        execution_error = classify_llm_exception(exception)
+        events.log_llm_failed(
+            run_state, loop_number, attempt_number, execution_error
+        )
+        app_log.log_error(
+            "LLM attempt %s failed for run %s: %s",
+            attempt_number,
+            run_state.run_id,
+            execution_error.code,
+        )
+        can_retry = (
+            execution_error.retryable
+            and retry_index < self.loop_limits.max_llm_retries
+        )
+        if not can_retry:
+            if run_state.completed_actions:
+                run_state.stop(StopReason.LLM_REQUEST_FAILED, partial=True)
+            else:
+                run_state.fail(StopReason.LLM_REQUEST_FAILED)
+            return False
+
+        retry_count = run_state.record_retry(f"llm:{loop_number}")
+        events.log_llm_retry_scheduled(
+            run_state, loop_number, retry_count, execution_error
+        )
+        return True
 
     def _execute_function_calls(
         self,
@@ -351,83 +395,37 @@ class Agent:
         allowed_tool_names: frozenset[str],
         loaded_skills: tuple[str, ...],
     ) -> None:
+        """Execute one response's tool calls in order, preserving stop semantics."""
         calls_started_this_round = 0
         for call_index, function_call in enumerate(function_calls):
             tool_name = function_call.name
             raw_arguments = function_call.arguments
 
-            if run_state.cancel_requested:
-                self._skip_calls(
-                    run_state,
-                    loop_number,
-                    function_calls[call_index:],
-                    ErrorType.CONTROL,
-                    "cancelled",
-                    "Run was cancelled before tool execution",
-                )
-                run_state.stop(
-                    StopReason.CANCELLED,
-                    partial=bool(run_state.completed_actions),
-                )
-                return
-
-            if not run_state.can_start_tool_call(
-                self.loop_limits,
-                calls_started_this_round=calls_started_this_round,
+            if self._stop_before_tool_call(
+                run_state,
+                loop_number,
+                function_calls[call_index:],
+                calls_started_this_round,
             ):
-                self._skip_calls(
-                    run_state,
-                    loop_number,
-                    function_calls[call_index:],
-                    ErrorType.CONTROL,
-                    "tool_budget_exhausted",
-                    "Tool call budget exhausted",
-                )
-                run_state.stop(
-                    StopReason.TOOL_BUDGET_EXHAUSTED,
-                    partial=bool(run_state.completed_actions),
-                )
                 return
 
             try:
                 arguments = json.loads(raw_arguments)
             except json.JSONDecodeError as exception:
-                run_state.start_tool_call(
-                    self.loop_limits,
-                    calls_started_this_round=calls_started_this_round,
-                )
-                calls_started_this_round += 1
-                tool_result = _error_json(
-                    tool_name,
-                    ErrorType.INVALID_ARGUMENTS,
-                    "invalid_json_arguments",
-                    str(exception),
-                )
-                parsed_result = _parse_result_object(tool_result)
-                failed_action = ActionRecord(
-                    call_id=function_call.call_id,
-                    tool_name=tool_name,
-                    arguments=raw_arguments,
-                    status=ActionStatus.FAILED,
-                    result=tool_result,
-                    error=parsed_result.get("error") if parsed_result else None,
-                )
-                run_state.add_action(failed_action)
-                self._append_tool_output(function_call.call_id, tool_result)
-                events.log_tool_failed(
+                calls_started_this_round = self._record_invalid_arguments(
                     run_state,
                     loop_number,
                     function_call,
-                    tool_result,
-                    failed_action.error,
+                    exception,
+                    calls_started_this_round,
                 )
-                app_log.log_warning("Invalid JSON arguments for tool %s", tool_name)
                 continue
 
             signature, signature_count, cycle_detected = run_state.register_call(
                 tool_name,
                 arguments,
             )
+            # Stable signatures expose deterministic repetition without guessing intent.
             tool = TOOLS.get(tool_name)
             repeated_write = bool(
                 tool is not None
@@ -435,161 +433,319 @@ class Agent:
                 and signature_count >= self.loop_limits.max_same_call_attempts
             )
             if cycle_detected or repeated_write:
-                self._skip_calls(
-                    run_state,
-                    loop_number,
-                    function_calls[call_index:],
-                    ErrorType.CONTROL,
-                    "repeated_call",
-                    "Repeated tool call or A-B-A-B cycle detected",
-                )
-                run_state.stop(
-                    StopReason.REPEATED_CALL,
-                    partial=bool(run_state.completed_actions),
+                self._stop_repeated_calls(
+                    run_state, loop_number, function_calls[call_index:]
                 )
                 return
 
             idempotency_key = None
             if tool is not None and tool.effect == ToolEffect.WRITE:
+                # A call_id identifies the same requested side effect across retries.
                 idempotency_key = f"{run_state.run_id}:{function_call.call_id}"
 
-            attempt_count = 0
-            tool_result = ""
-            parsed_result: dict[str, Any] | None = None
-            execution_error = None
-            while True:
-                if not run_state.can_start_tool_call(
-                    self.loop_limits,
-                    calls_started_this_round=calls_started_this_round,
-                ):
-                    break
-                run_state.start_tool_call(
-                    self.loop_limits,
-                    calls_started_this_round=calls_started_this_round,
-                )
-                calls_started_this_round += 1
-                attempt_count += 1
-
-                events.log_tool_started(
-                    run_state,
-                    loop_number,
-                    function_call,
-                    arguments,
-                    attempt_count,
-                    idempotency_key,
-                )
-                if tool is not None and tool_name not in allowed_tool_names:
-                    events.log_tool_denied(
-                        run_state,
-                        loop_number,
-                        function_call,
-                        arguments,
-                        loaded_skills,
-                    )
-
-                tool_result = call_tool(
-                    tool_name,
-                    arguments,
-                    allowed_tool_names=allowed_tool_names,
-                    idempotency_key=idempotency_key,
-                )
-                parsed_result = _parse_result_object(tool_result)
-                execution_error = tool_error_from_result(parsed_result)
-                if run_state.cancel_requested:
-                    break
-                if execution_error is None:
-                    break
-
-                safe_retry = bool(
-                    tool is not None
-                    and tool.retryable
-                    and execution_error.retryable
-                    and (tool.effect == ToolEffect.READ or tool.idempotent)
-                    and attempt_count <= self.loop_limits.max_tool_retries
-                )
-                if not safe_retry:
-                    break
-                if not run_state.can_start_tool_call(
-                    self.loop_limits,
-                    calls_started_this_round=calls_started_this_round,
-                ):
-                    break
-                retry_count = run_state.record_retry(f"tool:{function_call.call_id}")
-                events.log_tool_retry_scheduled(
-                    run_state,
-                    loop_number,
-                    function_call,
-                    retry_count,
-                    execution_error,
-                )
-                time.sleep(self.loop_limits.retry_backoff_seconds)
-
-            compacted_tool_result, compaction = compact_tool_output(
-                tool_name,
-                tool_result,
-            )
-            action_succeeded = bool(
-                parsed_result is not None and parsed_result.get("ok") is True
-            )
-            observation_signature, observation_count = run_state.register_observation(
-                signature,
-                parsed_result if parsed_result is not None else tool_result,
-            )
-            action = ActionRecord(
-                call_id=function_call.call_id,
-                tool_name=tool_name,
+            execution, calls_started_this_round = self._execute_tool_with_retry(
+                run_state=run_state,
+                loop_number=loop_number,
+                function_call=function_call,
                 arguments=arguments,
-                status=(
-                    ActionStatus.COMPLETED
-                    if action_succeeded
-                    else ActionStatus.FAILED
-                ),
-                result=compacted_tool_result,
-                error=(execution_error.to_dict() if execution_error else None),
+                tool=tool,
+                allowed_tool_names=allowed_tool_names,
+                loaded_skills=loaded_skills,
+                idempotency_key=idempotency_key,
+                calls_started_this_round=calls_started_this_round,
+            )
+
+            observation_count = self._record_tool_result(
+                run_state=run_state,
+                loop_number=loop_number,
+                function_call=function_call,
+                arguments=arguments,
                 signature=signature,
-                observation_signature=observation_signature,
-                attempt_count=attempt_count,
+                idempotency_key=idempotency_key,
+                execution=execution,
+            )
+            if self._stop_after_tool_call(
+                run_state=run_state,
+                loop_number=loop_number,
+                remaining_calls=function_calls[call_index + 1 :],
+                signature_count=signature_count,
+                observation_count=observation_count,
+            ):
+                return
+
+    def _record_tool_result(
+        self,
+        *,
+        run_state: RunState,
+        loop_number: int,
+        function_call: Any,
+        arguments: dict[str, Any],
+        signature: str,
+        idempotency_key: str | None,
+        execution: ToolExecutionResult,
+    ) -> int:
+        """Compact a tool result, record its Action, and append its observation."""
+        compacted_result, compaction = compact_tool_output(
+            function_call.name,
+            execution.content,
+        )
+        action_succeeded = bool(
+            execution.parsed is not None and execution.parsed.get("ok") is True
+        )
+        observation_signature, observation_count = run_state.register_observation(
+            signature,
+            execution.parsed if execution.parsed is not None else execution.content,
+        )
+        action = ActionRecord(
+            call_id=function_call.call_id,
+            tool_name=function_call.name,
+            arguments=arguments,
+            status=(
+                ActionStatus.COMPLETED if action_succeeded else ActionStatus.FAILED
+            ),
+            result=compacted_result,
+            error=(execution.error.to_dict() if execution.error else None),
+            signature=signature,
+            observation_signature=observation_signature,
+            attempt_count=execution.attempt_count,
+            idempotency_key=idempotency_key,
+        )
+        run_state.add_action(action)
+        events.log_tool_finished(
+            run_state, loop_number, action, context_compaction=compaction
+        )
+        self._append_tool_output(function_call.call_id, compacted_result)
+        return observation_count
+
+    def _stop_after_tool_call(
+        self,
+        *,
+        run_state: RunState,
+        loop_number: int,
+        remaining_calls: list[Any],
+        signature_count: int,
+        observation_count: int,
+    ) -> bool:
+        """Apply cancellation and no-progress checkpoints after an observation."""
+        if run_state.cancel_requested:
+            code = "cancelled"
+            message = "Run was cancelled after tool execution"
+            reason = StopReason.CANCELLED
+        elif (
+            signature_count >= self.loop_limits.max_same_call_attempts
+            and observation_count >= self.loop_limits.max_identical_observations
+        ):
+            code = "no_progress"
+            message = "Repeated call returned an identical observation"
+            reason = StopReason.NO_PROGRESS
+        else:
+            return False
+
+        self._skip_calls(
+            run_state,
+            loop_number,
+            remaining_calls,
+            ErrorType.CONTROL,
+            code,
+            message,
+        )
+        run_state.stop(reason, partial=bool(run_state.completed_actions))
+        return True
+
+    def _stop_before_tool_call(
+        self,
+        run_state: RunState,
+        loop_number: int,
+        remaining_calls: list[Any],
+        calls_started_this_round: int,
+    ) -> bool:
+        """Apply cancellation and budget checkpoints before side effects begin."""
+        if run_state.cancel_requested:
+            code = "cancelled"
+            message = "Run was cancelled before tool execution"
+            reason = StopReason.CANCELLED
+        elif not run_state.can_start_tool_call(
+            self.loop_limits,
+            calls_started_this_round=calls_started_this_round,
+        ):
+            code = "tool_budget_exhausted"
+            message = "Tool call budget exhausted"
+            reason = StopReason.TOOL_BUDGET_EXHAUSTED
+        else:
+            return False
+
+        self._skip_calls(
+            run_state,
+            loop_number,
+            remaining_calls,
+            ErrorType.CONTROL,
+            code,
+            message,
+        )
+        run_state.stop(reason, partial=bool(run_state.completed_actions))
+        return True
+
+    def _record_invalid_arguments(
+        self,
+        run_state: RunState,
+        loop_number: int,
+        function_call: Any,
+        exception: json.JSONDecodeError,
+        calls_started_this_round: int,
+    ) -> int:
+        """Turn malformed model arguments into a failed action and observation."""
+        run_state.start_tool_call(
+            self.loop_limits,
+            calls_started_this_round=calls_started_this_round,
+        )
+        tool_result = _error_json(
+            function_call.name,
+            ErrorType.INVALID_ARGUMENTS,
+            "invalid_json_arguments",
+            str(exception),
+        )
+        parsed_result = _parse_result_object(tool_result)
+        failed_action = ActionRecord(
+            call_id=function_call.call_id,
+            tool_name=function_call.name,
+            arguments=function_call.arguments,
+            status=ActionStatus.FAILED,
+            result=tool_result,
+            error=parsed_result.get("error") if parsed_result else None,
+        )
+        run_state.add_action(failed_action)
+        self._append_tool_output(function_call.call_id, tool_result)
+        events.log_tool_failed(
+            run_state,
+            loop_number,
+            function_call,
+            tool_result,
+            failed_action.error,
+        )
+        app_log.log_warning(
+            "Invalid JSON arguments for tool %s", function_call.name
+        )
+        return calls_started_this_round + 1
+
+    def _stop_repeated_calls(
+        self,
+        run_state: RunState,
+        loop_number: int,
+        remaining_calls: list[Any],
+    ) -> None:
+        """Stop before executing a repeated write or detected A-B-A-B cycle."""
+        self._skip_calls(
+            run_state,
+            loop_number,
+            remaining_calls,
+            ErrorType.CONTROL,
+            "repeated_call",
+            "Repeated tool call or A-B-A-B cycle detected",
+        )
+        run_state.stop(
+            StopReason.REPEATED_CALL,
+            partial=bool(run_state.completed_actions),
+        )
+
+    def _execute_tool_with_retry(
+        self,
+        *,
+        run_state: RunState,
+        loop_number: int,
+        function_call: Any,
+        arguments: dict[str, Any],
+        tool: Any,
+        allowed_tool_names: frozenset[str],
+        loaded_skills: tuple[str, ...],
+        idempotency_key: str | None,
+        calls_started_this_round: int,
+    ) -> tuple[ToolExecutionResult, int]:
+        """Execute one tool action while making every retry explicit and budgeted."""
+        attempt_count = 0
+        tool_result = ""
+        parsed_result: dict[str, Any] | None = None
+        execution_error: ExecutionError | None = None
+
+        while run_state.can_start_tool_call(
+            self.loop_limits,
+            calls_started_this_round=calls_started_this_round,
+        ):
+            run_state.start_tool_call(
+                self.loop_limits,
+                calls_started_this_round=calls_started_this_round,
+            )
+            calls_started_this_round += 1
+            attempt_count += 1
+
+            events.log_tool_started(
+                run_state,
+                loop_number,
+                function_call,
+                arguments,
+                attempt_count,
+                idempotency_key,
+            )
+            if tool is not None and function_call.name not in allowed_tool_names:
+                events.log_tool_denied(
+                    run_state,
+                    loop_number,
+                    function_call,
+                    arguments,
+                    loaded_skills,
+                )
+
+            tool_result = call_tool(
+                function_call.name,
+                arguments,
+                allowed_tool_names=allowed_tool_names,
                 idempotency_key=idempotency_key,
             )
-            run_state.add_action(action)
-            events.log_tool_finished(
-                run_state, loop_number, action, context_compaction=compaction
-            )
-            self._append_tool_output(function_call.call_id, compacted_tool_result)
-
-            if run_state.cancel_requested:
-                self._skip_calls(
-                    run_state,
-                    loop_number,
-                    function_calls[call_index + 1 :],
-                    ErrorType.CONTROL,
-                    "cancelled",
-                    "Run was cancelled after tool execution",
-                )
-                run_state.stop(
-                    StopReason.CANCELLED,
-                    partial=bool(run_state.completed_actions),
-                )
-                return
-
-            if (
-                signature_count >= self.loop_limits.max_same_call_attempts
-                and observation_count
-                >= self.loop_limits.max_identical_observations
+            parsed_result = _parse_result_object(tool_result)
+            execution_error = tool_error_from_result(parsed_result)
+            if run_state.cancel_requested or execution_error is None:
+                break
+            if not self._can_retry_tool(tool, execution_error, attempt_count):
+                break
+            if not run_state.can_start_tool_call(
+                self.loop_limits,
+                calls_started_this_round=calls_started_this_round,
             ):
-                self._skip_calls(
-                    run_state,
-                    loop_number,
-                    function_calls[call_index + 1 :],
-                    ErrorType.CONTROL,
-                    "no_progress",
-                    "Repeated call returned an identical observation",
-                )
-                run_state.stop(
-                    StopReason.NO_PROGRESS,
-                    partial=bool(run_state.completed_actions),
-                )
-                return
+                break
+
+            retry_count = run_state.record_retry(f"tool:{function_call.call_id}")
+            events.log_tool_retry_scheduled(
+                run_state,
+                loop_number,
+                function_call,
+                retry_count,
+                execution_error,
+            )
+            time.sleep(self.loop_limits.retry_backoff_seconds)
+
+        return (
+            ToolExecutionResult(
+                content=tool_result,
+                parsed=parsed_result,
+                error=execution_error,
+                attempt_count=attempt_count,
+            ),
+            calls_started_this_round,
+        )
+
+    def _can_retry_tool(
+        self,
+        tool: Any,
+        execution_error: ExecutionError,
+        attempt_count: int,
+    ) -> bool:
+        """Retry only safe read/idempotent operations within the retry budget."""
+        return bool(
+            tool is not None
+            and tool.retryable
+            and execution_error.retryable
+            and (tool.effect == ToolEffect.READ or tool.idempotent)
+            and attempt_count <= self.loop_limits.max_tool_retries
+        )
 
     def _skip_calls(
         self,
@@ -600,6 +756,7 @@ class Agent:
         code: str,
         message: str,
     ) -> None:
+        """Record skipped calls and still return one observation per call_id."""
         for call in calls:
             output = _error_json(call.name, error_type, code, message)
             parsed = _parse_result_object(output)
@@ -616,6 +773,7 @@ class Agent:
             events.log_tool_skipped(run_state, loop_number, skipped_action)
 
     def _append_tool_output(self, call_id: str, output: str) -> None:
+        """Append the Responses API observation paired to a function call."""
         self.messages.append(
             {
                 "type": "function_call_output",
@@ -625,6 +783,7 @@ class Agent:
         )
 
     def _stopped_answer(self, run_state: RunState) -> str:
+        """Log and format a controlled runtime stop exactly once."""
         answer = _runtime_stop_answer(run_state)
         events.log_run_stopped(run_state, answer)
         app_log.log_warning(

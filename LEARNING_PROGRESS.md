@@ -212,6 +212,14 @@ Trace 逐步增加：
 - 工具、Agent 与日志系统共享 JSON 安全序列化和 object 解析。
 - 时间字符串集中到轻量 time utils；业务 Store 仍保留各自的领域 CRUD。
 
+### Agent Loop 可读性整理
+
+- `chat()` 只保留创建 Run、准备本轮边界和运行 Loop 三个顶层步骤。
+- 使用 `TurnContext` 明确一轮内固定的 Prompt、Tool Schema、授权工具和 Skill。
+- LLM 失败分类与重试决策从请求循环中独立出来。
+- 工具执行拆分为前置检查、非法参数记录、重复检测、显式重试、Action 记录和后置检查。
+- 关键方法补充职责型 docstring；签名检测和幂等键补充设计原因注释。
+
 ## 阶段四：长期 Context 生命周期
 
 Agent Loop v0.1 核心可靠性完成后，将长期 Context 提前到最小 Memory 之前研究，解决
