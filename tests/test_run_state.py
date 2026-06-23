@@ -7,6 +7,7 @@ from app.runtime.run_state import (
     RunState,
     RunStatus,
     StopReason,
+    stable_signature,
 )
 
 
@@ -17,6 +18,24 @@ class LoopLimitsTests(unittest.TestCase):
 
 
 class RunStateTests(unittest.TestCase):
+    def test_signature_is_stable_across_dictionary_key_order(self) -> None:
+        self.assertEqual(
+            stable_signature({"a": 1, "b": 2}),
+            stable_signature({"b": 2, "a": 1}),
+        )
+
+    def test_detects_abab_call_cycle(self) -> None:
+        state = RunState()
+        state.register_call("tool_a", {"value": 1})
+        state.register_call("tool_b", {"value": 2})
+        state.register_call("tool_a", {"value": 1})
+
+        _signature, _count, cycle_detected = state.register_call(
+            "tool_b", {"value": 2}
+        )
+
+        self.assertTrue(cycle_detected)
+
     def test_tracks_budgets_actions_and_completion(self) -> None:
         limits = LoopLimits(
             max_llm_rounds=2,

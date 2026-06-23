@@ -39,6 +39,7 @@ Runtime、工具调用、Context、Skill 和可靠性设计。
 - 给建议前先阅读当前代码。
 - 为学习型功能提供能暴露内部行为的手动测试计划。
 - 引入新知识点时提供官方文档或可靠的一手资料。
+- 更新代码时，在相应的方法和重要变量上加简明扼要的注解解释方法或变量的用途
 
 ## 技术与运行
 
@@ -75,6 +76,8 @@ uv run python -m unittest discover -s tests -v
 | `app/tools/tool_schema.py` | 完整工具 Schema 的静态导出 |
 | `app/tools/capability_builder.py` | 将 Skill 映射为本轮 Tool Schema 和授权集合 |
 | `app/runtime/run_state.py` | 单次请求的 RunState、ActionRecord、调用预算和终止状态 |
+| `app/runtime/errors.py` | Tool/LLM 结构化错误模型、归一化和异常分类 |
+| `app/runtime/idempotency_store.py` | 写工具成功结果的本地幂等键存储与重放 |
 | `app/runtime/context_manager.py` | 工具结果的摘要压缩和引用压缩 |
 | `app/runtime/context_ref_store.py` | 完整结果的 Ref 存储与读取 |
 | `app/runtime/conversation_logger.py` | 生成结构化 Trace 和原始 LLM 日志 |
@@ -92,6 +95,7 @@ docs/skill_routing_test_plan.md
 docs/capability_scoping_test_plan.md
 docs/multi_turn_skill_state_test_plan.md
 docs/agent_loop_execution_skeleton_test_plan.md
+docs/agent_loop_reliability_test_plan.md
 ```
 
 ## 当前 Agent 运行链路
@@ -104,7 +108,9 @@ docs/agent_loop_execution_skeleton_test_plan.md
 -> Capability Builder 生成 Tool Schema 和授权集合
 -> Runtime 创建 RunState 并检查 LLM/Tool 调用预算
 -> LLM 返回回答或 Function Call
--> Runtime 校验权限并执行工具
+-> Runtime 检查取消、重复、循环、权限和 Tool Metadata
+-> Runtime 执行工具，并按错误类型决定重试或返回 Observation
+-> 写工具使用幂等键记录成功结果
 -> Context Manager 压缩 Observation
 -> RunState 记录 Action 和状态变化
 -> Observation 返回 LLM，直到完成或以明确原因停止
@@ -161,7 +167,7 @@ docs/agent_loop_execution_skeleton_test_plan.md
 - Runtime 在执行前再次校验工具权限。
 - Trace 记录可见工具、权限来源和 Schema 大小。
 
-### Agent Loop 执行骨架
+### Agent Loop 与执行可靠性
 
 - 每次 `chat()` 创建独立的 `RunState` 和 `run_id`。
 - 分别限制 LLM 轮数、单轮工具数和请求累计工具数。
@@ -169,6 +175,13 @@ docs/agent_loop_execution_skeleton_test_plan.md
 - Run 使用 `completed`、`partial`、`failed` 和 `stopped` 等明确状态。
 - 达到预算时记录结构化 `StopReason`，并保留已经成功的工具结果。
 - Trace/Raw 中的 LLM 和工具事件通过 `run_id` 关联到单次请求。
+- 工具名和规范化参数生成稳定签名，检测相同调用、相同 Observation 和 A-B-A-B 循环。
+- Tool Error 统一包含 `type`、`code`、`message` 和 `retryable`。
+- Tool Registry 声明读写副作用、内在幂等性、可重试性和超时。
+- SDK 隐式重试已关闭，LLM/Tool 重试由 Runtime 显式计数并写入 Trace。
+- 写工具使用 `run_id + call_id` 幂等键缓存成功结果；重复的非幂等写调用会在执行前停止。
+- 工具使用线程超时；Run 支持在 LLM/Tool 调用边界进行协作式取消。
+- Runtime 强制停止时汇总成功、失败和跳过的工具步骤。
 
 ### 日志
 
@@ -181,8 +194,13 @@ docs/agent_loop_execution_skeleton_test_plan.md
 - Router 词表仍然较小，需要根据真实 Trace 继续迭代。
 - 跨领域请求后的含糊追问会继承整组 Skill。
 - Prompt 和 Tool Schema 大小使用字符数，不是精确 token 数。
-- Agent Loop 已有分层调用预算，但尚未实现重复调用和无进展检测。
-- 尚未系统实现幂等写入、错误分类、重试和完整的部分成功恢复。
+- Agent Loop 的 v0.1 核心可靠性已经完成，但工具执行仍是顺序模式，尚未实现依赖图与
+  安全并行。
+- 取消是协作式的，不能强制终止已经进入同步 SDK 或 Python 函数的调用。
+- 幂等存储可以重放已成功结果，但尚未达到事务型 exactly-once；进程在副作用成功与
+  幂等结果落盘之间崩溃时仍可能留下不确定状态。
+- RunState 仅保存在内存中，尚不支持进程崩溃后的持久化恢复。
+- 重复与无进展检测基于确定性签名，不包含语义级计划进展判断。
 - 尚未实现 `/reset` 等 CLI 调试命令。
 
 ## 典型跨领域场景

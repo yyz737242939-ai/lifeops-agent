@@ -1,7 +1,9 @@
 import json
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from datetime import date, datetime
+from enum import StrEnum
 from typing import Any
 
 from app.memory import activity_catalog, daily_log_store, expense_store, todo_store
@@ -11,10 +13,18 @@ from app.memory.daily_log_store import Mood as DailyMood
 from app.memory.expense_store import BudgetPeriod
 from app.memory.todo_store import Todo, TodoPriority
 from app.runtime.context_ref_store import read_context_ref as load_context_ref
+from app.runtime.errors import classify_tool_exception, normalize_tool_result
+from app.runtime.idempotency_store import get_result as get_idempotent_result
+from app.runtime.idempotency_store import save_result as save_idempotent_result
 
 
 ToolParameters = dict[str, Any]
 ToolResult = dict[str, Any]
+
+
+class ToolEffect(StrEnum):
+    READ = "read"
+    WRITE = "write"
 
 
 @dataclass(frozen=True)
@@ -23,6 +33,10 @@ class ToolDefinition:
     description: str
     parameters: ToolParameters
     function: Callable[..., ToolResult]
+    effect: ToolEffect
+    idempotent: bool
+    retryable: bool
+    timeout_seconds: float
 
     def schema(self) -> dict[str, Any]:
         return {
@@ -32,14 +46,28 @@ class ToolDefinition:
             "parameters": self.parameters,
         }
 
+    def metadata(self) -> dict[str, Any]:
+        return {
+            "effect": self.effect.value,
+            "idempotent": self.idempotent,
+            "retryable": self.retryable,
+            "timeout_seconds": self.timeout_seconds,
+        }
+
 
 TOOLS: dict[str, ToolDefinition] = {}
+_TOOL_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="lifeops-tool")
 
 
 def register_tool(
     name: str,
     description: str,
     parameters: ToolParameters,
+    *,
+    effect: ToolEffect = ToolEffect.READ,
+    idempotent: bool = True,
+    retryable: bool = True,
+    timeout_seconds: float = 10.0,
 ) -> Callable[[Callable[..., ToolResult]], Callable[..., ToolResult]]:
     def decorator(function: Callable[..., ToolResult]) -> Callable[..., ToolResult]:
         TOOLS[name] = ToolDefinition(
@@ -47,6 +75,10 @@ def register_tool(
             description=description,
             parameters=parameters,
             function=function,
+            effect=effect,
+            idempotent=idempotent,
+            retryable=retryable,
+            timeout_seconds=timeout_seconds,
         )
         return function
 
@@ -156,6 +188,9 @@ def get_current_time() -> ToolResult:
         "schedule, or track something they need to do."
     ),
     parameters=_todo_parameters(required=["title"]),
+    effect=ToolEffect.WRITE,
+    idempotent=False,
+    retryable=False,
 )
 def add_todo(
     title: str,
@@ -219,6 +254,9 @@ def list_todos() -> ToolResult:
         },
         "required": [],
     },
+    effect=ToolEffect.WRITE,
+    idempotent=True,
+    retryable=True,
 )
 def record_daily_state(
     log_date: str | None = None,
@@ -317,6 +355,9 @@ def list_daily_logs(days: int = 7, end_date: str | None = None) -> ToolResult:
         },
         "required": ["amount", "category", "description"],
     },
+    effect=ToolEffect.WRITE,
+    idempotent=False,
+    retryable=False,
 )
 def record_expense(
     amount: float,
@@ -444,6 +485,9 @@ def summarize_spending(
         },
         "required": ["category", "amount"],
     },
+    effect=ToolEffect.WRITE,
+    idempotent=True,
+    retryable=True,
 )
 def set_budget(
     category: str,
@@ -605,6 +649,9 @@ def recommend_activities(
     name="complete_todo",
     description="Mark a todo task as done by id.",
     parameters=_todo_id_parameters(),
+    effect=ToolEffect.WRITE,
+    idempotent=False,
+    retryable=False,
 )
 def complete_todo(todo_id: int) -> ToolResult:
     todo = todo_store.complete_todo(todo_id)
@@ -630,6 +677,9 @@ def complete_todo(todo_id: int) -> ToolResult:
         "change a task title, due date, or priority."
     ),
     parameters=_update_todo_parameters(),
+    effect=ToolEffect.WRITE,
+    idempotent=True,
+    retryable=True,
 )
 def update_todo(
     todo_id: int,
@@ -662,6 +712,9 @@ def update_todo(
     name="delete_todo",
     description="Delete a todo task by id.",
     parameters=_todo_id_parameters(),
+    effect=ToolEffect.WRITE,
+    idempotent=False,
+    retryable=False,
 )
 def delete_todo(todo_id: int) -> ToolResult:
     todo = todo_store.delete_todo(todo_id)
@@ -794,43 +847,66 @@ def call_tool(
     arguments: dict[str, Any],
     *,
     allowed_tool_names: frozenset[str],
+    idempotency_key: str | None = None,
 ) -> str:
     tool = TOOLS.get(name)
 
     if tool is None:
-        result: ToolResult = {
-            "ok": False,
-            "action": name,
-            "error": "tool_not_found",
-        }
+        result: ToolResult = normalize_tool_result(
+            name,
+            {"ok": False, "action": name, "error": "tool_not_found"},
+        )
         return json.dumps(result, ensure_ascii=False)
 
     if name not in allowed_tool_names:
-        result = {
-            "ok": False,
-            "action": name,
-            "error": "tool_not_allowed",
-            "allowed_tools": [
-                tool_name for tool_name in TOOLS if tool_name in allowed_tool_names
-            ],
-        }
+        result = normalize_tool_result(
+            name,
+            {
+                "ok": False,
+                "action": name,
+                "error": "tool_not_allowed",
+                "allowed_tools": [
+                    tool_name for tool_name in TOOLS if tool_name in allowed_tool_names
+                ],
+            },
+        )
         return json.dumps(result, ensure_ascii=False)
 
+    if tool.effect == ToolEffect.WRITE and idempotency_key:
+        cached_result = get_idempotent_result(idempotency_key)
+        if cached_result is not None:
+            replayed = dict(cached_result)
+            replayed["idempotency"] = {
+                "key": idempotency_key,
+                "replayed": True,
+            }
+            return json.dumps(_json_safe(replayed), ensure_ascii=False)
+
     try:
-        result = tool.function(**arguments)
-    except TypeError as e:
-        result = {
-            "ok": False,
-            "action": name,
-            "error": "invalid_arguments",
-            "message": str(e),
+        future = _TOOL_EXECUTOR.submit(tool.function, **arguments)
+        result = future.result(timeout=tool.timeout_seconds)
+    except FutureTimeoutError:
+        future.cancel()
+        result = classify_tool_exception(
+            name,
+            TimeoutError(f"{name} exceeded {tool.timeout_seconds} seconds"),
+        )
+    except Exception as error:
+        result = classify_tool_exception(name, error)
+
+    result = normalize_tool_result(name, result)
+
+    if (
+        tool.effect == ToolEffect.WRITE
+        and idempotency_key
+        and result.get("ok") is True
+    ):
+        stored_result = dict(result)
+        stored_result["idempotency"] = {
+            "key": idempotency_key,
+            "replayed": False,
         }
-    except Exception as e:
-        result = {
-            "ok": False,
-            "action": name,
-            "error": "tool_failed",
-            "message": str(e),
-        }
+        save_idempotent_result(idempotency_key, stored_result)
+        result = stored_result
 
     return json.dumps(_json_safe(result), ensure_ascii=False)

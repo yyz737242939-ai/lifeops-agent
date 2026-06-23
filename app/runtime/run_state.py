@@ -1,3 +1,5 @@
+import hashlib
+import json
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -17,6 +19,10 @@ class StopReason(StrEnum):
     LLM_BUDGET_EXHAUSTED = "llm_budget_exhausted"
     TOOL_BUDGET_EXHAUSTED = "tool_budget_exhausted"
     LLM_REQUEST_FAILED = "llm_request_failed"
+    REPEATED_CALL = "repeated_call"
+    NO_PROGRESS = "no_progress"
+    CANCELLED = "cancelled"
+    UNRECOVERABLE_ERROR = "unrecoverable_error"
 
 
 class ActionStatus(StrEnum):
@@ -30,21 +36,39 @@ class LoopLimits:
     max_llm_rounds: int = 5
     max_tool_calls_per_round: int = 10
     max_total_tool_calls: int = 50
+    max_tool_retries: int = 2
+    max_llm_retries: int = 2
+    max_same_call_attempts: int = 2
+    max_identical_observations: int = 2
+    retry_backoff_seconds: float = 0.2
 
     def __post_init__(self) -> None:
         for field_name in (
             "max_llm_rounds",
             "max_tool_calls_per_round",
             "max_total_tool_calls",
+            "max_same_call_attempts",
+            "max_identical_observations",
         ):
             if getattr(self, field_name) < 1:
                 raise ValueError(f"{field_name} must be at least 1")
 
-    def to_dict(self) -> dict[str, int]:
+        for field_name in ("max_tool_retries", "max_llm_retries"):
+            if getattr(self, field_name) < 0:
+                raise ValueError(f"{field_name} must be at least 0")
+        if self.retry_backoff_seconds < 0:
+            raise ValueError("retry_backoff_seconds must be at least 0")
+
+    def to_dict(self) -> dict[str, int | float]:
         return {
             "max_llm_rounds": self.max_llm_rounds,
             "max_tool_calls_per_round": self.max_tool_calls_per_round,
             "max_total_tool_calls": self.max_total_tool_calls,
+            "max_tool_retries": self.max_tool_retries,
+            "max_llm_retries": self.max_llm_retries,
+            "max_same_call_attempts": self.max_same_call_attempts,
+            "max_identical_observations": self.max_identical_observations,
+            "retry_backoff_seconds": self.retry_backoff_seconds,
         }
 
 
@@ -55,7 +79,11 @@ class ActionRecord:
     arguments: Any
     status: ActionStatus
     result: Any = None
-    error: str | None = None
+    error: Any = None
+    signature: str | None = None
+    observation_signature: str | None = None
+    attempt_count: int = 1
+    idempotency_key: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -65,6 +93,10 @@ class ActionRecord:
             "status": self.status.value,
             "result": self.result,
             "error": self.error,
+            "signature": self.signature,
+            "observation_signature": self.observation_signature,
+            "attempt_count": self.attempt_count,
+            "idempotency_key": self.idempotency_key,
         }
 
 
@@ -76,6 +108,12 @@ class RunState:
     total_tool_calls: int = 0
     actions: list[ActionRecord] = field(default_factory=list)
     stop_reason: StopReason | None = None
+    llm_attempts: int = 0
+    retry_counts: dict[str, int] = field(default_factory=dict)
+    call_signature_counts: dict[str, int] = field(default_factory=dict)
+    observation_signature_counts: dict[str, int] = field(default_factory=dict)
+    recent_call_signatures: list[str] = field(default_factory=list)
+    cancel_requested: bool = False
 
     @property
     def completed_actions(self) -> list[ActionRecord]:
@@ -89,6 +127,12 @@ class RunState:
             action for action in self.actions if action.status == ActionStatus.FAILED
         ]
 
+    @property
+    def skipped_actions(self) -> list[ActionRecord]:
+        return [
+            action for action in self.actions if action.status == ActionStatus.SKIPPED
+        ]
+
     def can_start_llm_round(self, limits: LoopLimits) -> bool:
         return (
             self.status == RunStatus.RUNNING
@@ -100,6 +144,11 @@ class RunState:
             raise RuntimeError("LLM round budget exhausted")
         self.llm_rounds += 1
         return self.llm_rounds
+
+    def start_llm_attempt(self) -> int:
+        self._ensure_running()
+        self.llm_attempts += 1
+        return self.llm_attempts
 
     def can_start_tool_call(
         self,
@@ -131,6 +180,35 @@ class RunState:
             raise RuntimeError("Cannot add an action to a terminal run")
         self.actions.append(action)
 
+    def register_call(self, tool_name: str, arguments: Any) -> tuple[str, int, bool]:
+        signature = stable_signature({"tool": tool_name, "arguments": arguments})
+        count = self.call_signature_counts.get(signature, 0) + 1
+        self.call_signature_counts[signature] = count
+        cycle_detected = (
+            len(self.recent_call_signatures) >= 3
+            and self.recent_call_signatures[-3] == self.recent_call_signatures[-1]
+            and self.recent_call_signatures[-2] == signature
+        )
+        self.recent_call_signatures.append(signature)
+        return signature, count, cycle_detected
+
+    def register_observation(self, call_signature: str, result: Any) -> tuple[str, int]:
+        signature = stable_signature(
+            {"call_signature": call_signature, "result": result}
+        )
+        count = self.observation_signature_counts.get(signature, 0) + 1
+        self.observation_signature_counts[signature] = count
+        return signature, count
+
+    def record_retry(self, key: str) -> int:
+        count = self.retry_counts.get(key, 0) + 1
+        self.retry_counts[key] = count
+        return count
+
+    def request_cancel(self) -> None:
+        if self.status == RunStatus.RUNNING:
+            self.cancel_requested = True
+
     def complete(self) -> None:
         self._ensure_running()
         self.status = RunStatus.COMPLETED
@@ -156,10 +234,25 @@ class RunState:
             "status": self.status.value,
             "llm_rounds": self.llm_rounds,
             "total_tool_calls": self.total_tool_calls,
+            "llm_attempts": self.llm_attempts,
             "completed_action_count": len(self.completed_actions),
             "failed_action_count": len(self.failed_actions),
+            "skipped_action_count": len(self.skipped_actions),
             "stop_reason": self.stop_reason.value if self.stop_reason else None,
+            "retry_counts": dict(self.retry_counts),
+            "cancel_requested": self.cancel_requested,
         }
         if include_actions:
             result["actions"] = [action.to_dict() for action in self.actions]
         return result
+
+
+def stable_signature(value: Any) -> str:
+    serialized = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=repr,
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()

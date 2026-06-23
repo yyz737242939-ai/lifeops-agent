@@ -38,7 +38,8 @@ class ToolAuthorizationTests(unittest.TestCase):
             )
 
         self.assertFalse(result["ok"])
-        self.assertEqual(result["error"], "tool_not_allowed")
+        self.assertEqual(result["error"]["type"], "permission_denied")
+        self.assertEqual(result["error"]["code"], "tool_not_allowed")
         self.assertNotIn("record_expense", result["allowed_tools"])
         add_expense.assert_not_called()
 
@@ -51,7 +52,8 @@ class ToolAuthorizationTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(result["error"], "tool_not_found")
+        self.assertEqual(result["error"]["type"], "not_found")
+        self.assertEqual(result["error"]["code"], "tool_not_found")
 
 
 if __name__ == "__main__":

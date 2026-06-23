@@ -12,4 +12,5 @@ LLM_MODEL = os.getenv("MODEL", "deepseek/deepseek-v4-flash")
 LLM_TEMPERATURE = 0.3
 LLM_MAX_OUTPUT_TOKENS = 1000
 LLM_REQUEST_TIMEOUT = 30
-LLM_MAX_RETRIES = 3
+# Retries are controlled by Agent Loop so every attempt is visible in Trace.
+LLM_MAX_RETRIES = 0
