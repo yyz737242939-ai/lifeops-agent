@@ -220,6 +220,13 @@ Trace 逐步增加：
 - 工具执行拆分为前置检查、非法参数记录、重复检测、显式重试、Action 记录和后置检查。
 - 关键方法补充职责型 docstring；签名检测和幂等键补充设计原因注释。
 
+### Context Manager 可读性与策略测试
+
+- 将 JSON 解析、领域摘要、策略选择、Ref 持久化、payload 和 metadata 构造分离。
+- Summary/Reference 阈值集中声明，策略判定本身不执行文件 I/O。
+- 保持错误结果和 `read_context_ref` 完整输出不压缩的不变量。
+- 新增 inline、summary、reference、错误绕过和 Context 摘要的独立测试。
+
 ## 阶段四：长期 Context 生命周期
 
 Agent Loop v0.1 核心可靠性完成后，将长期 Context 提前到最小 Memory 之前研究，解决
