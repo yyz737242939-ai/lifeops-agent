@@ -28,11 +28,12 @@
           <div>
             <p class="eyebrow">CURRENT SESSION</p>
             <h2 id="session-title">选择一个会话</h2>
-            <p id="session-meta" class="session-meta">Trace 与 Raw 会在这里配对显示</p>
+            <p id="session-meta" class="session-meta">三类日志会在这里按会话配对显示</p>
           </div>
           <div class="kind-switch" role="tablist" aria-label="日志类型">
-            <button class="kind-button active" data-kind="trace" role="tab">Trace</button>
-            <button class="kind-button" data-kind="raw" role="tab">Raw</button>
+            <button class="kind-button active" data-kind="events" role="tab">Events</button>
+            <button class="kind-button" data-kind="llm" role="tab">LLM I/O</button>
+            <button class="kind-button" data-kind="application" role="tab">Application</button>
           </div>
         </header>
 

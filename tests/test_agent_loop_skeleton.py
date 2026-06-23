@@ -21,8 +21,8 @@ def _function_call(call_id: str) -> SimpleNamespace:
 
 
 class AgentLoopSkeletonTests(unittest.TestCase):
-    @patch("app.agents.agent.log_raw_event")
-    @patch("app.agents.agent.log_event")
+    @patch("app.agents.agent.llm_io")
+    @patch("app.agents.agent.events")
     @patch("app.agents.agent.client.responses.create")
     def test_completed_run_tracks_rounds_actions_and_run_id(
         self,
@@ -48,19 +48,12 @@ class AgentLoopSkeletonTests(unittest.TestCase):
         self.assertEqual(state.total_tool_calls, 1)
         self.assertEqual(state.actions[0].status, ActionStatus.COMPLETED)
 
-        run_events = [
-            call
-            for call in log_event.call_args_list
-            if call.args in {("run_started",), ("run_completed",)}
-        ]
-        self.assertEqual(len(run_events), 2)
-        self.assertEqual(
-            run_events[0].kwargs["run_id"],
-            run_events[1].kwargs["run_id"],
-        )
+        started_state = log_event.log_run_started.call_args.args[0]
+        completed_state = log_event.log_run_completed.call_args.args[0]
+        self.assertEqual(started_state.run_id, completed_state.run_id)
 
-    @patch("app.agents.agent.log_raw_event")
-    @patch("app.agents.agent.log_event")
+    @patch("app.agents.agent.llm_io")
+    @patch("app.agents.agent.events")
     @patch("app.agents.agent.client.responses.create")
     def test_llm_budget_stops_with_preserved_successful_action(
         self,
@@ -90,8 +83,8 @@ class AgentLoopSkeletonTests(unittest.TestCase):
         self.assertIn("已保留 1 个成功的工具结果", answer)
         self.assertEqual(create_response.call_count, 1)
 
-    @patch("app.agents.agent.log_raw_event")
-    @patch("app.agents.agent.log_event")
+    @patch("app.agents.agent.llm_io")
+    @patch("app.agents.agent.events")
     @patch("app.agents.agent.client.responses.create")
     def test_per_round_tool_budget_skips_remaining_calls(
         self,

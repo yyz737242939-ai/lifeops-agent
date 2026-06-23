@@ -1,7 +1,7 @@
 const state = {
   sessions: [],
   selectedId: null,
-  kind: "trace",
+  kind: "events",
   payload: null,
   expanded: false,
 };
@@ -70,8 +70,9 @@ function renderSessions() {
       <strong>${escapeHtml(shortSessionId(session.session_id))}</strong>
       <time>${escapeHtml(formatTime(session.started_at))}</time>
       <span class="file-dots">
-        <span class="file-dot ${session.has_trace ? "ready" : ""}">TRACE</span>
-        <span class="file-dot ${session.has_raw ? "ready" : ""}">RAW</span>
+        <span class="file-dot ${session.has_events ? "ready" : ""}">EVENT</span>
+        <span class="file-dot ${session.has_llm ? "ready" : ""}">LLM</span>
+        <span class="file-dot ${session.has_application ? "ready" : ""}">APP</span>
       </span>
     </button>
   `).join("") || `<div class="empty-state"><p>没有匹配的会话</p></div>`;
@@ -101,7 +102,9 @@ function updateKindButtons() {
 async function loadLog() {
   const session = selectedSession();
   if (!session) return;
-  if (!session[`has_${state.kind}`]) state.kind = session.has_trace ? "trace" : "raw";
+  if (!session[`has_${state.kind}`]) {
+    state.kind = ["events", "llm", "application"].find(kind => session[`has_${kind}`]);
+  }
   updateKindButtons();
   elements.sessionTitle.textContent = shortSessionId(session.session_id);
   elements.sessionMeta.textContent = `${formatTime(session.started_at)} · ${state.kind.toUpperCase()}`;

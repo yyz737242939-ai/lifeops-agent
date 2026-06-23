@@ -29,7 +29,7 @@ Runtime、工具调用、Context、Skill 和可靠性设计。
 1. 优先通过亲自实现理解原理。
 2. 抽象保持简单，避免框架隐藏核心流程。
 3. 只在产生真实需求后引入复杂度。
-4. 通过 Trace 和 Raw 日志解释、复盘 Agent 行为。
+4. 通过 Event、LLM I/O 和 Application 日志解释、复盘 Agent 行为。
 5. 当前重视快速迭代，只保留少量关键自动化测试。
 
 ## 协作偏好
@@ -53,7 +53,7 @@ Runtime、工具调用、Context、Skill 和可靠性设计。
 # 运行 Agent
 uv run python main.py
 
-# 查看 Trace/Raw 日志
+# 查看三类日志
 uv run python log_viewer.py
 
 # 运行测试
@@ -80,12 +80,12 @@ uv run python -m unittest discover -s tests -v
 | `app/runtime/idempotency_store.py` | 写工具成功结果的本地幂等键存储与重放 |
 | `app/runtime/context_manager.py` | 工具结果的摘要压缩和引用压缩 |
 | `app/runtime/context_ref_store.py` | 完整结果的 Ref 存储与读取 |
-| `app/runtime/conversation_logger.py` | 生成结构化 Trace 和原始 LLM 日志 |
+| `app/observability/*` | 日志会话、结构化 Event、完整 LLM I/O 和传统程序日志 |
 | `app/memory/todo_store.py` | Todo 模型与 JSON 持久化 |
 | `app/memory/daily_log_store.py` | Wellbeing 状态与 JSON 持久化 |
 | `app/memory/expense_store.py` | 消费、预算与 JSON 持久化 |
 | `app/memory/activity_catalog.py` | 本地活动目录与推荐逻辑 |
-| `log_viewer.py`、`app/log_viewer/*` | 本地 Trace/Raw 日志查看 UI |
+| `log_viewer.py`、`app/log_viewer/*` | 三类日志的本地查看 UI，并兼容旧 Trace/Raw 文件 |
 
 手动学习测试位于：
 
@@ -174,20 +174,22 @@ docs/agent_loop_reliability_test_plan.md
 - `ActionRecord` 记录工具成功、失败或因预算跳过。
 - Run 使用 `completed`、`partial`、`failed` 和 `stopped` 等明确状态。
 - 达到预算时记录结构化 `StopReason`，并保留已经成功的工具结果。
-- Trace/Raw 中的 LLM 和工具事件通过 `run_id` 关联到单次请求。
+- Event 与 LLM I/O 中的记录通过 `run_id` 关联到单次请求。
 - 工具名和规范化参数生成稳定签名，检测相同调用、相同 Observation 和 A-B-A-B 循环。
 - Tool Error 统一包含 `type`、`code`、`message` 和 `retryable`。
 - Tool Registry 声明读写副作用、内在幂等性、可重试性和超时。
-- SDK 隐式重试已关闭，LLM/Tool 重试由 Runtime 显式计数并写入 Trace。
+- SDK 隐式重试已关闭，LLM/Tool 重试由 Runtime 显式计数并写入 Event 日志。
 - 写工具使用 `run_id + call_id` 幂等键缓存成功结果；重复的非幂等写调用会在执行前停止。
 - 工具使用线程超时；Run 支持在 LLM/Tool 调用边界进行协作式取消。
 - Runtime 强制停止时汇总成功、失败和跳过的工具步骤。
 
 ### 日志
 
-- Trace：Agent 整体运行过程的结构化摘要。
-- Raw：完整 LLM 输入输出、Tool Schema 和工具结果。
-- 本地 UI 支持会话选择、筛选、搜索和 JSON 展开。
+- Event：`events.jsonl`，每行一个 Agent 关键节点的结构化 JSON object。
+- LLM I/O：`llm.jsonl`，只保存完整的模型 request 和 response。
+- Application：`application.log`，保存 debug/info/warning/error 等传统程序日志。
+- 日志调用使用 `log_` 前缀的分类方法，例如 `log_tool_started()`，调用方不再重复拼装公共字段。
+- 本地 UI 支持三类日志的会话选择、筛选、搜索和 JSON 展开，并继续读取旧 Trace/Raw 会话。
 
 ## 当前技术限制
 

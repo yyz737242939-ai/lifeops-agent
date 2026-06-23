@@ -1,7 +1,7 @@
 import sys
 
 from app.agents import Agent
-from app.runtime.conversation_logger import start_logging_session
+from app.observability import close_logging_session, start_logging_session
 
 
 def _configure_terminal_encoding() -> None:
@@ -17,16 +17,18 @@ def main() -> None:
 
     agent = Agent()
 
-    while True:
-        user_input = input("\nYou: ")
+    try:
+        while True:
+            user_input = input("\nYou: ")
 
-        if user_input.lower() in ["exit", "quit"]:
-            print("Bye!")
-            break
+            if user_input.lower() in ["exit", "quit"]:
+                print("Bye!")
+                break
 
-        answer = agent.chat(user_input)
-
-        print(f"\nAgent: {answer}")
+            answer = agent.chat(user_input)
+            print(f"\nAgent: {answer}")
+    finally:
+        close_logging_session()
 
 
 if __name__ == "__main__":

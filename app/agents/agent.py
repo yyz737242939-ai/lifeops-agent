@@ -7,12 +7,13 @@ from app.config import (
     LLM_MODEL,
     LLM_TEMPERATURE,
 )
+from app.observability import app_log, events, llm_io
+from app.observability.serialization import json_safe
 from app.prompts.prompt_builder import build_system_prompt
 from app.runtime.context_manager import (
     compact_tool_output,
     summarize_context_messages,
 )
-from app.runtime.conversation_logger import log_event, log_raw_event
 from app.runtime.errors import (
     ErrorType,
     ExecutionError,
@@ -39,18 +40,6 @@ from app.utils.llm import client
 DEFAULT_LOOP_LIMITS = LoopLimits()
 
 
-def _serialize_output(output: Any) -> Any:
-    if hasattr(output, "model_dump"):
-        return _serialize_output(output.model_dump())
-    if isinstance(output, list):
-        return [_serialize_output(item) for item in output]
-    if isinstance(output, dict):
-        return {key: _serialize_output(value) for key, value in output.items()}
-    if isinstance(output, (str, int, float, bool)) or output is None:
-        return output
-    return repr(output)
-
-
 def _preview_text(value: Any, max_length: int = 240) -> str:
     text = "" if value is None else str(value)
     if len(text) <= max_length:
@@ -59,7 +48,7 @@ def _preview_text(value: Any, max_length: int = 240) -> str:
 
 
 def _message_summary(message: Any) -> dict[str, Any]:
-    serialized = _serialize_output(message)
+    serialized = json_safe(message)
     if isinstance(serialized, dict):
         content = serialized.get("content")
         if content is None:
@@ -80,7 +69,7 @@ def _message_summary(message: Any) -> dict[str, Any]:
 
 
 def _context_summary(messages: list[Any]) -> dict[str, Any]:
-    serialized = _serialize_output(messages)
+    serialized = json_safe(messages)
     summary = {
         "message_count": len(messages),
         "approx_json_chars": len(json.dumps(serialized, ensure_ascii=False)),
@@ -93,7 +82,7 @@ def _context_summary(messages: list[Any]) -> dict[str, Any]:
 def _response_summary(output: list[Any]) -> list[dict[str, Any]]:
     summaries = []
     for item in output:
-        serialized = _serialize_output(item)
+        serialized = json_safe(item)
         if not isinstance(serialized, dict):
             summaries.append(
                 {
@@ -187,13 +176,9 @@ class Agent:
     def chat(self, user_input: str) -> str:
         run_state = RunState()
         self.last_run_state = run_state
-        run_id = run_state.run_id
-        log_event(
-            "run_started",
-            run_id=run_id,
-            limits=self.loop_limits.to_dict(),
-        )
-        log_event("user_input", run_id=run_id, role="user", content=user_input)
+        events.log_run_started(run_state, self.loop_limits.to_dict())
+        events.log_user_input(run_state, user_input)
+        app_log.log_info("Run %s started", run_state.run_id)
 
         routing = route_skills(user_input, self.skills)
         skill_state = resolve_skill_state(
@@ -207,43 +192,14 @@ class Agent:
             skill_state.loaded_skills,
         )
         capability_result = build_capabilities(prompt_result.loaded_skills)
-        log_event(
-            "skill_routing",
-            run_id=run_id,
-            available_skills=list(self.skills),
-            directly_selected=list(skill_state.directly_selected),
-            inherited_skills=list(skill_state.inherited_skills),
-            loaded_skills=list(skill_state.loaded_skills),
-            previous_active_skills=list(skill_state.previous_active_skills),
-            next_active_skills=list(skill_state.next_active_skills),
-            inheritance_used=skill_state.inheritance_used,
-            state_cleared=skill_state.state_cleared,
-            state_resolution=skill_state.resolution,
-            scores=routing.scores,
-            reasons={name: list(items) for name, items in routing.reasons.items()},
-            direct_fallback_used=routing.fallback_used,
+        events.log_routing_resolved(
+            run_state,
+            available_skills=self.skills,
+            routing=routing,
+            skill_state=skill_state,
             prompt_chars=prompt_result.prompt_chars,
         )
-        log_event(
-            "capability_build",
-            run_id=run_id,
-            loaded_skills=list(prompt_result.loaded_skills),
-            visible_tool_names=[
-                schema["name"] for schema in capability_result.tool_schemas
-            ],
-            capability_sources={
-                name: list(sources)
-                for name, sources in capability_result.capability_sources.items()
-            },
-            tool_schema_count=capability_result.schema_count,
-            tool_schema_chars=capability_result.schema_chars,
-            tool_metadata={
-                name: TOOLS[name].metadata()
-                for name in capability_result.allowed_tool_names
-                if name in TOOLS
-            },
-            fallback_used=capability_result.fallback_used,
-        )
+        events.log_capabilities_built(run_state, capability_result, TOOLS)
 
         self.messages.append(
             {
@@ -270,20 +226,10 @@ class Agent:
             if response is None:
                 return self._stopped_answer(run_state)
 
-            raw_output = _serialize_output(response.output)
-            log_event(
-                "llm_response",
-                run_id=run_id,
-                loop=loop_number,
-                output=_response_summary(response.output),
+            events.log_llm_responded(
+                run_state, loop_number, _response_summary(response.output)
             )
-            log_raw_event(
-                "llm_response",
-                run_id=run_id,
-                loop=loop_number,
-                output=raw_output,
-                output_text=response.output_text,
-            )
+            llm_io.log_response(run_state, loop_number, response)
 
             self.messages += response.output
 
@@ -294,17 +240,9 @@ class Agent:
             if not function_calls:
                 answer = response.output_text
                 run_state.complete()
-                log_event(
-                    "final_answer",
-                    run_id=run_id,
-                    role="assistant",
-                    content=answer,
-                )
-                log_event(
-                    "run_completed",
-                    run_id=run_id,
-                    run_state=run_state.to_dict(),
-                )
+                events.log_final_answer(run_state, answer)
+                events.log_run_completed(run_state)
+                app_log.log_info("Run %s completed", run_state.run_id)
                 return answer
 
             self._execute_function_calls(
@@ -317,11 +255,9 @@ class Agent:
 
             if run_state.stop_reason is not None:
                 answer = _runtime_stop_answer(run_state)
-                log_event(
-                    "run_stopped",
-                    run_id=run_id,
-                    final_answer=answer,
-                    run_state=run_state.to_dict(),
+                events.log_run_stopped(run_state, answer)
+                app_log.log_warning(
+                    "Run %s stopped: %s", run_state.run_id, run_state.stop_reason
                 )
                 return answer
 
@@ -330,11 +266,9 @@ class Agent:
             partial=bool(run_state.completed_actions),
         )
         final_answer = _runtime_stop_answer(run_state)
-        log_event(
-            "run_stopped",
-            run_id=run_id,
-            final_answer=final_answer,
-            run_state=run_state.to_dict(),
+        events.log_run_stopped(run_state, final_answer)
+        app_log.log_warning(
+            "Run %s stopped: %s", run_state.run_id, run_state.stop_reason
         )
         return final_answer
 
@@ -346,25 +280,9 @@ class Agent:
         instructions: str,
         tool_schemas: tuple[dict[str, Any], ...],
     ) -> Any | None:
-        run_id = run_state.run_id
-        log_event(
-            "llm_request",
-            run_id=run_id,
-            loop=loop_number,
-            model=LLM_MODEL,
-            context=_context_summary(self.messages),
-            run_state=run_state.to_dict(include_actions=False),
+        events.log_llm_requested(
+            run_state, loop_number, _context_summary(self.messages)
         )
-        log_raw_event(
-            "llm_request",
-            run_id=run_id,
-            loop=loop_number,
-            model=LLM_MODEL,
-            instructions=instructions,
-            tools=tool_schemas,
-            input=_serialize_output(self.messages),
-        )
-
         for retry_index in range(self.loop_limits.max_llm_retries + 1):
             if run_state.cancel_requested:
                 run_state.stop(
@@ -374,12 +292,21 @@ class Agent:
                 return None
 
             attempt_number = run_state.start_llm_attempt()
-            log_event(
-                "llm_attempt",
-                run_id=run_id,
-                loop=loop_number,
-                attempt=attempt_number,
-                retry_index=retry_index,
+            events.log_llm_attempted(
+                run_state, loop_number, attempt_number, retry_index
+            )
+            llm_io.log_request(
+                run_state,
+                loop_number,
+                attempt_number,
+                model=LLM_MODEL,
+                instructions=instructions,
+                tools=tool_schemas,
+                input_messages=self.messages,
+                parameters={
+                    "temperature": LLM_TEMPERATURE,
+                    "max_output_tokens": LLM_MAX_OUTPUT_TOKENS,
+                },
             )
             try:
                 return client.responses.create(
@@ -392,12 +319,14 @@ class Agent:
                 )
             except Exception as exception:
                 execution_error = classify_llm_exception(exception)
-                log_event(
-                    "llm_error",
-                    run_id=run_id,
-                    loop=loop_number,
-                    attempt=attempt_number,
-                    error=execution_error.to_dict(),
+                events.log_llm_failed(
+                    run_state, loop_number, attempt_number, execution_error
+                )
+                app_log.log_error(
+                    "LLM attempt %s failed for run %s: %s",
+                    attempt_number,
+                    run_state.run_id,
+                    execution_error.code,
                 )
                 can_retry = (
                     execution_error.retryable
@@ -410,12 +339,8 @@ class Agent:
                         run_state.fail(StopReason.LLM_REQUEST_FAILED)
                     return None
                 retry_count = run_state.record_retry(f"llm:{loop_number}")
-                log_event(
-                    "llm_retry_scheduled",
-                    run_id=run_id,
-                    loop=loop_number,
-                    retry_count=retry_count,
-                    error=execution_error.to_dict(),
+                events.log_llm_retry_scheduled(
+                    run_state, loop_number, retry_count, execution_error
                 )
                 time.sleep(self.loop_limits.retry_backoff_seconds)
         return None
@@ -482,26 +407,24 @@ class Agent:
                     str(exception),
                 )
                 parsed_result = _parse_result_object(tool_result)
-                run_state.add_action(
-                    ActionRecord(
-                        call_id=function_call.call_id,
-                        tool_name=tool_name,
-                        arguments=raw_arguments,
-                        status=ActionStatus.FAILED,
-                        result=tool_result,
-                        error=parsed_result.get("error") if parsed_result else None,
-                    )
-                )
-                self._append_tool_output(function_call.call_id, tool_result)
-                log_event(
-                    "tool_error",
-                    run_id=run_state.run_id,
-                    loop=loop_number,
-                    tool_call_name=tool_name,
-                    tool_call_arguments=raw_arguments,
-                    tool_result=tool_result,
+                failed_action = ActionRecord(
+                    call_id=function_call.call_id,
+                    tool_name=tool_name,
+                    arguments=raw_arguments,
+                    status=ActionStatus.FAILED,
+                    result=tool_result,
                     error=parsed_result.get("error") if parsed_result else None,
                 )
+                run_state.add_action(failed_action)
+                self._append_tool_output(function_call.call_id, tool_result)
+                events.log_tool_failed(
+                    run_state,
+                    loop_number,
+                    function_call,
+                    tool_result,
+                    failed_action.error,
+                )
+                app_log.log_warning("Invalid JSON arguments for tool %s", tool_name)
                 continue
 
             signature, signature_count, cycle_detected = run_state.register_call(
@@ -550,25 +473,21 @@ class Agent:
                 calls_started_this_round += 1
                 attempt_count += 1
 
-                log_event(
-                    "tool_call",
-                    run_id=run_state.run_id,
-                    loop=loop_number,
-                    attempt=attempt_count,
-                    tool_call_name=tool_name,
-                    tool_call_arguments=arguments,
-                    idempotency_key=idempotency_key,
+                events.log_tool_started(
+                    run_state,
+                    loop_number,
+                    function_call,
+                    arguments,
+                    attempt_count,
+                    idempotency_key,
                 )
                 if tool is not None and tool_name not in allowed_tool_names:
-                    log_event(
-                        "tool_denied",
-                        run_id=run_state.run_id,
-                        loop=loop_number,
-                        tool_call_name=tool_name,
-                        tool_call_arguments=arguments,
-                        loaded_skills=list(loaded_skills),
-                        allowed_tool_names=sorted(allowed_tool_names),
-                        error="tool_not_allowed",
+                    events.log_tool_denied(
+                        run_state,
+                        loop_number,
+                        function_call,
+                        arguments,
+                        loaded_skills,
                     )
 
                 tool_result = call_tool(
@@ -599,13 +518,12 @@ class Agent:
                 ):
                     break
                 retry_count = run_state.record_retry(f"tool:{function_call.call_id}")
-                log_event(
-                    "tool_retry_scheduled",
-                    run_id=run_state.run_id,
-                    loop=loop_number,
-                    tool_call_name=tool_name,
-                    retry_count=retry_count,
-                    error=execution_error.to_dict(),
+                events.log_tool_retry_scheduled(
+                    run_state,
+                    loop_number,
+                    function_call,
+                    retry_count,
+                    execution_error,
                 )
                 time.sleep(self.loop_limits.retry_backoff_seconds)
 
@@ -620,46 +538,25 @@ class Agent:
                 signature,
                 parsed_result if parsed_result is not None else tool_result,
             )
-            run_state.add_action(
-                ActionRecord(
-                    call_id=function_call.call_id,
-                    tool_name=tool_name,
-                    arguments=arguments,
-                    status=(
-                        ActionStatus.COMPLETED
-                        if action_succeeded
-                        else ActionStatus.FAILED
-                    ),
-                    result=compacted_tool_result,
-                    error=(execution_error.to_dict() if execution_error else None),
-                    signature=signature,
-                    observation_signature=observation_signature,
-                    attempt_count=attempt_count,
-                    idempotency_key=idempotency_key,
-                )
-            )
-            log_event(
-                "tool_result",
-                run_id=run_state.run_id,
-                loop=loop_number,
-                role="tool",
-                tool_call_name=tool_name,
-                tool_call_arguments=arguments,
+            action = ActionRecord(
+                call_id=function_call.call_id,
+                tool_name=tool_name,
+                arguments=arguments,
+                status=(
+                    ActionStatus.COMPLETED
+                    if action_succeeded
+                    else ActionStatus.FAILED
+                ),
+                result=compacted_tool_result,
+                error=(execution_error.to_dict() if execution_error else None),
+                signature=signature,
+                observation_signature=observation_signature,
                 attempt_count=attempt_count,
-                content=compacted_tool_result,
-                error=execution_error.to_dict() if execution_error else None,
-                context_compaction=compaction,
+                idempotency_key=idempotency_key,
             )
-            log_raw_event(
-                "tool_result",
-                run_id=run_state.run_id,
-                loop=loop_number,
-                role="tool",
-                tool_call_name=tool_name,
-                tool_call_arguments=arguments,
-                full_content=tool_result,
-                context_content=compacted_tool_result,
-                context_compaction=compaction,
+            run_state.add_action(action)
+            events.log_tool_finished(
+                run_state, loop_number, action, context_compaction=compaction
             )
             self._append_tool_output(function_call.call_id, compacted_tool_result)
 
@@ -709,25 +606,17 @@ class Agent:
         for call in calls:
             output = _error_json(call.name, error_type, code, message)
             parsed = _parse_result_object(output)
-            run_state.add_action(
-                ActionRecord(
-                    call_id=call.call_id,
-                    tool_name=call.name,
-                    arguments=call.arguments,
-                    status=ActionStatus.SKIPPED,
-                    result=output,
-                    error=parsed.get("error") if parsed else None,
-                )
-            )
-            self._append_tool_output(call.call_id, output)
-            log_event(
-                "tool_skipped",
-                run_id=run_state.run_id,
-                loop=loop_number,
-                tool_call_name=call.name,
-                tool_call_arguments=call.arguments,
+            skipped_action = ActionRecord(
+                call_id=call.call_id,
+                tool_name=call.name,
+                arguments=call.arguments,
+                status=ActionStatus.SKIPPED,
+                result=output,
                 error=parsed.get("error") if parsed else None,
             )
+            run_state.add_action(skipped_action)
+            self._append_tool_output(call.call_id, output)
+            events.log_tool_skipped(run_state, loop_number, skipped_action)
 
     def _append_tool_output(self, call_id: str, output: str) -> None:
         self.messages.append(
@@ -740,10 +629,8 @@ class Agent:
 
     def _stopped_answer(self, run_state: RunState) -> str:
         answer = _runtime_stop_answer(run_state)
-        log_event(
-            "run_stopped",
-            run_id=run_state.run_id,
-            final_answer=answer,
-            run_state=run_state.to_dict(),
+        events.log_run_stopped(run_state, answer)
+        app_log.log_warning(
+            "Run %s stopped: %s", run_state.run_id, run_state.stop_reason
         )
         return answer

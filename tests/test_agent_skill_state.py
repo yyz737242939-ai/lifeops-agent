@@ -11,8 +11,8 @@ def _tool_names(call) -> set[str]:
 
 
 class AgentSkillStateTests(unittest.TestCase):
-    @patch("app.agents.agent.log_raw_event")
-    @patch("app.agents.agent.log_event")
+    @patch("app.agents.agent.llm_io")
+    @patch("app.agents.agent.events")
     @patch("app.agents.agent.client.responses.create")
     def test_todo_followup_inherits_skill_and_capabilities(
         self,
@@ -33,19 +33,15 @@ class AgentSkillStateTests(unittest.TestCase):
         self.assertEqual(second_tools, expected)
         self.assertEqual(agent.active_skills, ("todo",))
 
-        routing_events = [
-            call.kwargs
-            for call in log_event.call_args_list
-            if call.args == ("skill_routing",)
-        ]
-        followup = routing_events[1]
-        self.assertEqual(followup["directly_selected"], [])
-        self.assertEqual(followup["inherited_skills"], ["todo"])
-        self.assertEqual(followup["loaded_skills"], ["todo"])
-        self.assertTrue(followup["inheritance_used"])
+        routing_calls = log_event.log_routing_resolved.call_args_list
+        followup = routing_calls[1].kwargs["skill_state"]
+        self.assertEqual(followup.directly_selected, ())
+        self.assertEqual(followup.inherited_skills, ("todo",))
+        self.assertEqual(followup.loaded_skills, ("todo",))
+        self.assertTrue(followup.inheritance_used)
 
-    @patch("app.agents.agent.log_raw_event")
-    @patch("app.agents.agent.log_event")
+    @patch("app.agents.agent.llm_io")
+    @patch("app.agents.agent.events")
     @patch("app.agents.agent.client.responses.create")
     def test_explicit_switch_replaces_old_skill_and_chat_clears_it(
         self,
@@ -70,17 +66,15 @@ class AgentSkillStateTests(unittest.TestCase):
         self.assertEqual(fallback_tools, set(COMMON_TOOL_NAMES))
         self.assertEqual(agent.active_skills, ())
 
-        routing_events = [
-            call.kwargs
-            for call in log_event.call_args_list
-            if call.args == ("skill_routing",)
-        ]
-        self.assertEqual(routing_events[1]["directly_selected"], ["finance"])
-        self.assertEqual(routing_events[1]["inherited_skills"], [])
-        self.assertTrue(routing_events[2]["state_cleared"])
+        routing_calls = log_event.log_routing_resolved.call_args_list
+        second_state = routing_calls[1].kwargs["skill_state"]
+        third_state = routing_calls[2].kwargs["skill_state"]
+        self.assertEqual(second_state.directly_selected, ("finance",))
+        self.assertEqual(second_state.inherited_skills, ())
+        self.assertTrue(third_state.state_cleared)
 
-    @patch("app.agents.agent.log_raw_event")
-    @patch("app.agents.agent.log_event")
+    @patch("app.agents.agent.llm_io")
+    @patch("app.agents.agent.events")
     @patch("app.agents.agent.client.responses.create")
     def test_ref_turn_uses_common_tools_but_preserves_topic_for_next_followup(
         self,
@@ -104,14 +98,12 @@ class AgentSkillStateTests(unittest.TestCase):
             set(COMMON_TOOL_NAMES | SKILL_TOOL_NAMES["finance"]),
         )
 
-        routing_events = [
-            call.kwargs
-            for call in log_event.call_args_list
-            if call.args == ("skill_routing",)
-        ]
-        self.assertEqual(routing_events[1]["state_resolution"], "context_ref_only")
-        self.assertEqual(routing_events[1]["loaded_skills"], [])
-        self.assertEqual(routing_events[2]["inherited_skills"], ["finance"])
+        routing_calls = log_event.log_routing_resolved.call_args_list
+        ref_state = routing_calls[1].kwargs["skill_state"]
+        continued_state = routing_calls[2].kwargs["skill_state"]
+        self.assertEqual(ref_state.resolution, "context_ref_only")
+        self.assertEqual(ref_state.loaded_skills, ())
+        self.assertEqual(continued_state.inherited_skills, ("finance",))
 
 
 if __name__ == "__main__":

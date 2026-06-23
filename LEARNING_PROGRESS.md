@@ -87,7 +87,7 @@ docs/multi_turn_skill_state_test_plan.md
 - 无 Skill 时使用只保留公共工具的安全 fallback。
 - `call_tool` 执行前再次检查本轮授权。
 - Trace 记录可见工具、Schema 大小和能力来源。
-- 本地 UI 可以配对查看 Trace 和 Raw 日志。
+- 本地 UI 可以配对查看 Event、LLM I/O 和 Application 三类日志。
 
 学习目标：
 
@@ -193,6 +193,16 @@ Trace 逐步增加：
 - 状态变化和最终停止原因。
 
 正式 Routing Eval、Precision/Recall 和大规模 LLM-as-judge 评测继续暂缓。
+
+### 三通道日志系统
+
+已经完成第一版可观测性分层：
+
+- Event 使用 JSONL 追加写入，记录 Runtime 的关键结构化节点。
+- LLM I/O 只记录完整 request/response，不混入工具执行结果。
+- Application 使用 Python `logging` 记录程序进程和错误诊断信息。
+- 所有对外日志方法使用 `log_` 前缀，并按 run、routing、LLM、tool 分类。
+- Viewer 支持三类日志，同时兼容历史 Trace/Raw 文件。
 
 ## 阶段四：长期 Context 生命周期
 

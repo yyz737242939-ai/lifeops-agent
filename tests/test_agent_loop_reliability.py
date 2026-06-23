@@ -39,8 +39,8 @@ class AgentLoopReliabilityTests(unittest.TestCase):
             retry_backoff_seconds=0,
         )
 
-    @patch("app.agents.agent.log_raw_event")
-    @patch("app.agents.agent.log_event")
+    @patch("app.agents.agent.llm_io")
+    @patch("app.agents.agent.events")
     @patch("app.agents.agent.client.responses.create")
     def test_llm_timeout_is_retried_explicitly(
         self,
@@ -61,8 +61,8 @@ class AgentLoopReliabilityTests(unittest.TestCase):
         self.assertEqual(state.llm_attempts, 2)
         self.assertEqual(state.retry_counts["llm:1"], 1)
 
-    @patch("app.agents.agent.log_raw_event")
-    @patch("app.agents.agent.log_event")
+    @patch("app.agents.agent.llm_io")
+    @patch("app.agents.agent.events")
     @patch("app.agents.agent.client.responses.create")
     def test_llm_failure_after_tool_success_returns_partial_result(
         self,
@@ -85,8 +85,8 @@ class AgentLoopReliabilityTests(unittest.TestCase):
         self.assertEqual(len(state.completed_actions), 1)
         self.assertIn("get_current_time", answer)
 
-    @patch("app.agents.agent.log_raw_event")
-    @patch("app.agents.agent.log_event")
+    @patch("app.agents.agent.llm_io")
+    @patch("app.agents.agent.events")
     @patch("app.agents.agent.client.responses.create")
     def test_read_tool_transient_error_is_retried(
         self,
@@ -118,8 +118,8 @@ class AgentLoopReliabilityTests(unittest.TestCase):
         self.assertEqual(state.total_tool_calls, 2)
         self.assertEqual(state.retry_counts["tool:call-1"], 1)
 
-    @patch("app.agents.agent.log_raw_event")
-    @patch("app.agents.agent.log_event")
+    @patch("app.agents.agent.llm_io")
+    @patch("app.agents.agent.events")
     @patch("app.agents.agent.client.responses.create")
     def test_non_idempotent_write_error_is_not_retried(
         self,
@@ -148,8 +148,8 @@ class AgentLoopReliabilityTests(unittest.TestCase):
         self.assertEqual(state.actions[0].attempt_count, 1)
         self.assertNotIn("tool:call-1", state.retry_counts)
 
-    @patch("app.agents.agent.log_raw_event")
-    @patch("app.agents.agent.log_event")
+    @patch("app.agents.agent.llm_io")
+    @patch("app.agents.agent.events")
     @patch("app.agents.agent.client.responses.create")
     @patch("app.tools.tool.save_idempotent_result")
     @patch("app.tools.tool.get_idempotent_result", return_value=None)
@@ -180,8 +180,8 @@ class AgentLoopReliabilityTests(unittest.TestCase):
         self.assertEqual(state.status, RunStatus.PARTIAL)
         self.assertIn("重复工具调用", answer)
 
-    @patch("app.agents.agent.log_raw_event")
-    @patch("app.agents.agent.log_event")
+    @patch("app.agents.agent.llm_io")
+    @patch("app.agents.agent.events")
     @patch("app.agents.agent.client.responses.create")
     def test_identical_read_observation_stops_no_progress(
         self,
@@ -204,8 +204,8 @@ class AgentLoopReliabilityTests(unittest.TestCase):
         self.assertEqual(len(state.failed_actions), 2)
         self.assertIn("没有产生新进展", answer)
 
-    @patch("app.agents.agent.log_raw_event")
-    @patch("app.agents.agent.log_event")
+    @patch("app.agents.agent.llm_io")
+    @patch("app.agents.agent.events")
     @patch("app.agents.agent.client.responses.create")
     def test_cooperative_cancel_skips_returned_tool_call(
         self,

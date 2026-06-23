@@ -45,6 +45,7 @@ SKILL_TOOL_NAMES: dict[str, frozenset[str]] = {
 
 @dataclass(frozen=True)
 class CapabilityBuildResult:
+    loaded_skills: tuple[str, ...]
     tool_schemas: tuple[dict[str, Any], ...]
     allowed_tool_names: frozenset[str]
     capability_sources: dict[str, tuple[str, ...]]
@@ -98,6 +99,7 @@ def build_capabilities(
     )
 
     return CapabilityBuildResult(
+        loaded_skills=tuple(dict.fromkeys(loaded_skills)),
         tool_schemas=tool_schemas,
         allowed_tool_names=frozenset(allowed),
         capability_sources={

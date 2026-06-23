@@ -6,8 +6,8 @@ from app.agents.agent import Agent
 
 
 class AgentCapabilityTests(unittest.TestCase):
-    @patch("app.agents.agent.log_raw_event")
-    @patch("app.agents.agent.log_event")
+    @patch("app.agents.agent.llm_io")
+    @patch("app.agents.agent.events")
     @patch("app.agents.agent.client.responses.create")
     def test_agent_sends_only_selected_capability_schemas(
         self,
@@ -30,28 +30,23 @@ class AgentCapabilityTests(unittest.TestCase):
         self.assertNotIn("record_expense", sent_names)
         self.assertNotIn("recommend_activities", sent_names)
 
-        capability_events = [
-            call.kwargs
-            for call in _log_event.call_args_list
-            if call.args == ("capability_build",)
-        ]
-        self.assertEqual(len(capability_events), 1)
-        self.assertEqual(set(capability_events[0]["visible_tool_names"]), sent_names)
-        self.assertEqual(capability_events[0]["loaded_skills"], ["todo"])
-
-        raw_requests = [
-            call.kwargs
-            for call in _log_raw_event.call_args_list
-            if call.args == ("llm_request",)
-        ]
-        self.assertEqual(len(raw_requests), 1)
+        capability_call = _log_event.log_capabilities_built.call_args
+        self.assertIsNotNone(capability_call)
+        capabilities = capability_call.args[1]
         self.assertEqual(
-            {schema["name"] for schema in raw_requests[0]["tools"]},
+            {schema["name"] for schema in capabilities.tool_schemas}, sent_names
+        )
+        self.assertEqual(capabilities.loaded_skills, ("todo",))
+
+        raw_request = _log_raw_event.log_request.call_args
+        self.assertIsNotNone(raw_request)
+        self.assertEqual(
+            {schema["name"] for schema in raw_request.kwargs["tools"]},
             sent_names,
         )
 
-    @patch("app.agents.agent.log_raw_event")
-    @patch("app.agents.agent.log_event")
+    @patch("app.agents.agent.llm_io")
+    @patch("app.agents.agent.events")
     @patch("app.agents.agent.client.responses.create")
     @patch("app.tools.tool.expense_store.add_expense")
     def test_agent_logs_and_blocks_a_denied_tool_call(
@@ -77,14 +72,9 @@ class AgentCapabilityTests(unittest.TestCase):
 
         self.assertEqual(answer, "permission denied")
         add_expense.assert_not_called()
-        denied_events = [
-            call.kwargs
-            for call in log_event.call_args_list
-            if call.args == ("tool_denied",)
-        ]
-        self.assertEqual(len(denied_events), 1)
-        self.assertEqual(denied_events[0]["tool_call_name"], "record_expense")
-        self.assertEqual(denied_events[0]["error"], "tool_not_allowed")
+        denied_call = log_event.log_tool_denied.call_args
+        self.assertIsNotNone(denied_call)
+        self.assertEqual(denied_call.args[2].name, "record_expense")
 
 
 if __name__ == "__main__":
