@@ -92,15 +92,10 @@ uv run python -m unittest discover -s tests -v
 | `app/utils/time.py` | 业务记录使用的统一本地时间字符串 |
 | `log_viewer.py`、`app/log_viewer/*` | 三类日志的本地查看 UI，并兼容旧 Trace/Raw 文件 |
 
-手动学习测试位于：
+统一手动测试计划位于：
 
 ```text
-docs/agent_learning_test_plan.md
-docs/skill_routing_test_plan.md
-docs/capability_scoping_test_plan.md
-docs/multi_turn_skill_state_test_plan.md
-docs/agent_loop_execution_skeleton_test_plan.md
-docs/agent_loop_reliability_test_plan.md
+docs/manual_test_plan.md
 ```
 
 ## 当前 Agent 运行链路
