@@ -6,10 +6,10 @@ Observe the full capability chain for each user turn:
 
 ```text
 user input
--> skill_routing.loaded_skills
--> capability_build.visible_tool_names
--> raw llm_request.tools
--> tool_call or tool_denied
+-> routing.resolved.loaded_skills
+-> capability.built.visible_tool_names
+-> LLM I/O llm.request.tools
+-> tool.started or tool.denied
 ```
 
 The current router is intentionally stateless. Ambiguous follow-up requests may lose
@@ -23,8 +23,9 @@ uv run python main.py
 
 Each session creates paired files under `logs/conversations/`:
 
-- `*_trace.json`: structured decisions and runtime behavior.
-- `*_raw.json`: complete LLM input/output and tool results.
+- `events.jsonl`: structured decisions, tool actions, and runtime behavior.
+- `llm.jsonl`: complete LLM requests and responses only.
+- `application.log`: traditional process diagnostics.
 
 The local viewer can be started with:
 
@@ -42,10 +43,10 @@ Input:
 
 Verify:
 
-- `skill_routing.directly_selected` and `loaded_skills` contain only `todo`.
-- `capability_build.visible_tool_names` contains Todo and common tools.
+- `routing.resolved.directly_selected` and `loaded_skills` contain only `todo`.
+- `capability.built.visible_tool_names` contains Todo and common tools.
 - Finance, Wellbeing, and Activity tools are absent.
-- Raw `llm_request.tools` exactly matches the visible names in Trace.
+- LLM I/O `llm.request.tools` exactly matches the visible names in Event.
 
 ## Case 2: Single Finance domain
 

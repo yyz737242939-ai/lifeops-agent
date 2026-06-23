@@ -120,13 +120,12 @@ list_todos
 
 Expected context behavior:
 
-- The raw log contains the complete tool output.
-- The trace log for `tool_result` has:
+- The Event `tool.completed` record contains the Action result and:
   - `context_compaction.strategy = "summary"`
   - `summary.open`
   - `summary.high_priority_open`
   - `summary.top_open_items`
-- The next `llm_request.context.context_budget.tool_outputs` shows the compacted
+- The next `llm.request.input` shows the compacted
   observation, not the full todo list.
 
 ### 6. Reference Compaction Observation
@@ -145,7 +144,7 @@ list_expenses
 
 Expected context behavior:
 
-- The trace log for `tool_result` has:
+- The Event `tool.completed` record has:
   - `context_compaction.strategy = "reference"`
   - a non-empty `ref_id`
 - `logs/context_refs/ctx_*.json` contains the complete expense result.
@@ -192,9 +191,9 @@ logs/context_refs/
 
 For each session, compare:
 
-- `*_raw.json`: what tools really returned
-- `*_trace.json`: what was summarized and why
-- `function_call_output` in later `llm_request` entries: what the model actually
+- Context Ref files: complete results retained for later expansion
+- `events.jsonl`: what was summarized and why
+- `function_call_output` in later `llm.request` entries: what the model actually
   saw
 
 That comparison is the main learning object for context management.

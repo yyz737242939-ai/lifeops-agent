@@ -6,11 +6,11 @@ from app.observability.session import append_log_record
 class EventLogger:
     """Emit compact, structured milestones from the Agent runtime."""
 
-    def _write_log_event(self, event: str, run_state: Any, **fields: Any) -> None:
+    def _write_log_event(self, event: str, state: Any, **fields: Any) -> None:
         append_log_record(
             "events",
             event,
-            {"run_id": run_state.run_id, **fields},
+            {"run_id": state.run_id, **fields},
         )
 
     def log_run_started(self, run_state: Any, limits: Any) -> None:

@@ -2,7 +2,7 @@
 
 ## 学习目标
 
-通过 Trace、Raw 和 Agent Messages 观察：
+通过 Event、LLM I/O 和 Agent Messages 观察：
 
 - Skill State 与单次请求 RunState 的生命周期差异。
 - LLM 轮数、单轮工具数和累计工具数之间的区别。
@@ -47,7 +47,7 @@ uv run python log_viewer.py
 - 工具结果通过相同 `call_id` 返回。
 - RunState 中存在一个 `completed` ActionRecord。
 - 模型再次调用后返回最终回答。
-- Trace 中所有相关事件具有相同 `run_id`。
+- Event 与 LLM I/O 中所有相关记录具有相同 `run_id`。
 
 ## 场景三：跨领域多工具调用
 

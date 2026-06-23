@@ -31,8 +31,8 @@ In another terminal, start the log viewer:
 uv run python log_viewer.py
 ```
 
-For every turn, compare the `skill_routing` and `capability_build` Trace events with
-the complete `llm_request.tools` entry in Raw.
+For every turn, compare the `routing.resolved` and `capability.built` Event records
+with the complete `llm.request.tools` entry in LLM I/O.
 
 ## Case 1: Todo follow-up inheritance
 
@@ -125,7 +125,7 @@ Verify that the second turn inherits both Todo and Finance and merges both tool
 groups without duplicates.
 
 This deliberately exposes a current trade-off: an ambiguous follow-up inherits the
-whole active Skill group. Future Trace evidence can justify a narrower policy based
+whole active Skill group. Future Event evidence can justify a narrower policy based
 on the last tool or result being referenced.
 
 ## Case 7: New session starts clean
@@ -147,4 +147,4 @@ uv run python -m unittest discover -s tests -v
 
 The automated tests cover direct selection, inheritance, explicit switching,
 cross-domain deduplication, Ref-only minimum capability, chat cleanup, missing active
-state, Tool Schema changes, and Trace state fields.
+state, Tool Schema changes, and Event state fields.

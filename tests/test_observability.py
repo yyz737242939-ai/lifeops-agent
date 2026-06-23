@@ -22,6 +22,7 @@ class ObservabilityTests(unittest.TestCase):
                 )
 
                 events.log_run_started(run_state, {"max_llm_rounds": 2})
+                events.log_llm_requested(run_state, 1, {"message_count": 1})
                 llm_io.log_request(
                     run_state,
                     1,
@@ -37,6 +38,7 @@ class ObservabilityTests(unittest.TestCase):
                     1,
                     SimpleNamespace(output_text="hi", output=[]),
                 )
+                events.log_run_completed(run_state)
                 app_log.log_info("Run %s completed", run_state.run_id)
 
                 event_records = self._read_jsonl(files["events"])
@@ -46,6 +48,10 @@ class ObservabilityTests(unittest.TestCase):
 
         self.assertEqual(event_records[0]["event"], "run.started")
         self.assertEqual(event_records[0]["run_id"], "run-test")
+        self.assertEqual(
+            [record["event"] for record in event_records],
+            ["run.started", "llm.requested", "run.completed"],
+        )
         self.assertEqual(
             [record["event"] for record in llm_records],
             ["llm.request", "llm.response"],

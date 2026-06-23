@@ -7,9 +7,10 @@
 
 ## 重点观察位置
 
-- Trace：`llm_attempt`、`llm_retry_scheduled`、`tool_retry_scheduled`、`tool_skipped`、
-  `run_stopped`。
-- Raw：模型原始 Function Call 和完整 Tool Result。
+- Event：`llm.attempted`、`llm.retry_scheduled`、`tool.retry_scheduled`、
+  `tool.skipped`、`run.stopped`。
+- LLM I/O：模型的完整 request 和 response，不包含 Tool Result。
+- Application：LLM 或程序错误的传统级别日志。
 - RunState：调用签名、Observation 签名、重试次数、Action 状态和 StopReason。
 - `data/idempotency.json`：写工具成功结果的幂等记录。不要在未经允许时删除已有数据。
 
@@ -33,7 +34,7 @@
 
 - 两次调用都返回相同结构化 Not Found。
 - 第二次结果后 StopReason 为 `no_progress`。
-- Trace 能配对看到相同调用签名和 Observation 签名。
+- Event 能配对看到相同调用签名和 Observation 签名。
 
 ## 场景三：A-B-A-B 循环
 
@@ -48,7 +49,7 @@
 预期：
 
 - Tool Error 分类为 `transient_error`。
-- `tool_retry_scheduled` 记录原因和次数。
+- `tool.retry_scheduled` 记录原因和次数。
 - 同一个 ActionRecord 的 `attempt_count` 为 2。
 - 累计工具预算统计两次实际尝试。
 
