@@ -169,7 +169,9 @@ Expected outcome:
 
 ## Code Reading Map
 
-- Tool registry and schemas: `app/tools/tool.py`
+- Tool registry and metadata: `app/tools/registry.py`
+- Tool authorization, timeout, and idempotency: `app/tools/executor.py`
+- Business tool schemas and handlers: `app/tools/tool.py`
 - Business memory stores:
   - `app/memory/todo_store.py`
   - `app/memory/daily_log_store.py`

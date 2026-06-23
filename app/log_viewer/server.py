@@ -66,105 +66,123 @@ def _read_application_log(path: Path) -> list[dict]:
     return records
 
 
-def list_sessions() -> list[dict]:
-    sessions: list[dict] = []
-    if SESSION_DIR.exists():
-        for path in SESSION_DIR.iterdir():
-            if not path.is_dir() or not SESSION_ID_PATTERN.fullmatch(path.name):
-                continue
-            metadata_path = path / "metadata.json"
-            try:
-                metadata = _read_json(metadata_path) if metadata_path.exists() else {}
-            except (OSError, json.JSONDecodeError):
-                metadata = {}
-            sessions.append(
-                {
-                    "session_id": path.name,
-                    "started_at": metadata.get("started_at"),
-                    "has_events": (path / "events.jsonl").exists(),
-                    "has_llm": (path / "llm.jsonl").exists(),
-                    "has_application": (path / "application.log").exists(),
-                    "legacy": False,
-                }
-            )
+def _read_first_metadata(paths: tuple[Path, ...]) -> dict:
+    """Read the first valid metadata source from a new or legacy session."""
+    for path in paths:
+        if not path.exists():
+            continue
+        try:
+            return _read_json(path)
+        except (OSError, ValueError):
+            continue
+    return {}
 
-    # Historical Trace/Raw sessions remain readable during the format migration.
-    if CONVERSATION_DIR.exists():
-        legacy_ids = {
-            path.name.removesuffix("_trace.json")
-            for path in CONVERSATION_DIR.glob("session_*_trace.json")
-        }
-        legacy_ids.update(
-            path.name.removesuffix("_raw.json")
-            for path in CONVERSATION_DIR.glob("session_*_raw.json")
+
+def _list_current_sessions() -> list[dict]:
+    if not SESSION_DIR.exists():
+        return []
+    sessions = []
+    for path in SESSION_DIR.iterdir():
+        if not path.is_dir() or not SESSION_ID_PATTERN.fullmatch(path.name):
+            continue
+        metadata = _read_first_metadata((path / "metadata.json",))
+        sessions.append(
+            {
+                "session_id": path.name,
+                "started_at": metadata.get("started_at"),
+                "has_events": (path / "events.jsonl").exists(),
+                "has_llm": (path / "llm.jsonl").exists(),
+                "has_application": (path / "application.log").exists(),
+                "legacy": False,
+            }
         )
-        for session_id in legacy_ids:
-            if not SESSION_ID_PATTERN.fullmatch(session_id):
-                continue
-            trace_path = CONVERSATION_DIR / f"{session_id}_trace.json"
-            raw_path = CONVERSATION_DIR / f"{session_id}_raw.json"
-            metadata = {}
-            for candidate in (trace_path, raw_path):
-                if candidate.exists():
-                    try:
-                        metadata = _read_json(candidate)
-                        break
-                    except (OSError, json.JSONDecodeError):
-                        continue
-            sessions.append(
-                {
-                    "session_id": session_id,
-                    "started_at": metadata.get("started_at"),
-                    "has_events": trace_path.exists(),
-                    "has_llm": raw_path.exists(),
-                    "has_application": False,
-                    "has_trace": trace_path.exists(),
-                    "has_raw": raw_path.exists(),
-                    "legacy": True,
-                }
-            )
+    return sessions
+
+
+def _list_legacy_sessions() -> list[dict]:
+    """Expose historical Trace/Raw pairs through the new channel names."""
+    if not CONVERSATION_DIR.exists():
+        return []
+    legacy_ids = {
+        path.name.removesuffix("_trace.json")
+        for path in CONVERSATION_DIR.glob("session_*_trace.json")
+    }
+    legacy_ids.update(
+        path.name.removesuffix("_raw.json")
+        for path in CONVERSATION_DIR.glob("session_*_raw.json")
+    )
+    sessions = []
+    for session_id in legacy_ids:
+        if not SESSION_ID_PATTERN.fullmatch(session_id):
+            continue
+        trace_path = CONVERSATION_DIR / f"{session_id}_trace.json"
+        raw_path = CONVERSATION_DIR / f"{session_id}_raw.json"
+        metadata = _read_first_metadata((trace_path, raw_path))
+        sessions.append(
+            {
+                "session_id": session_id,
+                "started_at": metadata.get("started_at"),
+                "has_events": trace_path.exists(),
+                "has_llm": raw_path.exists(),
+                "has_application": False,
+                "has_trace": trace_path.exists(),
+                "has_raw": raw_path.exists(),
+                "legacy": True,
+            }
+        )
+    return sessions
+
+
+def list_sessions() -> list[dict]:
+    """List current and legacy sessions in newest-first identifier order."""
+    sessions = _list_current_sessions() + _list_legacy_sessions()
     return sorted(sessions, key=lambda item: item["session_id"], reverse=True)
 
 
-def load_session_log(session_id: str, kind: str) -> dict:
-    if not SESSION_ID_PATTERN.fullmatch(session_id):
-        raise ValueError("Invalid session id")
-    if kind not in KINDS:
-        raise ValueError("Invalid log kind")
+def _load_current_log(session_id: str, kind: str) -> dict:
+    session_path = SESSION_DIR / session_id
+    path = session_path / NEW_LOG_FILES[kind]
+    if not path.exists():
+        raise FileNotFoundError(path)
+    metadata = _read_first_metadata((session_path / "metadata.json",))
+    records = (
+        _read_application_log(path) if kind == "application" else _read_jsonl(path)
+    )
+    return {
+        "session_id": session_id,
+        "started_at": metadata.get("started_at"),
+        "kind": kind,
+        "events": records,
+    }
 
-    if kind in NEW_LOG_FILES:
-        session_path = SESSION_DIR / session_id
-        path = session_path / NEW_LOG_FILES[kind]
-        if not path.exists():
-            legacy_kind = {"events": "trace", "llm": "raw"}.get(kind)
-            legacy_path = (
-                CONVERSATION_DIR / f"{session_id}_{legacy_kind}.json"
-                if legacy_kind
-                else path
-            )
-            if legacy_kind and legacy_path.exists():
-                return _read_json(legacy_path)
-            raise FileNotFoundError(path)
-        metadata_path = session_path / "metadata.json"
-        metadata = _read_json(metadata_path) if metadata_path.exists() else {}
-        if kind == "application":
-            records = _read_application_log(path)
-        else:
-            records = _read_jsonl(path)
-        return {
-            "session_id": session_id,
-            "started_at": metadata.get("started_at"),
-            "kind": kind,
-            "events": records,
-        }
 
-    path = CONVERSATION_DIR / f"{session_id}_{kind}.json"
+def _load_legacy_log(session_id: str, kind: str) -> dict:
+    legacy_kind = {"events": "trace", "llm": "raw"}.get(kind, kind)
+    path = CONVERSATION_DIR / f"{session_id}_{legacy_kind}.json"
     if not path.exists():
         raise FileNotFoundError(path)
     return _read_json(path)
 
 
+def load_session_log(session_id: str, kind: str) -> dict:
+    """Load one channel while safely mapping historical channel names."""
+    if not SESSION_ID_PATTERN.fullmatch(session_id):
+        raise ValueError("Invalid session id")
+    if kind not in KINDS:
+        raise ValueError("Invalid log kind")
+    if kind in NEW_LOG_FILES:
+        try:
+            return _load_current_log(session_id, kind)
+        except FileNotFoundError:
+            if kind in {"events", "llm"}:
+                return _load_legacy_log(session_id, kind)
+            raise
+    return _load_legacy_log(session_id, kind)
+
+
 class LogViewerHandler(BaseHTTPRequestHandler):
+    """Serve read-only log APIs and the bundled static Viewer UI."""
+
     server_version = "LifeOpsLogViewer/2.0"
 
     def do_GET(self) -> None:
@@ -230,6 +248,7 @@ class LogViewerHandler(BaseHTTPRequestHandler):
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) -> None:
+    """Run the local threaded Viewer server until interrupted."""
     server = ThreadingHTTPServer((host, port), LogViewerHandler)
     url = f"http://{host}:{port}"
     print(f"LifeOps log viewer: {url}")
@@ -245,6 +264,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) 
 
 
 def main() -> None:
+    """Parse CLI options and start the local Viewer."""
     parser = argparse.ArgumentParser(description="View LifeOps Agent logs.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)

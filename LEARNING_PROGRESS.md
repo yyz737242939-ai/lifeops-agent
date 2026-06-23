@@ -227,6 +227,16 @@ Trace 逐步增加：
 - 保持错误结果和 `read_context_ref` 完整输出不压缩的不变量。
 - 新增 inline、summary、reference、错误绕过和 Context 摘要的独立测试。
 
+### Tool Runtime 与业务目录分离
+
+- Registry 只保存 Tool Schema、函数引用、副作用和可靠性元数据。
+- Executor 独立处理授权、线程超时、幂等重放、异常归一化和结果序列化。
+- `tool.py` 保留业务工具定义与稳定导入门面，避免 Runtime 机制和业务实现交叉。
+- Activity 推荐拆分为硬约束过滤、偏好评分和稳定排序。
+- Skill State 将四种状态决策拆成命名明确的构造函数。
+- Viewer Server 将新旧会话发现与日志加载路径分开。
+- 删除不再被引用的旧 `conversation_logger.py` 兼容层。
+
 ## 阶段四：长期 Context 生命周期
 
 Agent Loop v0.1 核心可靠性完成后，将长期 Context 提前到最小 Memory 之前研究，解决

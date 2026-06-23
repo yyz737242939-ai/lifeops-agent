@@ -7,6 +7,7 @@ def now_iso() -> str:
 
 
 def today_iso() -> str:
+    """Return today's local calendar date in ISO format."""
     return date.today().isoformat()
 
 

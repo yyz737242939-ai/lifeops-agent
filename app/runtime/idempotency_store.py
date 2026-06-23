@@ -15,11 +15,13 @@ def _load() -> dict[str, dict[str, Any]]:
 
 
 def get_result(key: str) -> dict[str, Any] | None:
+    """Return a defensive copy of one cached write result."""
     result = _load().get(key)
     return dict(result) if isinstance(result, dict) else None
 
 
 def save_result(key: str, result: dict[str, Any]) -> None:
+    """Persist a successful result under its idempotency key."""
     entries = _load()
     entries[key] = result
     write_json_file(IDEMPOTENCY_FILE, entries)

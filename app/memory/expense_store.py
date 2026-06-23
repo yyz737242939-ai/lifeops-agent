@@ -16,6 +16,8 @@ BUDGETS_FILE = DATA_DIR / "budgets.json"
 
 
 class Expense(BaseModel):
+    """Persisted spending record with normalized amount and date."""
+
     id: int
     amount: float
     category: str
@@ -49,6 +51,8 @@ class Expense(BaseModel):
 
 
 class Budget(BaseModel):
+    """Category budget scoped to a daily, weekly, or monthly period."""
+
     category: str
     amount: float
     period: BudgetPeriod = "weekly"
@@ -92,6 +96,7 @@ def add_expense(
     description: str,
     spent_date: str | None = None,
 ) -> Expense:
+    """Persist a normalized expense with the next local identifier."""
     expenses = _load_expenses()
     next_id = max((expense.id for expense in expenses), default=0) + 1
     expense = Expense(
@@ -113,6 +118,7 @@ def list_expenses(
     category: str | None = None,
     limit: int | None = None,
 ) -> list[Expense]:
+    """Filter expenses and return newest records first."""
     expenses = _load_expenses()
     if start_date is not None:
         start = date.fromisoformat(start_date)
@@ -149,6 +155,7 @@ def summarize_expenses(
     end_date: str | None = None,
     category: str | None = None,
 ) -> dict[str, object]:
+    """Aggregate filtered spending while retaining a short recent sample."""
     expenses = list_expenses(
         start_date=start_date,
         end_date=end_date,
@@ -173,6 +180,7 @@ def summarize_expenses(
 
 
 def set_budget(category: str, amount: float, period: BudgetPeriod = "weekly") -> Budget:
+    """Create or replace the budget for one normalized category and period."""
     budgets = _load_budgets()
     normalized_category = category.strip().lower()
 
@@ -197,6 +205,7 @@ def set_budget(category: str, amount: float, period: BudgetPeriod = "weekly") ->
 
 
 def get_budget(category: str, period: BudgetPeriod = "weekly") -> Budget | None:
+    """Look up one category budget case-insensitively."""
     normalized_category = category.strip().lower()
     return next(
         (
@@ -209,6 +218,7 @@ def get_budget(category: str, period: BudgetPeriod = "weekly") -> Budget | None:
 
 
 def period_range(period: BudgetPeriod, anchor_date: str | None = None) -> tuple[str, str]:
+    """Return inclusive ISO date boundaries for a budget period."""
     anchor = date.fromisoformat(anchor_date or date.today().isoformat())
     if period == "daily":
         start = anchor

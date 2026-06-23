@@ -4,6 +4,8 @@ from typing import Any
 
 
 class ErrorType(StrEnum):
+    """Categories that drive correction, retry, or stop behavior."""
+
     CONTROL = "control"
     INVALID_ARGUMENTS = "invalid_arguments"
     BUSINESS_ERROR = "business_error"
@@ -16,6 +18,8 @@ class ErrorType(StrEnum):
 
 @dataclass(frozen=True)
 class ExecutionError:
+    """Normalized error contract shared by Tool and LLM paths."""
+
     type: ErrorType
     code: str
     message: str
@@ -49,6 +53,7 @@ def error_result(
     error: ExecutionError,
     **fields: Any,
 ) -> dict[str, Any]:
+    """Wrap an ExecutionError in the standard failed-result envelope."""
     return {
         "ok": False,
         "action": action,
@@ -58,6 +63,7 @@ def error_result(
 
 
 def normalize_tool_result(action: str, result: dict[str, Any]) -> dict[str, Any]:
+    """Normalize failed tool returns into the structured error contract."""
     if result.get("ok") is not False:
         return result
 
@@ -81,6 +87,7 @@ def normalize_tool_result(action: str, result: dict[str, Any]) -> dict[str, Any]
 
 
 def tool_error_from_result(result: dict[str, Any] | None) -> ExecutionError | None:
+    """Recover a typed error from a normalized failed tool result."""
     if not isinstance(result, dict) or result.get("ok") is not False:
         return None
     raw_error = result.get("error")
@@ -98,6 +105,7 @@ def tool_error_from_result(result: dict[str, Any] | None) -> ExecutionError | No
 
 
 def classify_tool_exception(action: str, error: Exception) -> dict[str, Any]:
+    """Convert Python exceptions into retry-aware tool errors."""
     if isinstance(error, TimeoutError):
         execution_error = ExecutionError(
             ErrorType.TIMEOUT,
@@ -130,6 +138,7 @@ def classify_tool_exception(action: str, error: Exception) -> dict[str, Any]:
 
 
 def classify_llm_exception(error: Exception) -> ExecutionError:
+    """Classify provider failures without one SDK-specific exception tree."""
     class_name = type(error).__name__.lower()
     message = str(error)
     if "timeout" in class_name:

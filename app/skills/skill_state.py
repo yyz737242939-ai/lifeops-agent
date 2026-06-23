@@ -22,6 +22,8 @@ CONTINUATION_PATTERNS: tuple[Pattern[str], ...] = (
 
 @dataclass(frozen=True)
 class SkillStateDecision:
+    """Explain both current-turn capabilities and next-turn topic state."""
+
     previous_active_skills: tuple[str, ...]
     directly_selected: tuple[str, ...]
     inherited_skills: tuple[str, ...]
@@ -40,58 +42,53 @@ def _matches_any(user_input: str, patterns: tuple[Pattern[str], ...]) -> bool:
     return any(pattern.search(user_input) for pattern in patterns)
 
 
-def resolve_skill_state(
-    user_input: str,
-    directly_selected: tuple[str, ...] | list[str],
-    previous_active_skills: tuple[str, ...] | list[str],
+def _direct_selection(
+    previous: tuple[str, ...],
+    direct: tuple[str, ...],
 ) -> SkillStateDecision:
-    direct = _unique(directly_selected)
-    previous = _unique(previous_active_skills)
+    return SkillStateDecision(
+        previous_active_skills=previous,
+        directly_selected=direct,
+        inherited_skills=(),
+        loaded_skills=direct,
+        next_active_skills=direct,
+        inheritance_used=False,
+        state_cleared=False,
+        resolution="direct_selection",
+    )
 
-    # Explicit domain evidence always replaces inherited state.
-    if direct:
-        return SkillStateDecision(
-            previous_active_skills=previous,
-            directly_selected=direct,
-            inherited_skills=(),
-            loaded_skills=direct,
-            next_active_skills=direct,
-            inheritance_used=False,
-            state_cleared=False,
-            resolution="direct_selection",
-        )
 
-    # A Ref-only turn needs the common read_context_ref capability, not every
-    # tool from the previous domain. Preserve the topic for a possible next turn.
-    if _matches_any(user_input, CONTEXT_REF_PATTERNS):
-        return SkillStateDecision(
-            previous_active_skills=previous,
-            directly_selected=(),
-            inherited_skills=(),
-            loaded_skills=(),
-            next_active_skills=previous,
-            inheritance_used=False,
-            state_cleared=False,
-            resolution="context_ref_only",
-        )
+def _context_ref_only(previous: tuple[str, ...]) -> SkillStateDecision:
+    return SkillStateDecision(
+        previous_active_skills=previous,
+        directly_selected=(),
+        inherited_skills=(),
+        loaded_skills=(),
+        next_active_skills=previous,
+        inheritance_used=False,
+        state_cleared=False,
+        resolution="context_ref_only",
+    )
 
-    if _matches_any(user_input, CONTINUATION_PATTERNS):
-        inherited = previous
-        return SkillStateDecision(
-            previous_active_skills=previous,
-            directly_selected=(),
-            inherited_skills=inherited,
-            loaded_skills=inherited,
-            next_active_skills=inherited,
-            inheritance_used=bool(inherited),
-            state_cleared=False,
-            resolution=(
-                "ambiguous_followup_inherited"
-                if inherited
-                else "followup_without_active_skill"
-            ),
-        )
 
+def _continued_topic(previous: tuple[str, ...]) -> SkillStateDecision:
+    return SkillStateDecision(
+        previous_active_skills=previous,
+        directly_selected=(),
+        inherited_skills=previous,
+        loaded_skills=previous,
+        next_active_skills=previous,
+        inheritance_used=bool(previous),
+        state_cleared=False,
+        resolution=(
+            "ambiguous_followup_inherited"
+            if previous
+            else "followup_without_active_skill"
+        ),
+    )
+
+
+def _cleared_topic(previous: tuple[str, ...]) -> SkillStateDecision:
     return SkillStateDecision(
         previous_active_skills=previous,
         directly_selected=(),
@@ -102,3 +99,27 @@ def resolve_skill_state(
         state_cleared=bool(previous),
         resolution="no_domain_or_continuation",
     )
+
+
+def resolve_skill_state(
+    user_input: str,
+    directly_selected: tuple[str, ...] | list[str],
+    previous_active_skills: tuple[str, ...] | list[str],
+) -> SkillStateDecision:
+    """Resolve direct routing and ambiguous follow-up state for one turn."""
+    direct = _unique(directly_selected)
+    previous = _unique(previous_active_skills)
+
+    # Explicit domain evidence always replaces inherited state.
+    if direct:
+        return _direct_selection(previous, direct)
+
+    # A Ref-only turn needs the common read_context_ref capability, not every
+    # tool from the previous domain. Preserve the topic for a possible next turn.
+    if _matches_any(user_input, CONTEXT_REF_PATTERNS):
+        return _context_ref_only(previous)
+
+    if _matches_any(user_input, CONTINUATION_PATTERNS):
+        return _continued_topic(previous)
+
+    return _cleared_topic(previous)

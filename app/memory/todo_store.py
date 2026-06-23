@@ -18,6 +18,8 @@ TODOS_FILE = DATA_DIR / "todos.json"
 
 
 class Todo(BaseModel):
+    """Persisted task record exposed through Todo tools."""
+
     id: int
     title: str
     status: TodoStatus = TODO_STATUS
@@ -59,6 +61,7 @@ def add_todo(
     due_date: str | None = None,
     priority: TodoPriority = "medium",
 ) -> Todo:
+    """Create a Todo with a monotonically increasing local identifier."""
     todos = _load_todos()
     next_id = max((todo.id for todo in todos), default=0) + 1
     todo = Todo(
@@ -75,10 +78,12 @@ def add_todo(
 
 
 def list_todos() -> list[Todo]:
+    """Return all persisted Todo records."""
     return _load_todos()
 
 
 def complete_todo(todo_id: int) -> Todo | None:
+    """Mark one Todo complete, returning None when its id is absent."""
     todos = _load_todos()
 
     for todo in todos:
@@ -97,6 +102,7 @@ def update_todo(
     due_date: str | None = None,
     priority: TodoPriority | None = None,
 ) -> Todo | None:
+    """Apply explicitly supplied fields while preserving all other values."""
     todos = _load_todos()
 
     for index, todo in enumerate(todos):
@@ -120,6 +126,7 @@ def update_todo(
 
 
 def delete_todo(todo_id: int) -> Todo | None:
+    """Delete and return one Todo, or None when it does not exist."""
     todos = _load_todos()
 
     for index, todo in enumerate(todos):

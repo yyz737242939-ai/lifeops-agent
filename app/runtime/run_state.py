@@ -7,6 +7,8 @@ from uuid import uuid4
 
 
 class RunStatus(StrEnum):
+    """Terminal and in-progress states for one Agent chat request."""
+
     RUNNING = "running"
     COMPLETED = "completed"
     PARTIAL = "partial"
@@ -15,6 +17,8 @@ class RunStatus(StrEnum):
 
 
 class StopReason(StrEnum):
+    """Machine-readable reason the Runtime ended a run."""
+
     COMPLETED = "completed"
     LLM_BUDGET_EXHAUSTED = "llm_budget_exhausted"
     TOOL_BUDGET_EXHAUSTED = "tool_budget_exhausted"
@@ -26,6 +30,8 @@ class StopReason(StrEnum):
 
 
 class ActionStatus(StrEnum):
+    """Outcome of one model-requested tool action."""
+
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
@@ -33,6 +39,8 @@ class ActionStatus(StrEnum):
 
 @dataclass(frozen=True)
 class LoopLimits:
+    """Independent budgets for LLM rounds, tool attempts, and retries."""
+
     max_llm_rounds: int = 5
     max_tool_calls_per_round: int = 10
     max_total_tool_calls: int = 50
@@ -74,6 +82,8 @@ class LoopLimits:
 
 @dataclass
 class ActionRecord:
+    """In-memory account of one requested tool action."""
+
     call_id: str
     tool_name: str
     arguments: Any
@@ -102,6 +112,8 @@ class ActionRecord:
 
 @dataclass
 class RunState:
+    """Mutable execution state scoped to exactly one Agent.chat() call."""
+
     run_id: str = field(default_factory=lambda: f"run_{uuid4().hex}")
     status: RunStatus = RunStatus.RUNNING
     llm_rounds: int = 0
@@ -248,6 +260,7 @@ class RunState:
 
 
 def stable_signature(value: Any) -> str:
+    """Hash normalized JSON so checks ignore dictionary key order."""
     serialized = json.dumps(
         value,
         ensure_ascii=False,

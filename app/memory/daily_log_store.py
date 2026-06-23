@@ -16,6 +16,8 @@ DAILY_LOGS_FILE = DATA_DIR / "daily_logs.json"
 
 
 class DailyLog(BaseModel):
+    """One day's persisted wellbeing state."""
+
     log_date: str
     sleep_hours: float | None = None
     mood: Mood | None = None
@@ -57,6 +59,7 @@ def upsert_daily_log(
     energy: Energy | None = None,
     note: str | None = None,
 ) -> DailyLog:
+    """Create or partially update the wellbeing record for a target date."""
     target_date = log_date or today_iso()
     logs = _load_logs()
 
@@ -94,11 +97,13 @@ def upsert_daily_log(
 
 
 def get_daily_log(log_date: str | None = None) -> DailyLog | None:
+    """Return one day's record, defaulting to today."""
     target_date = log_date or today_iso()
     return next((log for log in _load_logs() if log.log_date == target_date), None)
 
 
 def list_daily_logs(days: int = 7, end_date: str | None = None) -> list[DailyLog]:
+    """Return records inside an inclusive trailing date window."""
     if days < 1:
         raise ValueError("days must be at least 1")
 

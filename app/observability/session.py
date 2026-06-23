@@ -17,6 +17,7 @@ _started_at: str | None = None
 
 
 def now_iso() -> str:
+    """Return a timezone-aware timestamp for log records."""
     return datetime.now().astimezone().isoformat(timespec="milliseconds")
 
 
@@ -62,12 +63,14 @@ def close_logging_session() -> None:
 
 
 def current_session_id() -> str:
+    """Return the active log session id, lazily creating a session."""
     _ensure_session()
     assert _session_id is not None
     return _session_id
 
 
 def current_session_files() -> dict[str, Path]:
+    """Return paths for the active session's three log channels."""
     _ensure_session()
     assert _session_dir is not None
     return {
@@ -95,6 +98,7 @@ def append_log_record(channel: str, event: str, fields: dict[str, Any]) -> None:
 
 
 def session_metadata() -> dict[str, str]:
+    """Return stable identifiers shared by all active log channels."""
     _ensure_session()
     assert _session_id is not None and _started_at is not None
     return {"session_id": _session_id, "started_at": _started_at}

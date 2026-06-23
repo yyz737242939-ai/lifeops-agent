@@ -6,6 +6,8 @@ from app.skills.skill_loader import SkillMetadata, load_skill
 
 @dataclass(frozen=True)
 class PromptBuildResult:
+    """Rendered instructions plus metadata about loaded Skill content."""
+
     instructions: str
     loaded_skills: tuple[str, ...]
     prompt_chars: int
@@ -24,6 +26,7 @@ def build_system_prompt(
     available_skills: dict[str, SkillMetadata],
     loaded_skills: tuple[str, ...] | list[str],
 ) -> PromptBuildResult:
+    """Combine the core prompt with only the selected Skill bodies."""
     selected_skills = tuple(dict.fromkeys(loaded_skills))
     unknown_skills = set(selected_skills) - set(available_skills)
     if unknown_skills:

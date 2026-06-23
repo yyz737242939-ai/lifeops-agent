@@ -72,7 +72,9 @@ uv run python -m unittest discover -s tests -v
 | `app/skills/skill_router.py` | 根据当前输入执行确定性直接路由 |
 | `app/skills/skill_state.py` | 处理 Skill 继承、切换、清理和 Ref-only 状态 |
 | `app/skills/*/SKILL.md` | 四个业务领域的知识和工具编排规则 |
-| `app/tools/tool.py` | 工具注册、Schema、工具实现、执行与权限检查 |
+| `app/tools/tool.py` | 业务工具 Schema、处理函数与稳定兼容门面 |
+| `app/tools/registry.py` | ToolDefinition、读写副作用元数据和注册表 |
+| `app/tools/executor.py` | 工具授权、超时、幂等重放、异常归一化与结果序列化 |
 | `app/tools/tool_schema.py` | 完整工具 Schema 的静态导出 |
 | `app/tools/capability_builder.py` | 将 Skill 映射为本轮 Tool Schema 和授权集合 |
 | `app/runtime/run_state.py` | 单次请求的 RunState、ActionRecord、调用预算和终止状态 |

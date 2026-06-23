@@ -45,6 +45,8 @@ SKILL_TOOL_NAMES: dict[str, frozenset[str]] = {
 
 @dataclass(frozen=True)
 class CapabilityBuildResult:
+    """Tool visibility and authorization snapshot for one Agent turn."""
+
     loaded_skills: tuple[str, ...]
     tool_schemas: tuple[dict[str, Any], ...]
     allowed_tool_names: frozenset[str]
@@ -72,6 +74,7 @@ def _validate_configuration() -> None:
 def build_capabilities(
     loaded_skills: tuple[str, ...] | list[str],
 ) -> CapabilityBuildResult:
+    """Map loaded Skills to visible schemas and allowed tool names."""
     _validate_configuration()
 
     unknown_skills = set(loaded_skills) - set(SKILL_TOOL_NAMES)

@@ -15,6 +15,7 @@ def save_context_ref(
     full_result: Any,
     summary: Any,
 ) -> str:
+    """Persist a complete tool result and return its compact reference id."""
     REF_DIR.mkdir(parents=True, exist_ok=True)
     ref_id = f"ctx_{timestamp_id()}"
     ref_file = REF_DIR / f"{ref_id}.json"
@@ -30,6 +31,7 @@ def save_context_ref(
 
 
 def read_context_ref(ref_id: str) -> dict[str, Any] | None:
+    """Read a validated Context Ref without accepting arbitrary paths."""
     if not ref_id.startswith("ctx_"):
         return None
 
