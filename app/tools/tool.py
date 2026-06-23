@@ -1,6 +1,5 @@
-import json
-from collections.abc import Callable
-from dataclasses import dataclass
+"""Business tool schemas and handlers exposed through the stable tool facade."""
+
 from datetime import date, datetime
 from typing import Any
 
@@ -11,60 +10,17 @@ from app.memory.daily_log_store import Mood as DailyMood
 from app.memory.expense_store import BudgetPeriod
 from app.memory.todo_store import Todo, TodoPriority
 from app.runtime.context_ref_store import read_context_ref as load_context_ref
-
-
-ToolParameters = dict[str, Any]
-ToolResult = dict[str, Any]
-
-
-@dataclass(frozen=True)
-class ToolDefinition:
-    name: str
-    description: str
-    parameters: ToolParameters
-    function: Callable[..., ToolResult]
-
-    def schema(self) -> dict[str, Any]:
-        return {
-            "type": "function",
-            "name": self.name,
-            "description": self.description,
-            "parameters": self.parameters,
-        }
-
-
-TOOLS: dict[str, ToolDefinition] = {}
-
-
-def register_tool(
-    name: str,
-    description: str,
-    parameters: ToolParameters,
-) -> Callable[[Callable[..., ToolResult]], Callable[..., ToolResult]]:
-    def decorator(function: Callable[..., ToolResult]) -> Callable[..., ToolResult]:
-        TOOLS[name] = ToolDefinition(
-            name=name,
-            description=description,
-            parameters=parameters,
-            function=function,
-        )
-        return function
-
-    return decorator
-
-
-def _json_safe(value: Any) -> Any:
-    if hasattr(value, "model_dump"):
-        return _json_safe(value.model_dump(mode="json"))
-    if isinstance(value, dict):
-        return {str(key): _json_safe(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_json_safe(item) for item in value]
-    if isinstance(value, tuple):
-        return [_json_safe(item) for item in value]
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return repr(value)
+from app.runtime.idempotency_store import get_result as get_idempotent_result
+from app.runtime.idempotency_store import save_result as save_idempotent_result
+from app.tools.executor import execute_tool
+from app.tools.registry import (
+    TOOLS,
+    ToolDefinition,
+    ToolEffect,
+    ToolParameters,
+    ToolResult,
+    register_tool,
+)
 
 
 def _empty_parameters() -> ToolParameters:
@@ -140,6 +96,7 @@ def _model_to_dict(model: Any) -> dict[str, Any]:
     parameters=_empty_parameters(),
 )
 def get_current_time() -> ToolResult:
+    """Return local date and time for relative-date reasoning."""
     now = datetime.now()
     return {
         "ok": True,
@@ -156,12 +113,16 @@ def get_current_time() -> ToolResult:
         "schedule, or track something they need to do."
     ),
     parameters=_todo_parameters(required=["title"]),
+    effect=ToolEffect.WRITE,
+    idempotent=False,
+    retryable=False,
 )
 def add_todo(
     title: str,
     due_date: str | None = None,
     priority: TodoPriority = "medium",
 ) -> ToolResult:
+    """Create one Todo through the domain store."""
     todo = todo_store.add_todo(title=title, due_date=due_date, priority=priority)
     return {
         "ok": True,
@@ -176,6 +137,7 @@ def add_todo(
     parameters=_empty_parameters(),
 )
 def list_todos() -> ToolResult:
+    """Return all Todo records for planning or inspection."""
     todos = todo_store.list_todos()
     return {
         "ok": True,
@@ -219,6 +181,9 @@ def list_todos() -> ToolResult:
         },
         "required": [],
     },
+    effect=ToolEffect.WRITE,
+    idempotent=True,
+    retryable=True,
 )
 def record_daily_state(
     log_date: str | None = None,
@@ -227,6 +192,7 @@ def record_daily_state(
     energy: DailyEnergy | None = None,
     note: str | None = None,
 ) -> ToolResult:
+    """Create or update one day's wellbeing state."""
     log = daily_log_store.upsert_daily_log(
         log_date=log_date,
         sleep_hours=sleep_hours,
@@ -256,6 +222,7 @@ def record_daily_state(
     },
 )
 def get_daily_state(log_date: str | None = None) -> ToolResult:
+    """Read one day's wellbeing state."""
     log = daily_log_store.get_daily_log(log_date=log_date)
     return {
         "ok": True,
@@ -283,6 +250,7 @@ def get_daily_state(log_date: str | None = None) -> ToolResult:
     },
 )
 def list_daily_logs(days: int = 7, end_date: str | None = None) -> ToolResult:
+    """Read a trailing window of wellbeing records."""
     logs = daily_log_store.list_daily_logs(days=days, end_date=end_date)
     return {
         "ok": True,
@@ -317,6 +285,9 @@ def list_daily_logs(days: int = 7, end_date: str | None = None) -> ToolResult:
         },
         "required": ["amount", "category", "description"],
     },
+    effect=ToolEffect.WRITE,
+    idempotent=False,
+    retryable=False,
 )
 def record_expense(
     amount: float,
@@ -324,6 +295,7 @@ def record_expense(
     description: str,
     spent_date: str | None = None,
 ) -> ToolResult:
+    """Persist one normalized expense record."""
     expense = expense_store.add_expense(
         amount=amount,
         category=category,
@@ -369,6 +341,7 @@ def list_expenses(
     category: str | None = None,
     limit: int | None = None,
 ) -> ToolResult:
+    """Return filtered expenses in reverse chronological order."""
     expenses = expense_store.list_expenses(
         start_date=start_date,
         end_date=end_date,
@@ -410,6 +383,7 @@ def summarize_spending(
     end_date: str | None = None,
     category: str | None = None,
 ) -> ToolResult:
+    """Aggregate spending across an optional date/category scope."""
     summary = expense_store.summarize_expenses(
         start_date=start_date,
         end_date=end_date,
@@ -444,12 +418,16 @@ def summarize_spending(
         },
         "required": ["category", "amount"],
     },
+    effect=ToolEffect.WRITE,
+    idempotent=True,
+    retryable=True,
 )
 def set_budget(
     category: str,
     amount: float,
     period: BudgetPeriod = "weekly",
 ) -> ToolResult:
+    """Create or replace one category budget."""
     budget = expense_store.set_budget(
         category=category,
         amount=amount,
@@ -490,6 +468,7 @@ def check_budget(
     period: BudgetPeriod = "weekly",
     anchor_date: str | None = None,
 ) -> ToolResult:
+    """Compare scoped category spending against its configured budget."""
     budget = expense_store.get_budget(category=category, period=period)
     start_date, end_date = expense_store.period_range(
         period=period,
@@ -584,6 +563,7 @@ def recommend_activities(
     goal: ActivityGoal | None = None,
     limit: int = 3,
 ) -> ToolResult:
+    """Return deterministic activities matching user constraints."""
     activities = activity_catalog.recommend_activities(
         energy=energy,
         mood=mood,
@@ -605,8 +585,12 @@ def recommend_activities(
     name="complete_todo",
     description="Mark a todo task as done by id.",
     parameters=_todo_id_parameters(),
+    effect=ToolEffect.WRITE,
+    idempotent=False,
+    retryable=False,
 )
 def complete_todo(todo_id: int) -> ToolResult:
+    """Mark one Todo complete by id."""
     todo = todo_store.complete_todo(todo_id)
     if todo is None:
         return {
@@ -630,6 +614,9 @@ def complete_todo(todo_id: int) -> ToolResult:
         "change a task title, due date, or priority."
     ),
     parameters=_update_todo_parameters(),
+    effect=ToolEffect.WRITE,
+    idempotent=True,
+    retryable=True,
 )
 def update_todo(
     todo_id: int,
@@ -637,6 +624,7 @@ def update_todo(
     due_date: str | None = None,
     priority: TodoPriority | None = None,
 ) -> ToolResult:
+    """Apply a partial update to one Todo."""
     todo = todo_store.update_todo(
         todo_id=todo_id,
         title=title,
@@ -662,8 +650,12 @@ def update_todo(
     name="delete_todo",
     description="Delete a todo task by id.",
     parameters=_todo_id_parameters(),
+    effect=ToolEffect.WRITE,
+    idempotent=False,
+    retryable=False,
 )
 def delete_todo(todo_id: int) -> ToolResult:
+    """Delete one Todo by id."""
     todo = todo_store.delete_todo(todo_id)
     if todo is None:
         return {
@@ -698,6 +690,7 @@ def delete_todo(todo_id: int) -> ToolResult:
     },
 )
 def plan_day(for_date: str | None = None) -> ToolResult:
+    """Build a deterministic daily plan from incomplete Todo records."""
     target_date = for_date or date.today().isoformat()
     try:
         date.fromisoformat(target_date)
@@ -763,6 +756,7 @@ def plan_day(for_date: str | None = None) -> ToolResult:
     },
 )
 def read_context_ref(ref_id: str) -> ToolResult:
+    """Expand one Runtime-managed Context Ref."""
     payload = load_context_ref(ref_id)
     if payload is None:
         return {
@@ -783,38 +777,27 @@ def read_context_ref(ref_id: str) -> ToolResult:
 
 
 def get_tool_schemas() -> list[dict[str, Any]]:
+    """Export all registered schemas in stable registry order."""
     return [tool.schema() for tool in TOOLS.values()]
 
 
 TOOL_SCHEMAS = get_tool_schemas()
 
 
-def call_tool(name: str, arguments: dict[str, Any]) -> str:
-    tool = TOOLS.get(name)
-
-    if tool is None:
-        result: ToolResult = {
-            "ok": False,
-            "action": name,
-            "error": "tool_not_found",
-        }
-        return json.dumps(result, ensure_ascii=False)
-
-    try:
-        result = tool.function(**arguments)
-    except TypeError as e:
-        result = {
-            "ok": False,
-            "action": name,
-            "error": "invalid_arguments",
-            "message": str(e),
-        }
-    except Exception as e:
-        result = {
-            "ok": False,
-            "action": name,
-            "error": "tool_failed",
-            "message": str(e),
-        }
-
-    return json.dumps(_json_safe(result), ensure_ascii=False)
+def call_tool(
+    name: str,
+    arguments: dict[str, Any],
+    *,
+    allowed_tool_names: frozenset[str],
+    idempotency_key: str | None = None,
+) -> str:
+    """Compatibility facade over the isolated tool execution runtime."""
+    return execute_tool(
+        name,
+        arguments,
+        tools=TOOLS,
+        allowed_tool_names=allowed_tool_names,
+        idempotency_key=idempotency_key,
+        load_idempotent_result=get_idempotent_result,
+        save_idempotent_result=save_idempotent_result,
+    )

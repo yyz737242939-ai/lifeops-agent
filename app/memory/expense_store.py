@@ -1,9 +1,11 @@
-import json
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
+
+from app.utils.json_file import load_model_list, save_model_list
+from app.utils.time import now_iso
 
 
 BudgetPeriod = Literal["daily", "weekly", "monthly"]
@@ -14,12 +16,14 @@ BUDGETS_FILE = DATA_DIR / "budgets.json"
 
 
 class Expense(BaseModel):
+    """Persisted spending record with normalized amount and date."""
+
     id: int
     amount: float
     category: str
     description: str
     spent_date: str = Field(default_factory=lambda: date.today().isoformat())
-    created_at: str = Field(default_factory=lambda: _now_iso())
+    created_at: str = Field(default_factory=now_iso)
 
     @field_validator("amount")
     @classmethod
@@ -47,10 +51,12 @@ class Expense(BaseModel):
 
 
 class Budget(BaseModel):
+    """Category budget scoped to a daily, weekly, or monthly period."""
+
     category: str
     amount: float
     period: BudgetPeriod = "weekly"
-    updated_at: str = Field(default_factory=lambda: _now_iso())
+    updated_at: str = Field(default_factory=now_iso)
 
     @field_validator("category")
     @classmethod
@@ -68,66 +74,20 @@ class Budget(BaseModel):
         return round(value, 2)
 
 
-def _now_iso() -> str:
-    return datetime.now().isoformat(timespec="seconds")
-
-
-def _ensure_json_file(path: Path, default_value: str) -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        path.write_text(default_value, encoding="utf-8")
-
-
 def _load_expenses() -> list[Expense]:
-    _ensure_json_file(EXPENSES_FILE, "[]")
-
-    try:
-        raw_expenses = json.loads(EXPENSES_FILE.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in {EXPENSES_FILE}") from e
-
-    if not isinstance(raw_expenses, list):
-        raise ValueError(f"{EXPENSES_FILE} must contain a JSON list")
-
-    return [Expense.model_validate(raw_expense) for raw_expense in raw_expenses]
+    return load_model_list(EXPENSES_FILE, Expense)
 
 
 def _save_expenses(expenses: list[Expense]) -> None:
-    _ensure_json_file(EXPENSES_FILE, "[]")
-    EXPENSES_FILE.write_text(
-        json.dumps(
-            [expense.model_dump(mode="json") for expense in expenses],
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    save_model_list(EXPENSES_FILE, expenses)
 
 
 def _load_budgets() -> list[Budget]:
-    _ensure_json_file(BUDGETS_FILE, "[]")
-
-    try:
-        raw_budgets = json.loads(BUDGETS_FILE.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in {BUDGETS_FILE}") from e
-
-    if not isinstance(raw_budgets, list):
-        raise ValueError(f"{BUDGETS_FILE} must contain a JSON list")
-
-    return [Budget.model_validate(raw_budget) for raw_budget in raw_budgets]
+    return load_model_list(BUDGETS_FILE, Budget)
 
 
 def _save_budgets(budgets: list[Budget]) -> None:
-    _ensure_json_file(BUDGETS_FILE, "[]")
-    BUDGETS_FILE.write_text(
-        json.dumps(
-            [budget.model_dump(mode="json") for budget in budgets],
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    save_model_list(BUDGETS_FILE, budgets)
 
 
 def add_expense(
@@ -136,6 +96,7 @@ def add_expense(
     description: str,
     spent_date: str | None = None,
 ) -> Expense:
+    """Persist a normalized expense with the next local identifier."""
     expenses = _load_expenses()
     next_id = max((expense.id for expense in expenses), default=0) + 1
     expense = Expense(
@@ -157,6 +118,7 @@ def list_expenses(
     category: str | None = None,
     limit: int | None = None,
 ) -> list[Expense]:
+    """Filter expenses and return newest records first."""
     expenses = _load_expenses()
     if start_date is not None:
         start = date.fromisoformat(start_date)
@@ -193,6 +155,7 @@ def summarize_expenses(
     end_date: str | None = None,
     category: str | None = None,
 ) -> dict[str, object]:
+    """Aggregate filtered spending while retaining a short recent sample."""
     expenses = list_expenses(
         start_date=start_date,
         end_date=end_date,
@@ -217,6 +180,7 @@ def summarize_expenses(
 
 
 def set_budget(category: str, amount: float, period: BudgetPeriod = "weekly") -> Budget:
+    """Create or replace the budget for one normalized category and period."""
     budgets = _load_budgets()
     normalized_category = category.strip().lower()
 
@@ -228,7 +192,7 @@ def set_budget(category: str, amount: float, period: BudgetPeriod = "weekly") ->
             category=budget.category,
             amount=amount,
             period=period,
-            updated_at=_now_iso(),
+            updated_at=now_iso(),
         )
         budgets[index] = updated_budget
         _save_budgets(budgets)
@@ -241,6 +205,7 @@ def set_budget(category: str, amount: float, period: BudgetPeriod = "weekly") ->
 
 
 def get_budget(category: str, period: BudgetPeriod = "weekly") -> Budget | None:
+    """Look up one category budget case-insensitively."""
     normalized_category = category.strip().lower()
     return next(
         (
@@ -253,6 +218,7 @@ def get_budget(category: str, period: BudgetPeriod = "weekly") -> Budget | None:
 
 
 def period_range(period: BudgetPeriod, anchor_date: str | None = None) -> tuple[str, str]:
+    """Return inclusive ISO date boundaries for a budget period."""
     anchor = date.fromisoformat(anchor_date or date.today().isoformat())
     if period == "daily":
         start = anchor

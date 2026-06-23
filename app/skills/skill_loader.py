@@ -7,6 +7,8 @@ SKILLS_DIR = Path(__file__).resolve().parent
 
 @dataclass(frozen=True)
 class SkillMetadata:
+    """Always-visible Skill name and short routing description."""
+
     name: str
     description: str
     path: Path
@@ -14,6 +16,8 @@ class SkillMetadata:
 
 @dataclass(frozen=True)
 class Skill:
+    """Discovered Skill with lazily loaded instruction body."""
+
     metadata: SkillMetadata
     instructions: str
 
@@ -49,6 +53,7 @@ def _read_frontmatter(path: Path) -> dict[str, str]:
 
 
 def discover_skills(skills_dir: Path = SKILLS_DIR) -> dict[str, SkillMetadata]:
+    """Discover valid Skill folders without loading full bodies."""
     skills: dict[str, SkillMetadata] = {}
     for skill_path in sorted(skills_dir.glob("*/SKILL.md")):
         frontmatter = _read_frontmatter(skill_path)
@@ -68,6 +73,7 @@ def discover_skills(skills_dir: Path = SKILLS_DIR) -> dict[str, SkillMetadata]:
 
 
 def load_skill(metadata: SkillMetadata) -> Skill:
+    """Return a Skill with its full Markdown body loaded."""
     content = metadata.path.read_text(encoding="utf-8")
     parts = content.split("---", maxsplit=2)
     if len(parts) != 3:

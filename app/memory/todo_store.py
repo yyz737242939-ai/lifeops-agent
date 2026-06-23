@@ -1,9 +1,11 @@
-import json
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
+
+from app.utils.json_file import load_model_list, save_model_list
+from app.utils.time import now_iso
 
 
 TODO_STATUS = "todo"
@@ -16,12 +18,14 @@ TODOS_FILE = DATA_DIR / "todos.json"
 
 
 class Todo(BaseModel):
+    """Persisted task record exposed through Todo tools."""
+
     id: int
     title: str
     status: TodoStatus = TODO_STATUS
     priority: TodoPriority = "medium"
     due_date: str | None = None
-    created_at: str = Field(default_factory=lambda: _now_iso())
+    created_at: str = Field(default_factory=now_iso)
     completed_at: str | None = None
 
     @field_validator("title")
@@ -44,40 +48,12 @@ class Todo(BaseModel):
         return value
 
 
-def _now_iso() -> str:
-    return datetime.now().isoformat(timespec="seconds")
-
-
-def _ensure_todos_file() -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    if not TODOS_FILE.exists():
-        TODOS_FILE.write_text("[]", encoding="utf-8")
-
-
 def _load_todos() -> list[Todo]:
-    _ensure_todos_file()
-
-    try:
-        raw_todos = json.loads(TODOS_FILE.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in {TODOS_FILE}") from e
-
-    if not isinstance(raw_todos, list):
-        raise ValueError(f"{TODOS_FILE} must contain a JSON list")
-
-    return [Todo.model_validate(raw_todo) for raw_todo in raw_todos]
+    return load_model_list(TODOS_FILE, Todo)
 
 
 def _save_todos(todos: list[Todo]) -> None:
-    _ensure_todos_file()
-    TODOS_FILE.write_text(
-        json.dumps(
-            [todo.model_dump(mode="json") for todo in todos],
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    save_model_list(TODOS_FILE, todos)
 
 
 def add_todo(
@@ -85,6 +61,7 @@ def add_todo(
     due_date: str | None = None,
     priority: TodoPriority = "medium",
 ) -> Todo:
+    """Create a Todo with a monotonically increasing local identifier."""
     todos = _load_todos()
     next_id = max((todo.id for todo in todos), default=0) + 1
     todo = Todo(
@@ -101,16 +78,18 @@ def add_todo(
 
 
 def list_todos() -> list[Todo]:
+    """Return all persisted Todo records."""
     return _load_todos()
 
 
 def complete_todo(todo_id: int) -> Todo | None:
+    """Mark one Todo complete, returning None when its id is absent."""
     todos = _load_todos()
 
     for todo in todos:
         if todo.id == todo_id:
             todo.status = DONE_STATUS
-            todo.completed_at = _now_iso()
+            todo.completed_at = now_iso()
             _save_todos(todos)
             return todo
 
@@ -123,6 +102,7 @@ def update_todo(
     due_date: str | None = None,
     priority: TodoPriority | None = None,
 ) -> Todo | None:
+    """Apply explicitly supplied fields while preserving all other values."""
     todos = _load_todos()
 
     for index, todo in enumerate(todos):
@@ -146,6 +126,7 @@ def update_todo(
 
 
 def delete_todo(todo_id: int) -> Todo | None:
+    """Delete and return one Todo, or None when it does not exist."""
     todos = _load_todos()
 
     for index, todo in enumerate(todos):

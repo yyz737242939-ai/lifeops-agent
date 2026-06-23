@@ -4,22 +4,18 @@ from datetime import date
 from typing import Any
 
 from app.runtime.context_ref_store import save_context_ref
+from app.utils.json_file import parse_json_object
 
 
 SUMMARY_CHAR_THRESHOLD = 1500
 REFERENCE_CHAR_THRESHOLD = 4000
 REFERENCE_LIST_THRESHOLD = 30
-
-
-def _json_length(value: Any) -> int:
-    return len(json.dumps(value, ensure_ascii=False))
-
-
-def _parse_tool_result(result_json: str) -> Any:
-    try:
-        return json.loads(result_json)
-    except json.JSONDecodeError:
-        return None
+SUMMARY_LIST_THRESHOLDS = {
+    "list_todos": 8,
+    "list_expenses": 8,
+    "list_daily_logs": 8,
+    "recommend_activities": 3,
+}
 
 
 def _safe_date(value: str | None) -> date | None:
@@ -153,17 +149,15 @@ def _summarize_generic(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def summarize_tool_result(tool_name: str, result: dict[str, Any]) -> dict[str, Any]:
-    if tool_name == "list_todos":
-        return _summarize_todos(result)
-    if tool_name == "list_daily_logs":
-        return _summarize_daily_logs(result)
-    if tool_name == "list_expenses":
-        return _summarize_expenses(result)
-    if tool_name == "summarize_spending":
-        return _summarize_expenses(result)
-    if tool_name == "recommend_activities":
-        return _summarize_activities(result)
-    return _summarize_generic(result)
+    """Build a domain-aware summary while preserving action-relevant fields."""
+    summarizers = {
+        "list_todos": _summarize_todos,
+        "list_daily_logs": _summarize_daily_logs,
+        "list_expenses": _summarize_expenses,
+        "summarize_spending": _summarize_expenses,
+        "recommend_activities": _summarize_activities,
+    }
+    return summarizers.get(tool_name, _summarize_generic)(result)
 
 
 def _primary_list_count(result: dict[str, Any]) -> int:
@@ -174,16 +168,88 @@ def _primary_list_count(result: dict[str, Any]) -> int:
     return 0
 
 
-def compact_tool_output(tool_name: str, result_json: str) -> tuple[str, dict[str, Any]]:
-    parsed_result = _parse_tool_result(result_json)
-    original_chars = len(result_json)
-    metadata: dict[str, Any] = {
+def _select_compaction_strategy(
+    tool_name: str,
+    *,
+    original_chars: int,
+    list_count: int,
+) -> str:
+    """Choose a strategy using stable size thresholds, independent of I/O."""
+    if (
+        original_chars >= REFERENCE_CHAR_THRESHOLD
+        or list_count >= REFERENCE_LIST_THRESHOLD
+    ):
+        return "reference"
+
+    list_threshold = SUMMARY_LIST_THRESHOLDS.get(tool_name)
+    if original_chars >= SUMMARY_CHAR_THRESHOLD or (
+        list_threshold is not None and list_count > list_threshold
+    ):
+        return "summary"
+    return "none"
+
+
+def _base_compaction_metadata(tool_name: str, original_chars: int) -> dict[str, Any]:
+    return {
         "tool_name": tool_name,
         "strategy": "none",
         "original_chars": original_chars,
         "compacted_chars": original_chars,
         "ref_id": None,
     }
+
+
+def _build_compacted_payload(
+    tool_name: str,
+    result: dict[str, Any],
+    summary: dict[str, Any],
+    *,
+    strategy: str,
+    ref_id: str | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "ok": True,
+        "action": result.get("action", tool_name),
+        "compacted": True,
+        "compaction_strategy": strategy,
+        "summary": summary,
+    }
+    if strategy == "reference":
+        payload.update(
+            {
+                "ref_id": ref_id,
+                "hint": "Use read_context_ref if exact records are needed.",
+            }
+        )
+    return payload
+
+
+def _finish_compaction(
+    payload: dict[str, Any],
+    metadata: dict[str, Any],
+    *,
+    strategy: str,
+    summary: dict[str, Any],
+    ref_id: str | None = None,
+) -> tuple[str, dict[str, Any]]:
+    compacted_json = json.dumps(payload, ensure_ascii=False)
+    metadata.update(
+        {
+            "strategy": strategy,
+            "compacted_chars": len(compacted_json),
+            "summary": summary,
+        }
+    )
+    if ref_id is not None:
+        metadata["ref_id"] = ref_id
+    return compacted_json, metadata
+
+
+def compact_tool_output(tool_name: str, result_json: str) -> tuple[str, dict[str, Any]]:
+    """Compact a successful tool result without losing later-action essentials."""
+    parsed_result = parse_json_object(result_json)
+    original_chars = len(result_json)
+    metadata = _base_compaction_metadata(tool_name, original_chars)
 
     if not isinstance(parsed_result, dict):
         return result_json, metadata
@@ -196,66 +262,52 @@ def compact_tool_output(tool_name: str, result_json: str) -> tuple[str, dict[str
 
     summary = summarize_tool_result(tool_name, parsed_result)
     list_count = _primary_list_count(parsed_result)
-    should_reference = (
-        original_chars >= REFERENCE_CHAR_THRESHOLD
-        or list_count >= REFERENCE_LIST_THRESHOLD
-    )
-    should_summarize = (
-        original_chars >= SUMMARY_CHAR_THRESHOLD
-        or tool_name in {"list_todos", "list_expenses", "list_daily_logs"}
-        and list_count > 8
-        or tool_name == "recommend_activities"
-        and list_count > 3
+    strategy = _select_compaction_strategy(
+        tool_name,
+        original_chars=original_chars,
+        list_count=list_count,
     )
 
-    if should_reference:
+    if strategy == "reference":
         ref_id = save_context_ref(
             tool_name=tool_name,
             full_result=parsed_result,
             summary=summary,
         )
-        compacted = {
-            "ok": True,
-            "action": parsed_result.get("action", tool_name),
-            "compacted": True,
-            "compaction_strategy": "reference",
-            "ref_id": ref_id,
-            "summary": summary,
-            "hint": "Use read_context_ref if exact records are needed.",
-        }
-        compacted_json = json.dumps(compacted, ensure_ascii=False)
-        metadata.update(
-            {
-                "strategy": "reference",
-                "compacted_chars": len(compacted_json),
-                "ref_id": ref_id,
-                "summary": summary,
-            }
+        payload = _build_compacted_payload(
+            tool_name,
+            parsed_result,
+            summary,
+            strategy=strategy,
+            ref_id=ref_id,
         )
-        return compacted_json, metadata
+        return _finish_compaction(
+            payload,
+            metadata,
+            strategy=strategy,
+            summary=summary,
+            ref_id=ref_id,
+        )
 
-    if should_summarize:
-        compacted = {
-            "ok": True,
-            "action": parsed_result.get("action", tool_name),
-            "compacted": True,
-            "compaction_strategy": "summary",
-            "summary": summary,
-        }
-        compacted_json = json.dumps(compacted, ensure_ascii=False)
-        metadata.update(
-            {
-                "strategy": "summary",
-                "compacted_chars": len(compacted_json),
-                "summary": summary,
-            }
+    if strategy == "summary":
+        payload = _build_compacted_payload(
+            tool_name,
+            parsed_result,
+            summary,
+            strategy=strategy,
         )
-        return compacted_json, metadata
+        return _finish_compaction(
+            payload,
+            metadata,
+            strategy=strategy,
+            summary=summary,
+        )
 
     return result_json, metadata
 
 
 def summarize_context_messages(messages: list[Any]) -> dict[str, Any]:
+    """Describe current message composition without copying full context into Event."""
     type_counts: Counter[str] = Counter()
     tool_outputs: list[dict[str, Any]] = []
 
@@ -269,7 +321,7 @@ def summarize_context_messages(messages: list[Any]) -> dict[str, Any]:
         if message.get("type") == "function_call_output":
             output = message.get("output", "")
             output_text = str(output)
-            parsed = _parse_tool_result(output_text)
+            parsed = parse_json_object(output_text)
             tool_outputs.append(
                 {
                     "call_id": message.get("call_id"),

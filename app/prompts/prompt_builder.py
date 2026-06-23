@@ -2,13 +2,13 @@ from dataclasses import dataclass
 
 from app.prompts.system_prompt import CORE_PROMPT, CONTEXT_REF_PROMPT
 from app.skills.skill_loader import SkillMetadata, load_skill
-from app.skills.skill_router import RoutingDecision, route_skills
 
 
 @dataclass(frozen=True)
 class PromptBuildResult:
+    """Rendered instructions plus metadata about loaded Skill content."""
+
     instructions: str
-    routing: RoutingDecision
     loaded_skills: tuple[str, ...]
     prompt_chars: int
 
@@ -23,24 +23,28 @@ def _skill_catalog(skills: dict[str, SkillMetadata]) -> str:
 
 
 def build_system_prompt(
-    user_input: str,
     available_skills: dict[str, SkillMetadata],
+    loaded_skills: tuple[str, ...] | list[str],
 ) -> PromptBuildResult:
-    routing = route_skills(user_input, available_skills)
-    prompt_parts = [CORE_PROMPT, CONTEXT_REF_PROMPT, _skill_catalog(available_skills)]
-    loaded_skills: list[str] = []
+    """Combine the core prompt with only the selected Skill bodies."""
+    selected_skills = tuple(dict.fromkeys(loaded_skills))
+    unknown_skills = set(selected_skills) - set(available_skills)
+    if unknown_skills:
+        raise ValueError(f"Unknown skills in prompt request: {sorted(unknown_skills)}")
 
-    for skill_name in routing.selected:
+    prompt_parts = [CORE_PROMPT, CONTEXT_REF_PROMPT, _skill_catalog(available_skills)]
+    loaded_skill_names: list[str] = []
+
+    for skill_name in selected_skills:
         skill = load_skill(available_skills[skill_name])
         prompt_parts.append(
             f"Loaded skill: {skill.metadata.name}\n\n{skill.instructions}"
         )
-        loaded_skills.append(skill_name)
+        loaded_skill_names.append(skill_name)
 
     instructions = "\n\n".join(prompt_parts)
     return PromptBuildResult(
         instructions=instructions,
-        routing=routing,
-        loaded_skills=tuple(loaded_skills),
+        loaded_skills=tuple(loaded_skill_names),
         prompt_chars=len(instructions),
     )

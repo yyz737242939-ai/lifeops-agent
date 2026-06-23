@@ -10,6 +10,8 @@ MAX_SELECTED_SKILLS = 4
 
 @dataclass(frozen=True)
 class RoutingRule:
+    """Deterministic phrase rule contributing to one Skill score."""
+
     pattern: Pattern[str]
     reason: str
     weight: int = 1
@@ -17,6 +19,8 @@ class RoutingRule:
 
 @dataclass(frozen=True)
 class RoutingDecision:
+    """Selected Skills with scores and human-readable match reasons."""
+
     selected: tuple[str, ...]
     scores: dict[str, int]
     reasons: dict[str, tuple[str, ...]]
@@ -55,6 +59,7 @@ def route_skills(
     available_skills: dict[str, SkillMetadata],
     max_selected: int = MAX_SELECTED_SKILLS,
 ) -> RoutingDecision:
+    """Select Skills using deterministic domain phrase scoring."""
     scores: dict[str, int] = {}
     reasons: dict[str, tuple[str, ...]] = {}
 
