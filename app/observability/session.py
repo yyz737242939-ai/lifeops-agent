@@ -35,7 +35,7 @@ def start_logging_session() -> dict[str, Path]:
         metadata = {
             "session_id": _session_id,
             "started_at": _started_at,
-            "format_version": 2,
+            "format_version": 3,
             "channels": ["events", "llm", "application"],
         }
         (_session_dir / "metadata.json").write_text(

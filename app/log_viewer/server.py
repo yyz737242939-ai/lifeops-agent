@@ -14,10 +14,16 @@ from app.utils.json_file import read_json_file
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SESSION_DIR = PROJECT_ROOT / "logs" / "sessions"
 LEGACY_CONVERSATION_DIR = PROJECT_ROOT / "logs" / "conversations"
+UAT_ARTIFACT_DIR = PROJECT_ROOT / "artifacts" / "user_acceptance"
 # Kept as a patch point for legacy viewer tests and old integrations.
 CONVERSATION_DIR = LEGACY_CONVERSATION_DIR
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 SESSION_ID_PATTERN = re.compile(r"^session_[0-9_]+$")
+UAT_RUN_ID_PATTERN = re.compile(r"^run_[0-9A-Za-z_.-]+$")
+UAT_CASE_ID_PATTERN = re.compile(r"^UAT-[0-9]{3}$")
+UAT_VIEWER_ID_PATTERN = re.compile(
+    r"^uat__(run_[0-9A-Za-z_.-]+)__(UAT-[0-9]{3})__(session_[0-9_]+)$"
+)
 KINDS = {"events", "llm", "application", "trace", "raw"}
 NEW_LOG_FILES = {
     "events": "events.jsonl",
@@ -89,6 +95,10 @@ def _list_current_sessions() -> list[dict]:
         sessions.append(
             {
                 "session_id": path.name,
+                "viewer_id": path.name,
+                "source": "application",
+                "run_id": None,
+                "case_id": None,
                 "started_at": metadata.get("started_at"),
                 "has_events": (path / "events.jsonl").exists(),
                 "has_llm": (path / "llm.jsonl").exists(),
@@ -96,6 +106,47 @@ def _list_current_sessions() -> list[dict]:
                 "legacy": False,
             }
         )
+    return sessions
+
+
+def _list_uat_sessions() -> list[dict]:
+    """Discover isolated acceptance-test sessions without moving their logs."""
+    if not UAT_ARTIFACT_DIR.exists():
+        return []
+    sessions = []
+    for run_dir in UAT_ARTIFACT_DIR.iterdir():
+        if not run_dir.is_dir() or not UAT_RUN_ID_PATTERN.fullmatch(run_dir.name):
+            continue
+        for case_dir in run_dir.iterdir():
+            if not case_dir.is_dir() or not UAT_CASE_ID_PATTERN.fullmatch(case_dir.name):
+                continue
+            session_root = case_dir / "logs" / "sessions"
+            if not session_root.exists():
+                continue
+            for session_dir in session_root.iterdir():
+                if (
+                    not session_dir.is_dir()
+                    or not SESSION_ID_PATTERN.fullmatch(session_dir.name)
+                ):
+                    continue
+                metadata = _read_first_metadata((session_dir / "metadata.json",))
+                viewer_id = (
+                    f"uat__{run_dir.name}__{case_dir.name}__{session_dir.name}"
+                )
+                sessions.append(
+                    {
+                        "session_id": session_dir.name,
+                        "viewer_id": viewer_id,
+                        "source": "uat",
+                        "run_id": run_dir.name,
+                        "case_id": case_dir.name,
+                        "started_at": metadata.get("started_at"),
+                        "has_events": (session_dir / "events.jsonl").exists(),
+                        "has_llm": (session_dir / "llm.jsonl").exists(),
+                        "has_application": (session_dir / "application.log").exists(),
+                        "legacy": False,
+                    }
+                )
     return sessions
 
 
@@ -121,6 +172,10 @@ def _list_legacy_sessions() -> list[dict]:
         sessions.append(
             {
                 "session_id": session_id,
+                "viewer_id": session_id,
+                "source": "legacy",
+                "run_id": None,
+                "case_id": None,
                 "started_at": metadata.get("started_at"),
                 "has_events": trace_path.exists(),
                 "has_llm": raw_path.exists(),
@@ -135,12 +190,23 @@ def _list_legacy_sessions() -> list[dict]:
 
 def list_sessions() -> list[dict]:
     """List current and legacy sessions in newest-first identifier order."""
-    sessions = _list_current_sessions() + _list_legacy_sessions()
-    return sorted(sessions, key=lambda item: item["session_id"], reverse=True)
+    sessions = _list_current_sessions() + _list_uat_sessions() + _list_legacy_sessions()
+    return sorted(
+        sessions,
+        key=lambda item: (item.get("started_at") or "", item["session_id"]),
+        reverse=True,
+    )
 
 
 def _load_current_log(session_id: str, kind: str) -> dict:
-    session_path = SESSION_DIR / session_id
+    return _load_log_from_session_dir(SESSION_DIR / session_id, session_id, kind)
+
+
+def _load_log_from_session_dir(
+    session_path: Path,
+    session_id: str,
+    kind: str,
+) -> dict:
     path = session_path / NEW_LOG_FILES[kind]
     if not path.exists():
         raise FileNotFoundError(path)
@@ -166,10 +232,28 @@ def _load_legacy_log(session_id: str, kind: str) -> dict:
 
 def load_session_log(session_id: str, kind: str) -> dict:
     """Load one channel while safely mapping historical channel names."""
-    if not SESSION_ID_PATTERN.fullmatch(session_id):
-        raise ValueError("Invalid session id")
     if kind not in KINDS:
         raise ValueError("Invalid log kind")
+    uat_match = UAT_VIEWER_ID_PATTERN.fullmatch(session_id)
+    if uat_match:
+        if kind not in NEW_LOG_FILES:
+            raise ValueError("Invalid log kind for UAT session")
+        run_id, case_id, actual_session_id = uat_match.groups()
+        session_path = (
+            UAT_ARTIFACT_DIR
+            / run_id
+            / case_id
+            / "logs"
+            / "sessions"
+            / actual_session_id
+        )
+        return _load_log_from_session_dir(
+            session_path,
+            actual_session_id,
+            kind,
+        )
+    if not SESSION_ID_PATTERN.fullmatch(session_id):
+        raise ValueError("Invalid session id")
     if kind in NEW_LOG_FILES:
         try:
             return _load_current_log(session_id, kind)

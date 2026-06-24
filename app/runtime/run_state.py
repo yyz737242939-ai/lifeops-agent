@@ -90,9 +90,9 @@ class ActionRecord:
     status: ActionStatus
     result: Any = None
     error: Any = None
-    signature: str | None = None
-    observation_signature: str | None = None
-    attempt_count: int = 1
+    tool_call_signature: str | None = None
+    tool_observation_signature: str | None = None
+    tool_execution_attempt_count: int = 1
     idempotency_key: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -103,9 +103,9 @@ class ActionRecord:
             "status": self.status.value,
             "result": self.result,
             "error": self.error,
-            "signature": self.signature,
-            "observation_signature": self.observation_signature,
-            "attempt_count": self.attempt_count,
+            "tool_call_signature": self.tool_call_signature,
+            "tool_observation_signature": self.tool_observation_signature,
+            "tool_execution_attempt_count": self.tool_execution_attempt_count,
             "idempotency_key": self.idempotency_key,
         }
 
@@ -116,51 +116,57 @@ class RunState:
 
     run_id: str = field(default_factory=lambda: f"run_{uuid4().hex}")
     status: RunStatus = RunStatus.RUNNING
-    llm_rounds: int = 0
-    total_tool_calls: int = 0
-    actions: list[ActionRecord] = field(default_factory=list)
+    chat_llm_round_count: int = 0
+    chat_tool_execution_attempt_count: int = 0
+    action_records: list[ActionRecord] = field(default_factory=list)
     stop_reason: StopReason | None = None
-    llm_attempts: int = 0
-    retry_counts: dict[str, int] = field(default_factory=dict)
-    call_signature_counts: dict[str, int] = field(default_factory=dict)
-    observation_signature_counts: dict[str, int] = field(default_factory=dict)
-    recent_call_signatures: list[str] = field(default_factory=list)
-    cancel_requested: bool = False
+    chat_llm_request_count: int = 0
+    chat_retry_counts_by_operation: dict[str, int] = field(default_factory=dict)
+    tool_call_signature_counts: dict[str, int] = field(default_factory=dict)
+    tool_observation_signature_counts: dict[str, int] = field(default_factory=dict)
+    recent_tool_call_signatures: list[str] = field(default_factory=list)
+    chat_cancellation_requested: bool = False
 
     @property
-    def completed_actions(self) -> list[ActionRecord]:
+    def completed_action_records(self) -> list[ActionRecord]:
         return [
-            action for action in self.actions if action.status == ActionStatus.COMPLETED
+            action
+            for action in self.action_records
+            if action.status == ActionStatus.COMPLETED
         ]
 
     @property
-    def failed_actions(self) -> list[ActionRecord]:
+    def failed_action_records(self) -> list[ActionRecord]:
         return [
-            action for action in self.actions if action.status == ActionStatus.FAILED
+            action
+            for action in self.action_records
+            if action.status == ActionStatus.FAILED
         ]
 
     @property
-    def skipped_actions(self) -> list[ActionRecord]:
+    def skipped_action_records(self) -> list[ActionRecord]:
         return [
-            action for action in self.actions if action.status == ActionStatus.SKIPPED
+            action
+            for action in self.action_records
+            if action.status == ActionStatus.SKIPPED
         ]
 
     def can_start_llm_round(self, limits: LoopLimits) -> bool:
         return (
             self.status == RunStatus.RUNNING
-            and self.llm_rounds < limits.max_llm_rounds
+            and self.chat_llm_round_count < limits.max_llm_rounds
         )
 
     def start_llm_round(self, limits: LoopLimits) -> int:
         if not self.can_start_llm_round(limits):
             raise RuntimeError("LLM round budget exhausted")
-        self.llm_rounds += 1
-        return self.llm_rounds
+        self.chat_llm_round_count += 1
+        return self.chat_llm_round_count
 
-    def start_llm_attempt(self) -> int:
+    def start_llm_request(self) -> int:
         self._ensure_running()
-        self.llm_attempts += 1
-        return self.llm_attempts
+        self.chat_llm_request_count += 1
+        return self.chat_llm_request_count
 
     def can_start_tool_call(
         self,
@@ -171,7 +177,7 @@ class RunState:
         return (
             self.status == RunStatus.RUNNING
             and calls_started_this_round < limits.max_tool_calls_per_round
-            and self.total_tool_calls < limits.max_total_tool_calls
+            and self.chat_tool_execution_attempt_count < limits.max_total_tool_calls
         )
 
     def start_tool_call(
@@ -185,41 +191,42 @@ class RunState:
             calls_started_this_round=calls_started_this_round,
         ):
             raise RuntimeError("Tool call budget exhausted")
-        self.total_tool_calls += 1
+        self.chat_tool_execution_attempt_count += 1
 
     def add_action(self, action: ActionRecord) -> None:
         if self.status != RunStatus.RUNNING:
             raise RuntimeError("Cannot add an action to a terminal run")
-        self.actions.append(action)
+        self.action_records.append(action)
 
     def register_call(self, tool_name: str, arguments: Any) -> tuple[str, int, bool]:
         signature = stable_signature({"tool": tool_name, "arguments": arguments})
-        count = self.call_signature_counts.get(signature, 0) + 1
-        self.call_signature_counts[signature] = count
+        count = self.tool_call_signature_counts.get(signature, 0) + 1
+        self.tool_call_signature_counts[signature] = count
         cycle_detected = (
-            len(self.recent_call_signatures) >= 3
-            and self.recent_call_signatures[-3] == self.recent_call_signatures[-1]
-            and self.recent_call_signatures[-2] == signature
+            len(self.recent_tool_call_signatures) >= 3
+            and self.recent_tool_call_signatures[-3]
+            == self.recent_tool_call_signatures[-1]
+            and self.recent_tool_call_signatures[-2] == signature
         )
-        self.recent_call_signatures.append(signature)
+        self.recent_tool_call_signatures.append(signature)
         return signature, count, cycle_detected
 
     def register_observation(self, call_signature: str, result: Any) -> tuple[str, int]:
         signature = stable_signature(
             {"call_signature": call_signature, "result": result}
         )
-        count = self.observation_signature_counts.get(signature, 0) + 1
-        self.observation_signature_counts[signature] = count
+        count = self.tool_observation_signature_counts.get(signature, 0) + 1
+        self.tool_observation_signature_counts[signature] = count
         return signature, count
 
     def record_retry(self, key: str) -> int:
-        count = self.retry_counts.get(key, 0) + 1
-        self.retry_counts[key] = count
+        count = self.chat_retry_counts_by_operation.get(key, 0) + 1
+        self.chat_retry_counts_by_operation[key] = count
         return count
 
     def request_cancel(self) -> None:
         if self.status == RunStatus.RUNNING:
-            self.cancel_requested = True
+            self.chat_cancellation_requested = True
 
     def complete(self) -> None:
         self._ensure_running()
@@ -242,20 +249,27 @@ class RunState:
 
     def to_dict(self, *, include_actions: bool = True) -> dict[str, Any]:
         result: dict[str, Any] = {
+            "state_scope": "single_agent_chat",
             "run_id": self.run_id,
             "status": self.status.value,
-            "llm_rounds": self.llm_rounds,
-            "total_tool_calls": self.total_tool_calls,
-            "llm_attempts": self.llm_attempts,
-            "completed_action_count": len(self.completed_actions),
-            "failed_action_count": len(self.failed_actions),
-            "skipped_action_count": len(self.skipped_actions),
+            "chat_llm_round_count": self.chat_llm_round_count,
+            "chat_llm_request_count": self.chat_llm_request_count,
+            "chat_tool_execution_attempt_count": (
+                self.chat_tool_execution_attempt_count
+            ),
+            "chat_completed_action_count": len(self.completed_action_records),
+            "chat_failed_action_count": len(self.failed_action_records),
+            "chat_skipped_action_count": len(self.skipped_action_records),
             "stop_reason": self.stop_reason.value if self.stop_reason else None,
-            "retry_counts": dict(self.retry_counts),
-            "cancel_requested": self.cancel_requested,
+            "chat_retry_counts_by_operation": dict(
+                self.chat_retry_counts_by_operation
+            ),
+            "chat_cancellation_requested": self.chat_cancellation_requested,
         }
         if include_actions:
-            result["actions"] = [action.to_dict() for action in self.actions]
+            result["action_records"] = [
+                action.to_dict() for action in self.action_records
+            ]
         return result
 
 

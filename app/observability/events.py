@@ -72,30 +72,39 @@ class EventLogger:
         self._write_log_event(
             "llm.requested",
             run_state,
-            loop=loop,
+            chat_llm_round_number=loop,
             context=context,
             run_state=run_state.to_dict(include_actions=False),
         )
 
     def log_llm_attempted(
-        self, run_state: Any, loop: int, attempt: int, retry_index: int
+        self, run_state: Any, loop: int, request_number: int, retry_index: int
     ) -> None:
         self._write_log_event(
             "llm.attempted",
             run_state,
-            loop=loop,
-            attempt=attempt,
-            retry_index=retry_index,
+            chat_llm_round_number=loop,
+            chat_llm_request_number=request_number,
+            llm_request_retry_index_in_round=retry_index,
         )
 
     def log_llm_responded(self, run_state: Any, loop: int, output: Any) -> None:
-        self._write_log_event("llm.responded", run_state, loop=loop, output=output)
+        self._write_log_event(
+            "llm.responded",
+            run_state,
+            chat_llm_round_number=loop,
+            output=output,
+        )
 
     def log_llm_failed(
-        self, run_state: Any, loop: int, attempt: int, error: Any
+        self, run_state: Any, loop: int, request_number: int, error: Any
     ) -> None:
         self._write_log_event(
-            "llm.failed", run_state, loop=loop, attempt=attempt, error=error
+            "llm.failed",
+            run_state,
+            chat_llm_round_number=loop,
+            chat_llm_request_number=request_number,
+            error=error,
         )
 
     def log_llm_retry_scheduled(
@@ -104,8 +113,8 @@ class EventLogger:
         self._write_log_event(
             "llm.retry_scheduled",
             run_state,
-            loop=loop,
-            retry_count=retry_count,
+            chat_llm_round_number=loop,
+            llm_request_retry_count_for_round=retry_count,
             error=error,
         )
 
@@ -121,8 +130,8 @@ class EventLogger:
         self._write_log_event(
             "tool.started",
             run_state,
-            loop=loop,
-            attempt=attempt,
+            chat_llm_round_number=loop,
+            tool_execution_attempt_number_for_action=attempt,
             call_id=call.call_id,
             tool=call.name,
             arguments=arguments,
@@ -135,7 +144,7 @@ class EventLogger:
         self._write_log_event(
             "tool.denied",
             run_state,
-            loop=loop,
+            chat_llm_round_number=loop,
             call_id=call.call_id,
             tool=call.name,
             arguments=arguments,
@@ -149,7 +158,7 @@ class EventLogger:
         self._write_log_event(
             "tool.failed",
             run_state,
-            loop=loop,
+            chat_llm_round_number=loop,
             call_id=call.call_id,
             tool=call.name,
             arguments=call.arguments,
@@ -163,10 +172,10 @@ class EventLogger:
         self._write_log_event(
             "tool.retry_scheduled",
             run_state,
-            loop=loop,
+            chat_llm_round_number=loop,
             call_id=call.call_id,
             tool=call.name,
-            retry_count=retry_count,
+            tool_retry_count_for_action=retry_count,
             error=error,
         )
 
@@ -182,13 +191,18 @@ class EventLogger:
         self._write_log_event(
             event,
             run_state,
-            loop=loop,
+            chat_llm_round_number=loop,
             action=action,
             context_compaction=context_compaction,
         )
 
     def log_tool_skipped(self, run_state: Any, loop: int, action: Any) -> None:
-        self._write_log_event("tool.skipped", run_state, loop=loop, action=action)
+        self._write_log_event(
+            "tool.skipped",
+            run_state,
+            chat_llm_round_number=loop,
+            action=action,
+        )
 
     def log_final_answer(self, run_state: Any, content: str) -> None:
         self._write_log_event("run.final_answer", run_state, role="assistant", content=content)

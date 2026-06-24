@@ -82,7 +82,8 @@ input { padding: 10px 12px; }
 select { padding: 9px 34px 9px 11px; }
 input:focus, select:focus { border-color: #577c79; box-shadow: 0 0 0 3px rgba(122, 224, 184, 0.08); }
 
-.session-list { height: calc(100vh - 154px); overflow-y: auto; padding: 2px 4px 40px; }
+.compact-filter { margin-bottom: 10px; }
+.session-list { height: calc(100vh - 292px); overflow-y: auto; padding: 2px 4px 40px; }
 .session-item {
   width: 100%;
   margin-bottom: 7px;
@@ -98,6 +99,7 @@ input:focus, select:focus { border-color: #577c79; box-shadow: 0 0 0 3px rgba(12
 .session-item.active { border-color: rgba(122, 224, 184, 0.35); background: var(--accent-soft); }
 .session-item strong { display: block; overflow: hidden; font-size: 12px; text-overflow: ellipsis; }
 .session-item time { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; }
+.session-source { display: block; margin-top: 5px; overflow: hidden; color: var(--blue); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .file-dots { display: flex; gap: 5px; margin-top: 9px; }
 .file-dot { padding: 2px 6px; border-radius: 8px; color: var(--muted); background: #252c39; font-size: 9px; }
 .file-dot.ready { color: var(--accent); background: rgba(122, 224, 184, 0.1); }
@@ -142,10 +144,11 @@ input:focus, select:focus { border-color: #577c79; box-shadow: 0 0 0 3px rgba(12
 }
 .secondary-button:hover { border-color: #49556b; }
 
-.summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+.summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 20px; }
 .summary-card { padding: 15px 17px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
 .summary-card span { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em; }
 .summary-card strong { display: block; margin-top: 7px; font-size: 19px; }
+.summary-card.scope-card strong { color: var(--accent); font-size: 15px; }
 
 .events { display: grid; gap: 10px; }
 .event-card { overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }

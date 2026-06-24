@@ -59,10 +59,28 @@ class RunStateTests(unittest.TestCase):
 
         self.assertEqual(state.status, RunStatus.COMPLETED)
         self.assertEqual(state.stop_reason, StopReason.COMPLETED)
-        self.assertEqual(state.llm_rounds, 1)
-        self.assertEqual(state.total_tool_calls, 1)
-        self.assertEqual(len(state.completed_actions), 1)
-        self.assertEqual(state.to_dict()["actions"][0]["status"], "completed")
+        self.assertEqual(state.chat_llm_round_count, 1)
+        self.assertEqual(state.chat_tool_execution_attempt_count, 1)
+        self.assertEqual(len(state.completed_action_records), 1)
+        self.assertEqual(
+            state.to_dict()["action_records"][0]["status"],
+            "completed",
+        )
+
+    def test_serialized_field_names_explain_chat_scope_and_counter_meaning(self) -> None:
+        state = RunState(run_id="run-test")
+        serialized = state.to_dict()
+
+        self.assertEqual(serialized["state_scope"], "single_agent_chat")
+        self.assertIn("chat_llm_round_count", serialized)
+        self.assertIn("chat_llm_request_count", serialized)
+        self.assertIn("chat_tool_execution_attempt_count", serialized)
+        self.assertIn("chat_retry_counts_by_operation", serialized)
+        self.assertIn("action_records", serialized)
+        self.assertNotIn("llm_rounds", serialized)
+        self.assertNotIn("llm_attempts", serialized)
+        self.assertNotIn("total_tool_calls", serialized)
+        self.assertNotIn("actions", serialized)
 
     def test_enforces_per_round_and_total_tool_budgets(self) -> None:
         limits = LoopLimits(

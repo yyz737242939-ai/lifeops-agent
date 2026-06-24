@@ -44,9 +44,9 @@ class AgentLoopSkeletonTests(unittest.TestCase):
         assert state is not None
         self.assertEqual(state.status, RunStatus.COMPLETED)
         self.assertEqual(state.stop_reason, StopReason.COMPLETED)
-        self.assertEqual(state.llm_rounds, 2)
-        self.assertEqual(state.total_tool_calls, 1)
-        self.assertEqual(state.actions[0].status, ActionStatus.COMPLETED)
+        self.assertEqual(state.chat_llm_round_count, 2)
+        self.assertEqual(state.chat_tool_execution_attempt_count, 1)
+        self.assertEqual(state.action_records[0].status, ActionStatus.COMPLETED)
 
         started_state = log_event.log_run_started.call_args.args[0]
         completed_state = log_event.log_run_completed.call_args.args[0]
@@ -79,7 +79,7 @@ class AgentLoopSkeletonTests(unittest.TestCase):
         assert state is not None
         self.assertEqual(state.status, RunStatus.PARTIAL)
         self.assertEqual(state.stop_reason, StopReason.LLM_BUDGET_EXHAUSTED)
-        self.assertEqual(len(state.completed_actions), 1)
+        self.assertEqual(len(state.completed_action_records), 1)
         self.assertIn("已保留 1 个成功的工具结果", answer)
         self.assertEqual(create_response.call_count, 1)
 
@@ -110,9 +110,9 @@ class AgentLoopSkeletonTests(unittest.TestCase):
         assert state is not None
         self.assertEqual(state.status, RunStatus.PARTIAL)
         self.assertEqual(state.stop_reason, StopReason.TOOL_BUDGET_EXHAUSTED)
-        self.assertEqual(state.total_tool_calls, 1)
+        self.assertEqual(state.chat_tool_execution_attempt_count, 1)
         self.assertEqual(
-            [action.status for action in state.actions],
+            [action.status for action in state.action_records],
             [ActionStatus.COMPLETED, ActionStatus.SKIPPED],
         )
         self.assertIn("工具调用数量已达到限制", answer)

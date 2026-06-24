@@ -16,6 +16,21 @@
             <p>Agent Log Viewer</p>
           </div>
         </header>
+        <label class="search-box compact-filter">
+          <span>来源</span>
+          <select id="source-filter">
+            <option value="all">全部日志</option>
+            <option value="application">普通运行</option>
+            <option value="uat">验收测试</option>
+            <option value="legacy">历史日志</option>
+          </select>
+        </label>
+        <label class="search-box compact-filter">
+          <span>测试运行</span>
+          <select id="run-filter">
+            <option value="all">全部测试运行</option>
+          </select>
+        </label>
         <label class="search-box">
           <span>会话</span>
           <input id="session-search" type="search" placeholder="搜索会话…">
