@@ -4,10 +4,19 @@ from unittest.mock import patch
 
 from app.agents.agent import Agent
 from app.tools.capability_builder import COMMON_TOOL_NAMES, SKILL_TOOL_NAMES
+from app.tools.tool import TOOLS, ToolEffect
 
 
 def _tool_names(call) -> set[str]:
     return {schema["name"] for schema in call.kwargs["tools"]}
+
+
+def _read_tools(skill_name: str) -> set[str]:
+    return set(COMMON_TOOL_NAMES) | {
+        name
+        for name in SKILL_TOOL_NAMES[skill_name]
+        if TOOLS[name].effect == ToolEffect.READ
+    }
 
 
 class AgentSkillStateTests(unittest.TestCase):
@@ -28,9 +37,8 @@ class AgentSkillStateTests(unittest.TestCase):
 
         first_tools = _tool_names(create_response.call_args_list[0])
         second_tools = _tool_names(create_response.call_args_list[1])
-        expected = set(COMMON_TOOL_NAMES | SKILL_TOOL_NAMES["todo"])
-        self.assertEqual(first_tools, expected)
-        self.assertEqual(second_tools, expected)
+        self.assertEqual(first_tools, _read_tools("todo"))
+        self.assertEqual(second_tools, _read_tools("todo") | {"complete_todo"})
         self.assertEqual(agent.active_skills, ("todo",))
 
         routing_calls = log_event.log_routing_resolved.call_args_list
@@ -60,7 +68,7 @@ class AgentSkillStateTests(unittest.TestCase):
         fallback_tools = _tool_names(create_response.call_args_list[2])
         self.assertEqual(
             finance_tools,
-            set(COMMON_TOOL_NAMES | SKILL_TOOL_NAMES["finance"]),
+            _read_tools("finance"),
         )
         self.assertTrue(finance_tools.isdisjoint(SKILL_TOOL_NAMES["todo"]))
         self.assertEqual(fallback_tools, set(COMMON_TOOL_NAMES))
@@ -95,7 +103,7 @@ class AgentSkillStateTests(unittest.TestCase):
         self.assertEqual(ref_tools, set(COMMON_TOOL_NAMES))
         self.assertEqual(
             continued_tools,
-            set(COMMON_TOOL_NAMES | SKILL_TOOL_NAMES["finance"]),
+            _read_tools("finance"),
         )
 
         routing_calls = log_event.log_routing_resolved.call_args_list

@@ -57,9 +57,9 @@ class AgentLoopReliabilityTests(unittest.TestCase):
         assert state is not None
         self.assertEqual(answer, "done")
         self.assertEqual(state.status, RunStatus.COMPLETED)
-        self.assertEqual(state.llm_rounds, 1)
-        self.assertEqual(state.llm_attempts, 2)
-        self.assertEqual(state.retry_counts["llm:1"], 1)
+        self.assertEqual(state.chat_llm_round_count, 1)
+        self.assertEqual(state.chat_llm_request_count, 2)
+        self.assertEqual(state.chat_retry_counts_by_operation["llm:1"], 1)
 
     @patch("app.agents.agent.llm_io")
     @patch("app.agents.agent.events")
@@ -82,7 +82,7 @@ class AgentLoopReliabilityTests(unittest.TestCase):
         assert state is not None
         self.assertEqual(state.status, RunStatus.PARTIAL)
         self.assertEqual(state.stop_reason, StopReason.LLM_REQUEST_FAILED)
-        self.assertEqual(len(state.completed_actions), 1)
+        self.assertEqual(len(state.completed_action_records), 1)
         self.assertIn("get_current_time", answer)
 
     @patch("app.agents.agent.llm_io")
@@ -114,9 +114,15 @@ class AgentLoopReliabilityTests(unittest.TestCase):
         assert state is not None
         self.assertEqual(answer, "done")
         self.assertEqual(function.call_count, 2)
-        self.assertEqual(state.actions[0].attempt_count, 2)
-        self.assertEqual(state.total_tool_calls, 2)
-        self.assertEqual(state.retry_counts["tool:call-1"], 1)
+        self.assertEqual(
+            state.action_records[0].tool_execution_attempt_count,
+            2,
+        )
+        self.assertEqual(state.chat_tool_execution_attempt_count, 2)
+        self.assertEqual(
+            state.chat_retry_counts_by_operation["tool:call-1"],
+            1,
+        )
 
     @patch("app.agents.agent.llm_io")
     @patch("app.agents.agent.events")
@@ -145,8 +151,11 @@ class AgentLoopReliabilityTests(unittest.TestCase):
         assert state is not None
         self.assertEqual(answer, "could not add")
         self.assertEqual(function.call_count, 1)
-        self.assertEqual(state.actions[0].attempt_count, 1)
-        self.assertNotIn("tool:call-1", state.retry_counts)
+        self.assertEqual(
+            state.action_records[0].tool_execution_attempt_count,
+            1,
+        )
+        self.assertNotIn("tool:call-1", state.chat_retry_counts_by_operation)
 
     @patch("app.agents.agent.llm_io")
     @patch("app.agents.agent.events")
@@ -201,7 +210,7 @@ class AgentLoopReliabilityTests(unittest.TestCase):
         state = agent.last_run_state
         assert state is not None
         self.assertEqual(state.stop_reason, StopReason.NO_PROGRESS)
-        self.assertEqual(len(state.failed_actions), 2)
+        self.assertEqual(len(state.failed_action_records), 2)
         self.assertIn("没有产生新进展", answer)
 
     @patch("app.agents.agent.llm_io")
@@ -226,7 +235,7 @@ class AgentLoopReliabilityTests(unittest.TestCase):
         state = agent.last_run_state
         assert state is not None
         self.assertEqual(state.stop_reason, StopReason.CANCELLED)
-        self.assertEqual(state.actions[0].status.value, "skipped")
+        self.assertEqual(state.action_records[0].status.value, "skipped")
         self.assertIn("已取消", answer)
 
 

@@ -1,405 +1,193 @@
 # LifeOps Agent 学习进度与计划
 
-## 如何使用
+## 文件职责
 
-本文件只记录已经学习的概念、已完成的学习阶段和未来计划。
+本文件只保留学习结论、当前问题和下一阶段计划。项目结构、实现细节与当前行为统一放在
+`PROJECT_CONTEXT.md`，不在这里重复维护。
 
-项目架构与各模块职责见：
+## 当前阶段
 
-```text
-D:\lifeops-agent\PROJECT_CONTEXT.md
-```
+第一阶段的Runtime基础已经结束。当前主线是：
 
-## 当前学习阶段
+> Context压缩、长期消息窗口，以及压缩后关键信息可恢复性。
 
-项目已经从“增加业务工具”进入“理解 Agent Runtime 的状态、能力边界和可靠性”。
+暂不横向增加业务工具，也不立即进入长期Memory、MCP或Multi-Agent。
 
-当前已完成：
+## 第一阶段已经建立的认识
 
-- 多轮 Skill 状态管理。
-- 动态 Tool Schema 与 Skill 权限。
-- Agent Loop v0.1 核心可靠性。
+### Agent Loop与状态边界
 
-下一阶段进入长期 Context 生命周期与最小 Memory State。
+- 一次用户输入可以触发多轮LLM请求和多次工具执行。
+- LLM逻辑轮次与实际API请求数不同；请求重试只增加后者。
+- RunState属于一次 `Agent.chat()`，Session、对话历史、RunState和长期Task State是不同层次。
+- Function Call是模型请求的Action；工具重试是同一Action的多次执行尝试。
 
-Routing Eval 的 Precision/Recall 与行为回归已经讨论过，但决定暂时不做正式 Eval。
-每个新功能仍保留少量关键自动化测试和能够暴露内部行为的手动测试。
+### Skill、Prompt与Capability
 
-## 已学习的核心概念
+- Skill提供领域规则，Tool提供真实能力，Capability决定本轮模型能看到和执行什么。
+- Skill正文应按需加载，避免无关Prompt和Schema占用Context。
+- 对话延续不能只靠历史文本，还需要明确的Runtime状态边界。
 
-1. Function Calling Agent Loop：模型输出工具调用，Agent 执行工具并把 Observation
-   返回模型，直到得到最终回答或达到循环上限。
-2. Tool Registry 与 Schema：工具实现、参数 Schema、结构化结果和错误处理之间的关系。
-3. Context Management：完整结果、结构化摘要、引用压缩和按需读取之间的取舍。
-4. Prompt 与对话记录分离：`instructions` 每次重新生成，`self.messages` 保存跨轮消息、
-   Function Call 和工具结果。
-5. Skill 渐进式披露：所有 Skill 只暴露简短元数据，选中后才加载完整正文。
-6. 确定性 Skill Routing：使用规则、分数和匹配原因选择一个或多个领域 Skill。
-7. 动态 Prompt Builder：根据最终 `loaded_skills` 构建最新 System Prompt，避免 Skill
-   正文在对话 Context 中重复累积。
-8. Skill 与 Tool 的边界：Skill 提供领域知识和编排规则，Tool 提供实际执行能力。
-9. Context Ref 与 Skill 的关系：Ref 是通用 Runtime 能力，Skill 只补充领域展开条件。
-10. Capability Scoping：Skill 映射为本轮可见工具，Schema 过滤减少干扰和 Context
-    开销，Runtime 授权检查守住实际执行边界。
-11. 多轮 Skill 状态：直接路由与 Runtime 状态分离，明确领域替换旧状态，含糊追问
-    继承状态，闲聊清理状态，Ref 请求使用最小能力但保留话题。
-12. RunState 与执行状态机：单次请求使用独立状态、预算、ActionRecord 和终止原因。
-13. 错误恢复：Runtime Retry 处理临时基础设施错误，LLM Correction 处理参数和业务反馈。
-14. 进展检测：稳定调用签名、Observation 签名和短周期检测用于阻止确定性死循环。
-15. 幂等与副作用：同一 Action 的重放与模型生成的新 Action 是不同问题；非幂等写不能
-    因结果不确定而盲目重试。
-16. 协作式取消：Runtime 可以在调用边界停止，但同步函数内部需要进程隔离才能强制终止。
+### 可靠性与副作用
 
-## 已完成阶段一：多轮 Skill 状态管理
+- Runtime Retry处理临时基础设施错误；把工具业务错误重新交给LLM属于模型纠正流程。
+- 幂等重放、重复Action和新的模型Action不是同一个问题。
+- 模型输出不可信，权限、写入授权、Ref来源和成功声明必须由Runtime校验。
+- 确定性签名能阻止完全重复，但不能替代语义级进展判断。
 
-已经实现：
+### 可观测性
 
-- Agent 保存上一轮活跃 Skill。
-- 区分 `directly_selected`、`inherited_skills` 和 `loaded_skills`。
-- 明确领域信号优先使用新的直接路由结果。
-- “第一个”“刚才那个”“继续”等含糊追问可以继承上一轮 Skill。
-- 明确切换领域时替换旧状态，普通闲聊清理状态。
-- 新 Agent 从空状态开始。
-- Ref-only 请求本轮只使用公共工具，同时保留活跃话题。
-- Event 记录状态解析原因和前后活跃 Skill。
+- Event用于理解执行决策，LLM I/O用于查看模型边界，Application日志用于程序诊断。
+- 日志字段必须表达统计作用域和统计对象，不能只写含糊的 `attempt` 或 `count`。
+- 原始SDK Response会回显Request配置；诊断日志应投影必要字段，而不是无差别保存整个对象。
 
-学习目标：
+## 当前Context知识地图
 
-- 对话历史与 Agent Runtime 状态的区别。
-- 单轮 Router 与多轮状态解析层的边界。
-- 话题延续、切换和 Skill 生命周期。
-- 继承策略的风险与安全 fallback。
+后续学习时先区分五类容易混在一起的内容：
 
-对应手动测试统一见：
+| 类型 | 作用 | 当前状态 |
+|---|---|---|
+| System Instructions | 本轮行为规则 | 每轮动态重建 |
+| Recent Conversation | 最近用户、助手和工具交互 | 全量保存在 `messages` |
+| Tool Observation | 工具返回的数据 | 已有none/summary/reference压缩 |
+| Conversation Summary | 被移出窗口的历史语义 | 尚未实现 |
+| Long-term Memory | 跨会话长期事实与偏好 | 尚未实现 |
 
-```text
-docs/manual_test_plan.md
-```
+当前最重要的认识：
 
-## 已完成阶段二：动态 Tool Schema 与 Skill 权限
+> Tool Result压缩解决“一次Observation太大”；长期Context管理解决“历史消息不断累积”。
+> 两者相关，但不是同一个机制。
 
-已经实现：
+## 下一阶段：Context压缩与长期窗口
 
-- 每个 Skill 都有显式的允许工具集合。
-- `read_context_ref` 和 `get_current_time` 等公共工具始终可用。
-- Capability Builder 根据最终 Skill 返回本轮 Tool Schema。
-- 未选中领域的工具默认不暴露给模型。
-- 无 Skill 时使用只保留公共工具的安全 fallback。
-- `call_tool` 执行前再次检查本轮授权。
-- Event 记录可见工具、Schema 大小和能力来源。
-- 本地 UI 可以配对查看 Event、LLM I/O 和 Application 三类日志。
+### 学习目标
 
-学习目标：
+1. 理解Responses API输入项如何组成真实Context。
+2. 理解字符数、token数、Context Window、输出预算和成本之间的关系。
+3. 区分无损裁剪、结构化摘要、有损摘要、引用存储和按需读取。
+4. 确定Function Call与Tool Observation必须成组保留的原因。
+5. 学会定义“摘要必须保留的信息”，而不只是追求更短。
+6. 理解摘要的生成、更新、替换、失效和恢复路径。
+7. 用轻量Eval证明压缩前后关键行为一致。
 
-- Capability Scoping 和最小权限原则。
-- Skill 与 Tool 的能力映射。
-- Tool Schema 的 Context 开销。
-- 模型可见性和 Runtime 权限之间的区别。
+### 第一部分：建立Context基线
 
-对应手动测试统一见：
+先测量，再设计压缩策略：
 
-```text
-docs/manual_test_plan.md
-```
+- 记录每轮发送的消息数、消息类型、JSON字符数和真实input tokens。
+- 区分instructions、tool schemas、最近对话、历史对话和tool outputs的占比。
+- 观察Prompt Caching是否存在，以及缓存命中对成本和延迟的影响。
+- 用短对话、10轮对话、大Tool Result三种场景建立基线。
 
-## 后续学习路线总览
+产出：一份小型Context预算报告，以及能回答“token主要花在哪里”的Event数据。
 
-后续不再优先横向增加业务工具，而是使用真实复杂场景纵向深化现有 Runtime：
+### 第二部分：定义压缩不变量
 
-```text
-Agent Loop 与 RunState（v0.1 核心完成）
--> 轻量 Eval 与可观测性（同步进行）
--> 长期 Context 生命周期
--> 最小 Memory State
--> Interaction / Safety State
--> Skill References 与受控脚本
--> Task State
--> 高级 Memory Retrieval
--> MCP
--> 复杂规划与 Multi-Agent
-```
+压缩前先给信息分类：
 
-采用螺旋式学习方式：
-
-```text
-简单实现
--> 制造压力和失败
--> 发现一个真实缺口
--> 增加最小机制
--> 使用 Event 验证
--> 固化为轻量 Eval
--> 进入下一个缺口
-```
-
-## 已完成阶段三：Agent Loop v0.1 核心可靠性
-
-已完成：
-
-- 单请求 `RunState`、ActionRecord、明确终态和结构化 StopReason。
-- LLM 轮数、单轮工具数、累计工具数和重试次数的独立预算。
-- 稳定调用签名、重复非幂等写拦截、相同 Observation 无进展检测和 A-B-A-B 循环检测。
-- 参数、业务、Not Found、权限、临时、超时和内部错误的结构化分类。
-- Runtime Retry 与 LLM 参数纠正的边界；SDK 隐式重试改为 Runtime 显式重试。
-- Tool Metadata：`effect`、`idempotent`、`retryable` 和 `timeout_seconds`。
-- 写工具成功结果的幂等键存储与重放。
-- LLM 与工具超时、协作式取消检查点。
-- 强制停止时保留并汇总成功、失败和跳过的 Action。
-- Event 记录 `run_id`、调用尝试、重试、错误、幂等键和停止原因。
-
-自动化与统一手动测试：
-
-```text
-tests/test_run_state.py
-tests/test_agent_loop_skeleton.py
-tests/test_agent_loop_reliability.py
-tests/test_tool_reliability.py
-docs/manual_test_plan.md
-```
-
-### Agent Loop 是否已经完全做好
-
-结论：**v0.1 单 Agent、顺序工具执行的核心 Loop 已经完成；广义的生产级 Agent Loop
-尚未完全完成。** 以下能力保留为以后出现真实需求后再深化：
-
-1. 工具依赖图、安全并行、并发写入控制和并行取消。
-2. RunState 持久化、进程崩溃恢复和跨进程继续执行。
-3. 事务型幂等、Outbox/Inbox 或补偿操作，覆盖“副作用成功但结果落盘前崩溃”的窗口。
-4. 能强制中断底层同步调用的进程隔离；当前取消仅在调用边界生效。
-5. 全局 wall-clock deadline、token/cost budget、流式输出和 backpressure。
-6. 超越确定性调用签名的语义级进展判断与计划偏航检测。
-
-这些不是进入长期 Context 和 Memory 阶段的阻塞项。
-
-## 贯穿阶段：轻量 Eval 与可观测性
-
-Eval 不作为等待所有功能完成后的独立工程，而是随每项 Runtime 机制同步增加。
-
-优先使用确定性行为断言：
-
-- 是否选择了正确 Skill 和工具。
-- 工具参数是否正确。
-- 写工具是否只执行一次。
-- 是否出现未授权工具。
-- 是否正确检测重复调用和停止。
-- 是否保留部分成功结果。
-- Context 压缩是否保留后续 Action 所需的 ID、日期、金额和 Ref。
-
-Trace 逐步增加：
-
-- `run_id` 和 RunState 摘要。
-- LLM 轮数、累计工具数和工具耗时。
-- 错误分类、重试次数与重试原因。
-- 状态变化和最终停止原因。
-
-正式 Routing Eval、Precision/Recall 和大规模 LLM-as-judge 评测继续暂缓。
-
-### 三通道日志系统
-
-已经完成第一版可观测性分层：
-
-- Event 使用 JSONL 追加写入，记录 Runtime 的关键结构化节点。
-- LLM I/O 只记录完整 request/response，不混入工具执行结果。
-- Application 使用 Python `logging` 记录程序进程和错误诊断信息。
-- 所有对外日志方法使用 `log_` 前缀，并按 run、routing、LLM、tool 分类。
-- Viewer 支持三类日志，同时兼容历史 Trace/Raw 文件。
-
-### 公共 Utils 整理
-
-- Memory Store 共享 JSON 文件校验、Pydantic 列表加载与保存。
-- JSON 文件使用同目录临时文件加原子替换，降低写入中断造成半文件的风险。
-- Context Ref 与幂等存储共享相同的 JSON object 读写规则。
-- 工具、Agent 与日志系统共享 JSON 安全序列化和 object 解析。
-- 时间字符串集中到轻量 time utils；业务 Store 仍保留各自的领域 CRUD。
-
-### Agent Loop 可读性整理
-
-- `chat()` 只保留创建 Run、准备本轮边界和运行 Loop 三个顶层步骤。
-- 使用 `TurnContext` 明确一轮内固定的 Prompt、Tool Schema、授权工具和 Skill。
-- LLM 失败分类与重试决策从请求循环中独立出来。
-- 工具执行拆分为前置检查、非法参数记录、重复检测、显式重试、Action 记录和后置检查。
-- 关键方法补充职责型 docstring；签名检测和幂等键补充设计原因注释。
-
-### Context Manager 可读性与策略测试
-
-- 将 JSON 解析、领域摘要、策略选择、Ref 持久化、payload 和 metadata 构造分离。
-- Summary/Reference 阈值集中声明，策略判定本身不执行文件 I/O。
-- 保持错误结果和 `read_context_ref` 完整输出不压缩的不变量。
-- 新增 inline、summary、reference、错误绕过和 Context 摘要的独立测试。
-
-### Tool Runtime 与业务目录分离
-
-- Registry 只保存 Tool Schema、函数引用、副作用和可靠性元数据。
-- Executor 独立处理授权、线程超时、幂等重放、异常归一化和结果序列化。
-- `tool.py` 保留业务工具定义与稳定导入门面，避免 Runtime 机制和业务实现交叉。
-- Activity 推荐拆分为硬约束过滤、偏好评分和稳定排序。
-- Skill State 将四种状态决策拆成命名明确的构造函数。
-- Viewer Server 将新旧会话发现与日志加载路径分开。
-- 删除不再被引用的旧 `conversation_logger.py` 兼容层。
-
-## 阶段四：长期 Context 生命周期
-
-Agent Loop v0.1 核心可靠性完成后，将长期 Context 提前到最小 Memory 之前研究，解决
-`self.messages` 随对话无限增长的问题。
-
-计划研究和实现：
-
-1. 区分最近消息窗口、历史对话摘要、结构化 Agent State、长期 Memory 和业务数据。
-2. 研究 Function Call 与 Observation 的窗口保留策略。
-3. 为压缩结果区分必须保留字段和可丢失的展示细节。
-4. 确保 Todo ID、Ref ID、日期、金额和待确认状态不会因摘要丢失。
-5. 研究摘要的生成、更新、失效和替换时机。
-6. 为 Context Ref 增加生命周期、过期和清理策略。
-7. 在真实 Prompt Budget 压力出现后，引入精确 tokenizer 统计。
+- 身份字段：Todo ID、Expense ID、Context Ref ID。
+- 决策字段：状态、优先级、日期、金额、排序依据。
+- 交互字段：待确认操作、用户选择、失败与取消状态。
+- 可恢复字段：完整结果存放位置、来源、有效期。
+- 展示字段：解释文字、重复描述和可重新生成内容。
 
 核心不变量：
 
 ```text
-Context 可以损失展示细节，但不能损失后续 Action 所需的信息。
+Context可以丢失展示细节，但不能丢失完成当前请求或后续Action所需的信息。
 ```
 
-完成标准：
+### 第三部分：改进Tool Observation压缩
 
-- 长对话不会导致 `self.messages` 无限增长。
-- 摘要前后关键 Agent 行为保持一致。
-- 压缩不会破坏后续工具调用。
-- Agent 能正确判断何时读取完整 Context Ref。
+当前体积阈值策略需要升级为“体积 + 用户需求 + 可恢复性”策略：
 
-## 阶段五：最小 Memory State
+1. 查询工具支持明确排序、分页和 `limit`，优先只取用户真正需要的记录。
+2. 摘要数量不能固定为5；必须考虑“用户要求几项”。
+3. 任何被截断且可能继续使用的结果，都应有Runtime签发的恢复路径。
+4. Summary与Reference的选择要考虑后续Action是否需要精确字段。
+5. `read_context_ref` 只能接受当前Runtime真实产生且仍有效的Ref。
+6. Ref增加来源、Session/Run归属、创建时间、过期和清理策略。
 
-第一版只保存用户明确表达、具有长期价值的信息，不立即引入向量数据库或自动记忆提取。
-
-第一批记忆类型：
-
-- 用户明确要求记住的事实。
-- 稳定偏好。
-- 稳定作息和工作时间。
-- 明确的长期目标。
-
-计划研究和实现：
-
-1. 建立包含类型、内容、来源、创建时间、更新时间和状态的 `MemoryItem`。
-2. 提供保存、查看、修改和删除 Memory 的明确工具。
-3. 为 Memory 写入实现幂等性和冲突处理。
-4. 区分 Memory、对话摘要、Task State 和 Todo 等业务数据。
-5. Trace 记录 Memory 的读取、写入和注入来源。
-6. 用户能够查看、纠正和删除 Agent 保存的记忆。
-
-暂时不实现：
-
-- 自动从所有对话中提取记忆。
-- 向量数据库和语义相似度检索。
-- 自动合并、衰减和遗忘算法。
-- 模型自主决定所有 Memory 写入。
-
-## 阶段六：Interaction State 与 Safety State
-
-研究 Agent 在缺少信息或需要用户批准时如何暂停并跨轮恢复。
-
-计划研究和实现：
-
-1. 使用结构化 `PendingInteraction` 保存缺失参数、候选对象和待确认操作。
-2. 支持确认、取消、修改范围和确认过期。
-3. 将工具分为只读、可逆写入和高影响写入。
-4. 高影响操作先预览，确认后执行。
-5. 真正执行前重新读取并校验外部业务状态。
-
-完成标准：
-
-- 含糊的高影响操作不会直接执行。
-- “只处理前三个”等追问能够基于结构化状态处理。
-- 用户可以查看、修改和取消待执行操作。
-
-## 阶段七：Skill References 与受控脚本
-
-先选择一个 Skill 进行 References 小型试点，不一次改造所有 Skill。建议使用 Finance：
+已确认的回归场景：
 
 ```text
-finance/
-├── SKILL.md
-├── references/
-│   ├── budget_rules.md
-│   └── expense_categories.md
-└── agents/
-    └── openai.yaml
+已有12条待办，用户要求“告诉我最值得先做的6项”。
 ```
 
-学习目标：
+当前摘要只保留5条，因此不能可靠回答第6项。后续应加入一个小型、确定性的测试，验证：
 
-- Skill 正文与 Reference 的边界。
-- 二级渐进式披露和按需加载。
-- Reference 的访问权限、Context 开销和 Trace。
+- 返回数量满足用户请求，或明确说明数据不足。
+- 第6项的标题、ID、优先级和日期来自真实数据。
+- 模型不能编造被摘要丢弃的记录。
 
-受控脚本现在已经具备所需的基础 Runtime 条件。第一个脚本应只读、确定性、无网络、使用
-固定参数并返回结构化 JSON。暂不提供任意 Shell 或自由文件读写能力。
+### 第四部分：实现长期消息窗口
 
-## 阶段八：Task State
-
-研究跨请求、可暂停、可恢复的长期任务状态，包括 Goal、Step、Dependency、Completed、
-Failed、Blocked 和 Next Action。
-
-关键边界：
+目标不是简单截断最旧消息，而是维护以下结构：
 
 ```text
-RunState：一次 chat() 请求的执行状态
-Task State：一个长期目标跨多次请求的整体进度
+稳定核心规则
++ 历史对话摘要
++ 最近完整消息窗口
++ 当前未完成交互状态
++ 当前请求相关的精确Tool Result或Ref
 ```
 
-完成标准：
+需要重点研究：
 
-- 新请求能够恢复同一个长期任务。
-- 已完成步骤不会无意义重做。
-- 用户可以查看、暂停、继续和取消任务。
+- 最近窗口按token而不是固定轮数控制。
+- User消息、Function Call和对应Observation不能被拆散。
+- 写入确认、失败结果和未完成选择不能被普通摘要吞掉。
+- 历史摘要更新后应替换旧摘要，而不是每轮继续叠加。
+- 数据发生修改后，旧摘要中的派生结论如何失效。
+- 摘要生成失败时如何安全退回完整窗口或确定性裁剪。
 
-## 阶段九：高级 Memory Retrieval
+### 第五部分：Context Eval
 
-在最小 Memory、Context 生命周期、Task State 和基础 Eval 稳定后，再研究：
+后续不再运行70例大规模UAT。每个Context机制只保留少量高信息量用例：
 
-- 自动记忆候选提取。
-- 语义检索和向量存储。
-- 记忆召回、排序和 Context 注入。
-- 冲突合并、置信度、衰减和遗忘。
-- Memory Precision / Recall 与错误记忆测试。
+1. 请求条数超过摘要默认上限。
+2. 摘要后继续完成指定Todo，ID必须正确。
+3. 摘要后追问某笔消费，金额和日期必须正确。
+4. 长对话后总结实际写入，只能包含成功WRITE Action。
+5. 压缩跨越批量删除确认时，确认范围不能丢失。
+6. Ref过期或非法时不能编造完整结果。
+7. 压缩前后工具选择、参数和最终事实保持一致。
 
-## 阶段十：MCP
+测试优先使用固定数据和确定性断言；只有验证模型行为时才运行少量真实LLM场景。
 
-当本地 Tool Runtime 稳定后，将一个 LifeOps 能力暴露为 MCP Server，并让 Agent 作为
-Client 调用，用来理解能力发现、Schema、传输、身份、权限和信任边界。
+## Context阶段完成标准
 
-## 最后阶段：复杂规划与 Multi-Agent
+- `Agent.messages` 不再随对话无界增长。
+- 每轮Context有可解释的token预算和组成。
+- Function Call与Observation配对关系不会被破坏。
+- 摘要后的事实、ID、金额、日期和待确认状态可验证。
+- 被截断的信息具有真实、受控、可过期的恢复路径。
+- 压缩前后关键工具选择和写入安全行为保持一致。
+- 长对话的input tokens相对当前全量历史有可测量下降。
 
-最后再研究 Planner / Executor、DAG、依赖调度、Agent 委派、共享状态、冲突处理和结果
-合并。
-
-进入条件：
-
-- 单 Agent Loop 已可靠。
-- Tool 副作用和审批受控。
-- Agent State 生命周期清晰。
-- 已有轻量行为 Eval。
-- Trace 能解释完整执行路径。
-
-## 当前近期执行顺序
+## 推荐执行顺序
 
 ```text
-当前：长期消息窗口、摘要与 Context 关键信息保留
-之后：显式 Memory CRUD、来源、冲突和删除
-之后：Interaction / Safety State
-之后：Skill References 与受控只读脚本
-
-同步进行：Trace 增强 + 少量行为 Eval
+1. Context组成与token基线
+2. Context不变量和字段分类
+3. 修复“固定5条摘要”问题
+4. Ref来源校验与生命周期
+5. 最近消息窗口 + 历史摘要
+6. 摘要更新、失效和恢复
+7. 小型Context行为回归
 ```
 
-## 暂缓但保留的方向
+## Context之后的路线
 
-- 正式 Routing Eval、Precision/Recall 和大规模行为回归。
-- 使用小模型或语义检索进行 Skill Routing。
-- 全面 Skill 脚本化和任意 CLI 执行。
-- 自动记忆提取、向量数据库和复杂遗忘算法。
-- `/tools`、`/skills`、`/context`、`/refs`、`/trace`、`/raw`、`/reset`
-  等 CLI 调试命令。
-- Planner、复杂工作流和 Multi-Agent。
+Context阶段完成后，再按以下顺序推进：
 
-当前主线原则：
+1. 最小Memory State：用户明确授权保存的长期事实和偏好。
+2. Interaction/Safety State：跨轮确认、取消、范围修改和过期。
+3. Skill References与受控只读脚本。
+4. Task State：跨Chat的长期目标、步骤和恢复。
+5. 高级Memory Retrieval。
+6. MCP。
+7. 复杂规划与Multi-Agent。
 
-> Agent Loop v0.1 核心已经完成。下一步用同样的“真实压力、Trace、轻量 Eval”方式
-> 深化长期 Context 和最小 Memory State。
+继续暂缓：正式Routing Eval、向量数据库、自动记忆提取、任意Shell、复杂Planner和
+大规模LLM-as-judge评测。

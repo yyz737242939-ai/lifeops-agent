@@ -29,6 +29,11 @@ from app.runtime.run_state import (
     RunStatus,
     StopReason,
 )
+from app.runtime.write_policy import (
+    authorized_write_tools,
+    has_write_success_claim,
+    requires_bulk_delete_confirmation,
+)
 from app.skills.skill_loader import discover_skills
 from app.skills.skill_router import route_skills
 from app.skills.skill_state import resolve_skill_state
@@ -50,6 +55,7 @@ class TurnContext:
     tool_schemas: tuple[dict[str, Any], ...]
     allowed_tool_names: frozenset[str]
     loaded_skills: tuple[str, ...]
+    bulk_delete_confirmation_required: bool
 
 
 @dataclass(frozen=True)
@@ -59,7 +65,7 @@ class ToolExecutionResult:
     content: str
     parsed: dict[str, Any] | None
     error: ExecutionError | None
-    attempt_count: int
+    tool_execution_attempt_count: int
 
 
 def _preview_text(value: Any, max_length: int = 240) -> str:
@@ -146,16 +152,22 @@ def _runtime_stop_answer(run_state: RunState) -> str:
     }
     reason = reason_messages.get(run_state.stop_reason, "Agent 执行已停止。")
     details = []
-    if run_state.completed_actions:
-        names = ", ".join(action.tool_name for action in run_state.completed_actions)
-        details.append(
-            f"已保留 {len(run_state.completed_actions)} 个成功的工具结果：{names}。"
+    if run_state.completed_action_records:
+        names = ", ".join(
+            action.tool_name for action in run_state.completed_action_records
         )
-    if run_state.failed_actions:
-        names = ", ".join(action.tool_name for action in run_state.failed_actions)
+        details.append(
+            f"已保留 {len(run_state.completed_action_records)} 个成功的工具结果：{names}。"
+        )
+    if run_state.failed_action_records:
+        names = ", ".join(
+            action.tool_name for action in run_state.failed_action_records
+        )
         details.append(f"失败步骤：{names}。")
-    if run_state.skipped_actions:
-        names = ", ".join(action.tool_name for action in run_state.skipped_actions)
+    if run_state.skipped_action_records:
+        names = ", ".join(
+            action.tool_name for action in run_state.skipped_action_records
+        )
         details.append(f"未执行步骤：{names}。")
     return reason + "".join(details)
 
@@ -218,7 +230,22 @@ class Agent:
             self.skills,
             skill_state.loaded_skills,
         )
-        capability_result = build_capabilities(prompt_result.loaded_skills)
+        authorized_writes = authorized_write_tools(user_input)
+        bulk_delete_confirmation_required = requires_bulk_delete_confirmation(
+            user_input
+        )
+        capability_result = build_capabilities(
+            prompt_result.loaded_skills,
+            authorized_write_tool_names=authorized_writes,
+        )
+        instructions = prompt_result.instructions
+        if bulk_delete_confirmation_required:
+            instructions += (
+                "\n\nSafety policy for this turn:\n"
+                "- The user requested a destructive bulk deletion without explicit confirmation.\n"
+                "- Do not delete anything. Ask the user to confirm the exact bulk deletion.\n"
+                "- Do not claim that any item was deleted."
+            )
         events.log_routing_resolved(
             run_state,
             available_skills=self.skills,
@@ -229,19 +256,20 @@ class Agent:
         events.log_capabilities_built(run_state, capability_result, TOOLS)
         self.messages.append({"role": "user", "content": user_input})
         return TurnContext(
-            instructions=prompt_result.instructions,
+            instructions=instructions,
             tool_schemas=capability_result.tool_schemas,
             allowed_tool_names=capability_result.allowed_tool_names,
             loaded_skills=prompt_result.loaded_skills,
+            bulk_delete_confirmation_required=bulk_delete_confirmation_required,
         )
 
     def _run_agent_loop(self, run_state: RunState, turn: TurnContext) -> str:
         """Run sequential LLM/tool rounds until completion or a controlled stop."""
         while run_state.can_start_llm_round(self.loop_limits):
-            if run_state.cancel_requested:
+            if run_state.chat_cancellation_requested:
                 run_state.stop(
                     StopReason.CANCELLED,
-                    partial=bool(run_state.completed_actions),
+                    partial=bool(run_state.completed_action_records),
                 )
                 return self._stopped_answer(run_state)
 
@@ -260,19 +288,23 @@ class Agent:
             )
             llm_io.log_response(run_state, loop_number, response)
 
-            self.messages += response.output
-
             function_calls = [
                 item for item in response.output if item.type == "function_call"
             ]
 
             if not function_calls:
-                answer = response.output_text
+                answer = self._validate_final_answer(response.output_text, run_state)
+                if answer == response.output_text:
+                    self.messages += response.output
+                else:
+                    self.messages.append({"role": "assistant", "content": answer})
                 run_state.complete()
                 events.log_final_answer(run_state, answer)
                 events.log_run_completed(run_state)
                 app_log.log_info("Run %s completed", run_state.run_id)
                 return answer
+
+            self.messages += response.output
 
             self._execute_function_calls(
                 run_state=run_state,
@@ -287,9 +319,38 @@ class Agent:
 
         run_state.stop(
             StopReason.LLM_BUDGET_EXHAUSTED,
-            partial=bool(run_state.completed_actions),
+            partial=bool(run_state.completed_action_records),
         )
         return self._stopped_answer(run_state)
+
+    @staticmethod
+    def _validate_final_answer(answer: str, run_state: RunState) -> str:
+        """Prevent a model-only answer from claiming an unconfirmed write."""
+        successful_writes = [
+            action
+            for action in run_state.completed_action_records
+            if (tool := TOOLS.get(action.tool_name)) is not None
+            and tool.effect == ToolEffect.WRITE
+        ]
+        failed_writes = [
+            action
+            for action in run_state.failed_action_records
+            if (tool := TOOLS.get(action.tool_name)) is not None
+            and tool.effect == ToolEffect.WRITE
+        ]
+        if failed_writes and has_write_success_claim(answer):
+            succeeded = ", ".join(action.tool_name for action in successful_writes) or "无"
+            failed = ", ".join(action.tool_name for action in failed_writes)
+            return (
+                f"本次写入未全部成功。已成功：{succeeded}；未成功：{failed}。"
+                "请确认后重试失败项。"
+            )
+        if successful_writes or not has_write_success_claim(answer):
+            return answer
+        return (
+            "我没有收到任何成功的写入结果，因此不能确认数据已经保存或修改。"
+            "请重试该写入操作，或稍后再试。"
+        )
 
     def _request_llm(
         self,
@@ -304,21 +365,21 @@ class Agent:
             run_state, loop_number, _context_summary(self.messages)
         )
         for retry_index in range(self.loop_limits.max_llm_retries + 1):
-            if run_state.cancel_requested:
+            if run_state.chat_cancellation_requested:
                 run_state.stop(
                     StopReason.CANCELLED,
-                    partial=bool(run_state.completed_actions),
+                    partial=bool(run_state.completed_action_records),
                 )
                 return None
 
-            attempt_number = run_state.start_llm_attempt()
+            request_number = run_state.start_llm_request()
             events.log_llm_attempted(
-                run_state, loop_number, attempt_number, retry_index
+                run_state, loop_number, request_number, retry_index
             )
             llm_io.log_request(
                 run_state,
                 loop_number,
-                attempt_number,
+                request_number,
                 model=LLM_MODEL,
                 instructions=instructions,
                 tools=tool_schemas,
@@ -341,7 +402,7 @@ class Agent:
                 if not self._handle_llm_failure(
                     run_state=run_state,
                     loop_number=loop_number,
-                    attempt_number=attempt_number,
+                    llm_request_number=request_number,
                     retry_index=retry_index,
                     exception=exception,
                 ):
@@ -354,18 +415,18 @@ class Agent:
         *,
         run_state: RunState,
         loop_number: int,
-        attempt_number: int,
+        llm_request_number: int,
         retry_index: int,
         exception: Exception,
     ) -> bool:
         """Classify one LLM failure and decide whether the loop may retry."""
         execution_error = classify_llm_exception(exception)
         events.log_llm_failed(
-            run_state, loop_number, attempt_number, execution_error
+            run_state, loop_number, llm_request_number, execution_error
         )
         app_log.log_error(
             "LLM attempt %s failed for run %s: %s",
-            attempt_number,
+            llm_request_number,
             run_state.run_id,
             execution_error.code,
         )
@@ -374,7 +435,7 @@ class Agent:
             and retry_index < self.loop_limits.max_llm_retries
         )
         if not can_retry:
-            if run_state.completed_actions:
+            if run_state.completed_action_records:
                 run_state.stop(StopReason.LLM_REQUEST_FAILED, partial=True)
             else:
                 run_state.fail(StopReason.LLM_REQUEST_FAILED)
@@ -505,9 +566,9 @@ class Agent:
             ),
             result=compacted_result,
             error=(execution.error.to_dict() if execution.error else None),
-            signature=signature,
-            observation_signature=observation_signature,
-            attempt_count=execution.attempt_count,
+            tool_call_signature=signature,
+            tool_observation_signature=observation_signature,
+            tool_execution_attempt_count=execution.tool_execution_attempt_count,
             idempotency_key=idempotency_key,
         )
         run_state.add_action(action)
@@ -527,7 +588,7 @@ class Agent:
         observation_count: int,
     ) -> bool:
         """Apply cancellation and no-progress checkpoints after an observation."""
-        if run_state.cancel_requested:
+        if run_state.chat_cancellation_requested:
             code = "cancelled"
             message = "Run was cancelled after tool execution"
             reason = StopReason.CANCELLED
@@ -549,7 +610,7 @@ class Agent:
             code,
             message,
         )
-        run_state.stop(reason, partial=bool(run_state.completed_actions))
+        run_state.stop(reason, partial=bool(run_state.completed_action_records))
         return True
 
     def _stop_before_tool_call(
@@ -560,7 +621,7 @@ class Agent:
         calls_started_this_round: int,
     ) -> bool:
         """Apply cancellation and budget checkpoints before side effects begin."""
-        if run_state.cancel_requested:
+        if run_state.chat_cancellation_requested:
             code = "cancelled"
             message = "Run was cancelled before tool execution"
             reason = StopReason.CANCELLED
@@ -582,7 +643,7 @@ class Agent:
             code,
             message,
         )
-        run_state.stop(reason, partial=bool(run_state.completed_actions))
+        run_state.stop(reason, partial=bool(run_state.completed_action_records))
         return True
 
     def _record_invalid_arguments(
@@ -644,7 +705,7 @@ class Agent:
         )
         run_state.stop(
             StopReason.REPEATED_CALL,
-            partial=bool(run_state.completed_actions),
+            partial=bool(run_state.completed_action_records),
         )
 
     def _execute_tool_with_retry(
@@ -702,7 +763,7 @@ class Agent:
             )
             parsed_result = _parse_result_object(tool_result)
             execution_error = tool_error_from_result(parsed_result)
-            if run_state.cancel_requested or execution_error is None:
+            if run_state.chat_cancellation_requested or execution_error is None:
                 break
             if not self._can_retry_tool(tool, execution_error, attempt_count):
                 break
@@ -727,7 +788,7 @@ class Agent:
                 content=tool_result,
                 parsed=parsed_result,
                 error=execution_error,
-                attempt_count=attempt_count,
+                tool_execution_attempt_count=attempt_count,
             ),
             calls_started_this_round,
         )

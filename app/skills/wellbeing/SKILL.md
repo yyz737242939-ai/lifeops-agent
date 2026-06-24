@@ -8,7 +8,8 @@ description: Record and inspect sleep, mood, energy, stress, recovery, and daily
 Use daily state tools for sleep, energy, mood, recovery, tiredness, stress, and
 current capacity.
 
-- Record concrete state supplied by the user before using it for planning.
+- Record concrete state only when the user explicitly asks to save or update it.
+- Treat state supplied only for advice or planning as temporary context.
 - Use `get_daily_state` for one date and `list_daily_logs` for recent trends.
 - Reduce workload and prefer shorter work blocks after low energy or poor sleep.
 - Do not infer a diagnosis from wellbeing records.

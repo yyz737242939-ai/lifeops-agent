@@ -1,51 +1,30 @@
-# LifeOps Agent 项目说明
+# LifeOps Agent 项目上下文
 
-## 如何使用
+## 文件职责
 
-本文件只记录项目定位、代码结构、模块职责和当前技术状态。
+本文件只描述项目当前事实：定位、架构、状态边界、已经实现的行为和已知限制。
 
-学习进度与未来计划见：
-
-```text
-D:\lifeops-agent\LEARNING_PROGRESS.md
-```
-
-开启新的 AI 编程会话时，可以直接说：
-
-```text
-请先阅读 D:\lifeops-agent\PROJECT_CONTEXT.md 和
-D:\lifeops-agent\LEARNING_PROGRESS.md，了解项目背景、当前状态和学习计划。
-```
+学习结论与下一步计划见 `LEARNING_PROGRESS.md`。开启新的协作会话时，先阅读这两个文件。
 
 ## 项目定位
 
-LifeOps Agent 是位于 `D:\lifeops-agent` 的 AI Agent 开发学习项目。
+LifeOps Agent 是一个用于学习 Agent Runtime 的本地 Python 项目。业务能力只是实验载体，
+重点是用可阅读、可观察的实现理解：Function Calling、Skill、Capability、Context、状态、
+副作用、安全边界和执行可靠性。
 
-目标不仅是完成功能，更重要的是通过清晰、可观察、可阅读的代码理解 Agent
-Runtime、工具调用、Context、Skill 和可靠性设计。
+当前原则：
 
-开发原则：
-
-1. 优先通过亲自实现理解原理。
-2. 抽象保持简单，避免框架隐藏核心流程。
-3. 只在产生真实需求后引入复杂度。
-4. 通过 Event、LLM I/O 和 Application 日志解释、复盘 Agent 行为。
-5. 当前重视快速迭代，只保留少量关键自动化测试。
-
-## 协作偏好
-
-- 讨论架构或学习方向时，除非用户明确要求实现，否则不要修改代码。
-- 实现功能时解释其中体现的 Agent 知识点。
-- 给建议前先阅读当前代码。
-- 为学习型功能提供能暴露内部行为的手动测试计划。
-- 引入新知识点时提供官方文档或可靠的一手资料。
-- 更新代码时，在相应的方法和重要变量上加简明扼要的注解解释方法或变量的用途
+1. 优先亲自实现核心机制，避免框架隐藏执行过程。
+2. 先用真实失败暴露缺口，再增加最小机制。
+3. 业务写入必须来自用户当前输入的明确授权。
+4. Event、LLM I/O 和 Application 日志应能解释一次执行。
+5. 自动化测试保留为回归安全网；不长期保存一次性大规模验收产物。
 
 ## 技术与运行
 
 - Python 3.13+
 - OpenRouter 与兼容 OpenAI Responses API 的模型
-- Pydantic 数据模型
+- Pydantic
 - 本地 JSON 持久化
 - `uv` 项目环境
 
@@ -53,182 +32,185 @@ Runtime、工具调用、Context、Skill 和可靠性设计。
 # 运行 Agent
 uv run python main.py
 
-# 查看三类日志
+# 查看日志
 uv run python log_viewer.py
 
-# 运行测试
+# 运行自动化测试
 uv run python -m unittest discover -s tests -v
 ```
 
-## 模块职责
+## 代码结构
 
-| 路径 | 职责 |
+| 路径 | 当前职责 |
 |---|---|
-| `main.py` | CLI 入口，创建 Agent 并处理用户输入输出 |
-| `app/agents/agent.py` | Agent Loop、跨轮状态、LLM 与工具编排、日志记录 |
-| `app/prompts/system_prompt.py` | 始终加载的核心行为与 Context Ref 规则 |
-| `app/prompts/prompt_builder.py` | 根据最终 `loaded_skills` 动态组合 System Prompt |
-| `app/skills/skill_loader.py` | 发现 Skill 元数据并按需加载完整正文 |
-| `app/skills/skill_router.py` | 根据当前输入执行确定性直接路由 |
-| `app/skills/skill_state.py` | 处理 Skill 继承、切换、清理和 Ref-only 状态 |
-| `app/skills/*/SKILL.md` | 四个业务领域的知识和工具编排规则 |
-| `app/tools/tool.py` | 业务工具 Schema、处理函数与稳定兼容门面 |
-| `app/tools/registry.py` | ToolDefinition、读写副作用元数据和注册表 |
-| `app/tools/executor.py` | 工具授权、超时、幂等重放、异常归一化与结果序列化 |
-| `app/tools/tool_schema.py` | 完整工具 Schema 的静态导出 |
-| `app/tools/capability_builder.py` | 将 Skill 映射为本轮 Tool Schema 和授权集合 |
-| `app/runtime/run_state.py` | 单次请求的 RunState、ActionRecord、调用预算和终止状态 |
-| `app/runtime/errors.py` | Tool/LLM 结构化错误模型、归一化和异常分类 |
-| `app/runtime/idempotency_store.py` | 写工具成功结果的本地幂等键存储与重放 |
-| `app/runtime/context_manager.py` | 工具结果的摘要压缩和引用压缩 |
-| `app/runtime/context_ref_store.py` | 完整结果的 Ref 存储与读取 |
-| `app/observability/*` | 日志会话、结构化 Event、完整 LLM I/O 和传统程序日志 |
-| `app/memory/todo_store.py` | Todo 模型与 JSON 持久化 |
-| `app/memory/daily_log_store.py` | Wellbeing 状态与 JSON 持久化 |
-| `app/memory/expense_store.py` | 消费、预算与 JSON 持久化 |
-| `app/memory/activity_catalog.py` | 本地活动目录与推荐逻辑 |
-| `app/utils/json_file.py` | JSON 容器校验、原子写入和 Pydantic 列表持久化 |
-| `app/utils/serialization.py` | SDK、Pydantic 和 Runtime 对象的 JSON 安全转换 |
-| `app/utils/time.py` | 业务记录使用的统一本地时间字符串 |
-| `log_viewer.py`、`app/log_viewer/*` | 三类日志的本地查看 UI，并兼容旧 Trace/Raw 文件 |
+| `main.py` | CLI 入口和多轮用户输入循环 |
+| `app/agents/agent.py` | 单次 Chat 的准备、Agent Loop、LLM/Tool 编排和最终回答校验 |
+| `app/runtime/run_state.py` | 单次 `Agent.chat()` 的 RunState、ActionRecord、预算与终态 |
+| `app/runtime/errors.py` | LLM/Tool 错误分类与结构化错误 |
+| `app/runtime/write_policy.py` | 当前用户输入的写授权、批量删除确认和成功声明检测 |
+| `app/runtime/context_manager.py` | Tool Observation 的 inline、summary、reference 压缩 |
+| `app/runtime/context_ref_store.py` | 完整 Tool Result 的 Context Ref 存储与读取 |
+| `app/runtime/idempotency_store.py` | 写工具成功结果的幂等存储与重放 |
+| `app/skills/skill_router.py` | 当前输入的确定性 Skill 路由 |
+| `app/skills/skill_state.py` | Skill 继承、替换、清理和 Ref-only 状态 |
+| `app/skills/skill_loader.py` | Skill 元数据发现和完整正文按需加载 |
+| `app/skills/*/SKILL.md` | Todo、Finance、Wellbeing、Activity 领域规则 |
+| `app/prompts/prompt_builder.py` | 根据本轮 Skill 动态构建 Prompt |
+| `app/tools/capability_builder.py` | 根据 Skill 和写授权生成本轮工具可见性与权限 |
+| `app/tools/registry.py` | 工具定义、副作用、幂等、重试和超时元数据 |
+| `app/tools/executor.py` | 工具授权、执行、超时、幂等重放和异常归一化 |
+| `app/memory/*` | Todo、日状态、消费预算和活动目录的本地业务数据 |
+| `app/observability/*` | 三通道日志及安全序列化 |
+| `app/log_viewer/*` | 本地日志查看器，支持普通会话和UAT目录格式 |
+| `tests/*` | 核心 Runtime、Context、安全、Skill、日志与工具的回归测试 |
 
-统一手动测试计划位于：
+## 状态与生命周期
 
-```text
-docs/manual_test_plan.md
-```
+这是当前理解项目时最重要的边界：
 
-## 当前 Agent 运行链路
+| 对象 | 生命周期 | 保存内容 |
+|---|---|---|
+| Logging Session | 一次进程级日志会话 | `session_id` 和三类日志文件 |
+| `Agent` | 一个CLI对话实例 | `messages`、Skill元数据、活跃Skill、限制、最近一次RunState |
+| `Agent.messages` | 跨多次 `chat()` | 用户消息、LLM输出、Function Call、Tool Observation |
+| `TurnContext` | 一次用户输入 | 固定Prompt、Tool Schema、授权工具、加载Skill、安全标记 |
+| `RunState` | 恰好一次 `Agent.chat()` | 本次Chat的LLM轮次、API请求、工具执行尝试、Action和终态 |
+| `ActionRecord` | 一次模型请求的工具Action | 参数、结果、错误、工具执行尝试、签名和幂等键 |
+
+`Agent.last_run_state` 指向最近一次 `chat()` 创建的RunState；执行过程中它代表当前Run，
+执行完成后它代表上一笔已完成Run。它不是整个Session的累计状态。
+
+RunState的主要计数字段已经显式包含作用域和统计对象：
+
+- `chat_llm_round_count`：本次Chat的逻辑LLM轮次。
+- `chat_llm_request_count`：本次Chat实际发送的LLM API请求数，包含重试。
+- `chat_tool_execution_attempt_count`：本次Chat的工具执行尝试数，包含工具重试。
+- `action_records`：本次Chat内的模型请求Action记录。
+- `chat_retry_counts_by_operation`：本次Chat按操作归类的重试次数。
+
+序列化的RunState包含 `state_scope: single_agent_chat`。
+
+## 当前执行链路
 
 ```text
 用户输入
--> Skill Router 直接路由
--> Skill State Resolver 继承、切换或清理
--> Prompt Builder 加载最终 Skill 正文
--> Capability Builder 生成 Tool Schema 和授权集合
--> Runtime 创建 RunState 并检查 LLM/Tool 调用预算
--> LLM 返回回答或 Function Call
--> Runtime 检查取消、重复、循环、权限和 Tool Metadata
--> Runtime 执行工具，并按错误类型决定重试或返回 Observation
--> 写工具使用幂等键记录成功结果
--> Context Manager 压缩 Observation
--> RunState 记录 Action 和状态变化
--> Observation 返回 LLM，直到完成或以明确原因停止
+-> Skill Router
+-> Skill State Resolver
+-> 当前输入写授权分析
+-> Prompt Builder
+-> Capability Builder 过滤 Tool Schema 和执行权限
+-> 创建单次 Chat RunState
+-> LLM Request
+-> LLM回答，或返回Function Call
+-> Runtime校验权限、预算、取消、重复与无进展
+-> Tool Executor执行，按错误类型决定是否重试
+-> 写工具使用幂等键保存成功结果
+-> Context Manager压缩Tool Observation
+-> ActionRecord记录结果，Observation返回LLM
+-> 最终回答校验写入声明
+-> 完成，或以结构化StopReason停止
 ```
 
-## 已实现的业务领域
+## 已实现能力
 
-### Todo 与计划
+### 业务工具
 
-- 新增、查看、完成、删除和更新 Todo。
-- 支持优先级和截止日期。
-- 根据未完成 Todo 生成日计划。
+- Todo：新增、查看、完成、删除、更新和日计划。
+- Wellbeing：记录与查询睡眠、心情、能量和备注。
+- Finance：记录、查询、汇总消费，设置和检查分类预算。
+- Activity：按时间、地点、预算、心情、能量和目标推荐本地活动。
 
-### Wellbeing
+### Skill与Capability
 
-- 记录睡眠、心情、能量和备注。
-- 查询指定日期或最近一段时间的状态。
+- Skill元数据始终可用于路由，完整正文只在选中后加载。
+- 明确领域信号替换旧Skill；含糊追问可继承；普通闲聊清理。
+- Prompt每次Chat重新构建，不把Skill正文追加到历史消息。
+- LLM只看到本轮允许的Tool Schema，Executor在执行前再次校验权限。
+- 当前输入没有明确授权时，写工具不会暴露给模型。
 
-### Finance
+### 写入安全
 
-- 记录、查询和汇总消费。
-- 设置并检查每日、每周或每月分类预算。
+- 描述个人状态或请求建议不等于授权保存数据。
+- 批量删除需要确认后才能暴露删除能力。
+- 最终回答声称“已保存/已修改”时，必须有成功WRITE Action作为依据。
+- 部分写入失败时，Runtime会替换模型的虚假全成功声明。
 
-### Activity Recommendation
+### Agent Loop可靠性
 
-- 从本地目录推荐活动。
-- 按能量、心情、时间、预算、地点和目标筛选。
+- LLM逻辑轮次、LLM API请求、工具执行尝试和重试分别计数。
+- 工具错误统一包含 `type`、`code`、`message` 和 `retryable`。
+- SDK隐式重试关闭，LLM/Tool重试由Runtime显式管理。
+- 重复非幂等写、相同Observation和A-B-A-B调用循环可以被拦截。
+- 强制停止时保留并汇总成功、失败和跳过的Action。
+- 工具支持线程超时；取消目前在调用边界协作式生效。
 
-## 当前关键行为
+## 当前Context实现
 
-### Prompt 与 Skill
+当前只有“Tool Observation压缩”，还没有“长期对话窗口压缩”。二者不要混淆。
 
-- 核心 Prompt、Ref 规则和 Skill 元数据始终可见。
-- 完整 Skill 正文只在最终选中后加载。
-- Prompt 每轮重新构建，不在对话 Context 中累积 Skill 正文。
+### Prompt与历史消息
 
-### 多轮 Skill 状态
+- `instructions` 每轮重新生成，通过独立参数发送。
+- `Agent.messages` 保存跨Chat历史，包括Function Call和Tool Observation。
+- Skill正文不会累积进 `messages`。
+- `messages` 当前没有窗口、历史摘要或token预算，会随长对话持续增长。
 
-- 明确领域信号替换旧状态。
-- “继续”“第一个”等含糊追问可以继承活跃 Skill。
-- 普通闲聊清理旧状态。
-- Ref-only 请求只使用公共工具，但保留活跃话题。
+### Tool Observation压缩
 
-### Context 管理
+`compact_tool_output()`在工具成功后，根据字符数和主列表长度选择：
 
-- 中等长度列表使用结构化摘要。
-- 很长且可能需要精确细节的结果使用引用压缩。
-- `read_context_ref` 的完整结果不会再次被压缩。
+1. `none`：小结果完整进入Context。
+2. `summary`：中等结果替换成领域结构化摘要。
+3. `reference`：大结果保存完整值，只把摘要、`ref_id`和读取提示放入Context。
 
-### 能力边界
+当前阈值使用字符数和列表条数，不是精确token数。Todo、Expense、Daily Log和Activity
+有领域摘要；错误结果与 `read_context_ref` 返回值不再次压缩。
 
-- Skill 显式映射到允许工具集合。
-- LLM 只看到本轮允许的 Tool Schema。
-- Runtime 在执行前再次校验工具权限。
-- Trace 记录可见工具、权限来源和 Schema 大小。
+### Context Ref
 
-### Agent Loop 与执行可靠性
+- Reference策略会把完整结果写入本地Ref Store。
+- LLM只有在工具结果明确提供真实 `ref_id` 后，才应调用 `read_context_ref`。
+- 当前Ref没有过期、清理、会话归属和访问范围策略。
+- Summary策略不会创建Ref，因此摘要丢失的记录目前无法按需展开。
 
-- 每次 `chat()` 创建独立的 `RunState` 和 `run_id`。
-- 分别限制 LLM 轮数、单轮工具数和请求累计工具数。
-- `ActionRecord` 记录工具成功、失败或因预算跳过。
-- Run 使用 `completed`、`partial`、`failed` 和 `stopped` 等明确状态。
-- 达到预算时记录结构化 `StopReason`，并保留已经成功的工具结果。
-- Event 与 LLM I/O 中的记录通过 `run_id` 关联到单次请求。
-- 工具名和规范化参数生成稳定签名，检测相同调用、相同 Observation 和 A-B-A-B 循环。
-- Tool Error 统一包含 `type`、`code`、`message` 和 `retryable`。
-- Tool Registry 声明读写副作用、内在幂等性、可重试性和超时。
-- SDK 隐式重试已关闭，LLM/Tool 重试由 Runtime 显式计数并写入 Event 日志。
-- 写工具使用 `run_id + call_id` 幂等键缓存成功结果；重复的非幂等写调用会在执行前停止。
-- 工具使用线程超时；Run 支持在 LLM/Tool 调用边界进行协作式取消。
-- Runtime 强制停止时汇总成功、失败和跳过的工具步骤。
+### 已确认的Context缺口
 
-### 日志
+- Todo摘要固定保留5条；用户要求6条时，第6条真实字段不可用。
+- 压缩策略不了解用户当前需要多少条、哪些字段和后续Action。
+- Summary与Reference的选择主要由体积决定，而不是信息需求决定。
+- 长对话会重复发送全部历史；UAT-064的10轮对话曾消耗约64K tokens。
+- Runtime只能检测确定性重复，不能识别“不断微调参数但目标不变”的语义循环。
+- 模型可能构造未由Runtime签发的Ref ID；工具会返回Not Found，但调用前尚无来源校验。
 
-- Event：`events.jsonl`，每行一个 Agent 关键节点的结构化 JSON object。
-- LLM I/O：`llm.jsonl`，只保存完整的模型 request 和 response。
-- Application：`application.log`，保存 debug/info/warning/error 等传统程序日志。
-- 日志调用使用 `log_` 前缀的分类方法，例如 `log_tool_started()`，调用方不再重复拼装公共字段。
-- 本地 UI 支持三类日志的会话选择、筛选、搜索和 JSON 展开，并继续读取旧 Trace/Raw 会话。
+## 可观测性
 
-## 当前技术限制
+每个Logging Session包含：
 
-- Router 词表仍然较小，需要根据真实 Trace 继续迭代。
-- 跨领域请求后的含糊追问会继承整组 Skill。
-- Prompt 和 Tool Schema 大小使用字符数，不是精确 token 数。
-- Agent Loop 的 v0.1 核心可靠性已经完成，但工具执行仍是顺序模式，尚未实现依赖图与
-  安全并行。
-- 取消是协作式的，不能强制终止已经进入同步 SDK 或 Python 函数的调用。
-- 幂等存储可以重放已成功结果，但尚未达到事务型 exactly-once；进程在副作用成功与
-  幂等结果落盘之间崩溃时仍可能留下不确定状态。
-- RunState 仅保存在内存中，尚不支持进程崩溃后的持久化恢复。
-- 重复与无进展检测基于确定性签名，不包含语义级计划进展判断。
-- 尚未实现 `/reset` 等 CLI 调试命令。
+- `events.jsonl`：Runtime关键节点和紧凑上下文摘要。
+- `llm.jsonl`：完整Request与诊断型Response投影。
+- `application.log`：传统程序日志。
 
-## 典型跨领域场景
+LLM Response不重复记录Request中的instructions、tools和参数，只保留输出、状态、错误、
+用量和必要标识。日志查看器在Events页面明确显示RunState统计范围及本次Chat计数，并兼容
+旧字段和旧日志。
 
-```text
-我昨晚只睡了 5 小时，今天能量低。这周餐饮预算比较紧，还有重要任务。
-帮我安排一个现实一点的今天计划，并推荐一个不花钱的恢复活动。
-```
+## 当前限制与非目标
 
-可能触发：
+- Router仍是简单规则匹配，中英文归一化和广泛表达覆盖暂不优先。
+- 工具按顺序执行，没有依赖图、安全并行和并发写控制。
+- RunState只在内存中，不支持崩溃恢复。
+- 幂等存储不是事务型exactly-once。
+- 同步SDK或Python函数不能被强制中断。
+- 尚无全局wall-clock、token或cost预算。
+- 尚无长期Memory、Interaction State、Task State、MCP和Multi-Agent。
 
-```text
-record_daily_state
--> check_budget 或 summarize_spending
--> plan_day
--> recommend_activities
--> 最终回答
-```
+## 本地数据
 
-## 本地运行数据
-
-以下内容是被 Git 忽略的本地运行产物：
+以下目录是本地运行数据，不属于一次性测试源文件：
 
 ```text
-data/*.json
+data/
 logs/
 ```
 
-它们可能包含手动测试数据，不要视为已提交源代码，也不要在未经允许时删除。
+它们可能包含用户数据和历史日志，除非用户明确要求，不应删除。

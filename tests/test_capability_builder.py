@@ -9,6 +9,16 @@ from app.tools.tool import TOOLS
 
 
 class CapabilityBuilderTests(unittest.TestCase):
+    def test_filters_write_tools_when_current_turn_did_not_authorize_them(self) -> None:
+        result = build_capabilities(
+            ("wellbeing", "activity"),
+            authorized_write_tool_names=frozenset(),
+        )
+
+        self.assertNotIn("record_daily_state", result.allowed_tool_names)
+        self.assertIn("get_daily_state", result.allowed_tool_names)
+        self.assertIn("recommend_activities", result.allowed_tool_names)
+
     def test_single_skill_exposes_only_domain_and_common_tools(self) -> None:
         result = build_capabilities(("todo",))
 

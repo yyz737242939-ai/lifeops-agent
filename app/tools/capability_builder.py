@@ -2,7 +2,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from app.tools.tool import TOOLS
+from app.tools.tool import TOOLS, ToolEffect
 
 
 COMMON_TOOL_NAMES = frozenset(
@@ -73,6 +73,8 @@ def _validate_configuration() -> None:
 
 def build_capabilities(
     loaded_skills: tuple[str, ...] | list[str],
+    *,
+    authorized_write_tool_names: frozenset[str] | None = None,
 ) -> CapabilityBuildResult:
     """Map loaded Skills to visible schemas and allowed tool names."""
     _validate_configuration()
@@ -88,6 +90,13 @@ def build_capabilities(
 
     for skill_name in dict.fromkeys(loaded_skills):
         for tool_name in SKILL_TOOL_NAMES[skill_name]:
+            tool = TOOLS[tool_name]
+            if (
+                authorized_write_tool_names is not None
+                and tool.effect == ToolEffect.WRITE
+                and tool_name not in authorized_write_tool_names
+            ):
+                continue
             allowed.add(tool_name)
             sources.setdefault(tool_name, []).append(skill_name)
 
