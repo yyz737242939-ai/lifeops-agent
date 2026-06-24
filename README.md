@@ -13,6 +13,7 @@ uv run python -m unittest discover -s tests -v
 
 ## 文档
 
+- `CHANGELOG.md`：各Milestone交付内容和当前功能总览。
 - `PROJECT_CONTEXT.md`：当前架构、实现、状态边界和已知限制。
 - `LEARNING_PROGRESS.md`：学习结论和下一阶段Context计划。
 
