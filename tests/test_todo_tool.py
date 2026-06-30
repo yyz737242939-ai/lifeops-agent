@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from app.memory.todo_store import Todo
+from app.domains.todo_store import Todo
 from app.tools.tool import list_todos, read_context_ref
 
 

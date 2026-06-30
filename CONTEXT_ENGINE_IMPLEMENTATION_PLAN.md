@@ -25,8 +25,8 @@ Conversation Summary 的目标不是恢复原文，而是让 LLM 对窗口外对
 
 - `app/agents/agent.py` 里 `Agent.messages` 保存跨多轮的完整历史；LLM 请求输入已经改为由 `ContextEngine.assemble()` 生成。
 - `instructions` 和 tool schemas 每轮动态生成，不直接累积进 `Agent.messages`。
-- `app/runtime/context_manager.py` 目前做 Tool Observation 压缩：`none / summary / summary_reference / reference`。
-- `app/runtime/context_ref_store.py` 可以保存并读取完整 Tool Result，已有 metadata、payload hash 和 TTL 过期校验；session/run 归属与更严格来源校验仍可继续加强。
+- `app/context/context_manager.py` 目前做 Tool Observation 压缩：`none / summary / summary_reference / reference`。
+- `app/context/context_ref_store.py` 可以保存并读取完整 Tool Result，已有 metadata、payload hash 和 TTL 过期校验；session/run 归属与更严格来源校验仍可继续加强。
 - 已有第一版整体对话窗口管理：ContextEngine assemble、Context Unit、近似预算、滑动窗口、Rolling Summary 和 summary message。
 - 还没有 Context Index、旧 unit 检索、Context Inspect 和主动/被动/手动压缩触发。
 
@@ -106,8 +106,8 @@ Agent
 ### 推荐新增文件
 
 ```text
-app/runtime/context_engine.py
-app/runtime/context_types.py
+app/context/context_engine.py
+app/context/context_types.py
 ```
 
 ### 推荐类型
@@ -276,8 +276,8 @@ estimated_tokens = ceil(json_char_count / 4)
 ### 推荐新增文件
 
 ```text
-app/runtime/context_store.py
-app/runtime/context_budget.py
+app/context/context_store.py
+app/context/context_budget.py
 ```
 
 ### ContextStore 第一版
@@ -365,7 +365,7 @@ old_summary + newly_evicted_units -> new_summary
 ### 推荐新增文件
 
 ```text
-app/runtime/context_compactor.py
+app/context/context_compactor.py
 ```
 
 ### Summary 数据结构
@@ -580,7 +580,7 @@ protected
 ### 推荐新增文件
 
 ```text
-app/runtime/context_index.py
+app/context/context_index.py
 ```
 
 ### 检索策略

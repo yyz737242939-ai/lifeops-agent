@@ -54,13 +54,13 @@ uv run python -m unittest discover -s tests -v
 | `app/runtime/run_state.py` | 单次 `Agent.chat()` 的 RunState、ActionRecord、预算与终态 |
 | `app/runtime/errors.py` | LLM/Tool 错误分类与结构化错误 |
 | `app/runtime/write_policy.py` | 当前用户输入的写授权、批量删除确认和成功声明检测 |
-| `app/runtime/context_engine.py` | LLM 输入组装入口；当前支持 pass-through 与第一版滑动窗口，并输出 Context Unit 与预算报告 |
-| `app/runtime/context_budget.py` | Context窗口预算配置，当前使用字符数近似token估算 |
-| `app/runtime/context_store.py` | 内存版完整历史和Rolling Summary状态存储 |
-| `app/runtime/context_compactor.py` | 确定性Rolling Summary生成，把被窗口排除的旧Unit压缩成结构化摘要 |
-| `app/runtime/context_types.py` | ContextAssembly、ContextUnit 和字符数到 token 的近似估算类型 |
-| `app/runtime/context_manager.py` | Tool Observation 的 inline、summary、reference 压缩 |
-| `app/runtime/context_ref_store.py` | 完整 Tool Result 的 Context Ref 存储、metadata/hash/过期校验与读取 |
+| `app/context/context_engine.py` | LLM 输入组装入口；当前支持 pass-through 与第一版滑动窗口，并输出 Context Unit 与预算报告 |
+| `app/context/context_budget.py` | Context窗口预算配置，当前使用字符数近似token估算 |
+| `app/context/context_store.py` | 内存版完整历史和Rolling Summary状态存储 |
+| `app/context/context_compactor.py` | 确定性Rolling Summary生成，把被窗口排除的旧Unit压缩成结构化摘要 |
+| `app/context/context_types.py` | ContextAssembly、ContextUnit 和字符数到 token 的近似估算类型 |
+| `app/context/context_manager.py` | Tool Observation 的 inline、summary、reference 压缩 |
+| `app/context/context_ref_store.py` | 完整 Tool Result 的 Context Ref 存储、metadata/hash/过期校验与读取 |
 | `app/runtime/idempotency_store.py` | 写工具成功结果的幂等存储与重放 |
 | `app/skills/skill_router.py` | 当前输入的确定性 Skill 路由 |
 | `app/skills/skill_state.py` | Skill 继承、替换、清理和 Ref-only 状态 |
@@ -70,7 +70,7 @@ uv run python -m unittest discover -s tests -v
 | `app/tools/capability_builder.py` | 根据 Skill 和写授权生成本轮工具可见性与权限 |
 | `app/tools/registry.py` | 工具定义、副作用、幂等、重试和超时元数据 |
 | `app/tools/executor.py` | 工具授权、执行、超时、幂等重放和异常归一化 |
-| `app/memory/*` | Todo、日状态、消费预算和活动目录的本地业务数据 |
+| `app/domains/*` | Todo、日状态、消费预算和活动目录的本地业务数据 |
 | `app/observability/*` | 三通道日志及安全序列化 |
 | `app/log_viewer/*` | 本地日志查看器，支持普通会话和UAT目录格式 |
 | `tests/*` | 核心 Runtime、Context、安全、Skill、日志与工具的回归测试 |

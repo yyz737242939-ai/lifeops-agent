@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from app.agents.agent import Agent
-from app.memory.todo_store import Todo
+from app.domains.todo_store import Todo
 from app.runtime.run_state import LoopLimits, RunStatus, StopReason
 from app.tools.tool import TOOLS
 

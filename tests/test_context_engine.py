@@ -2,8 +2,8 @@ import unittest
 import json
 from types import SimpleNamespace
 
-from app.runtime.context_budget import ContextBudgetConfig
-from app.runtime.context_engine import ContextEngine
+from app.context.context_budget import ContextBudgetConfig
+from app.context.context_engine import ContextEngine
 
 
 class ContextEngineTests(unittest.TestCase):

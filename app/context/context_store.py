@@ -1,6 +1,6 @@
 from typing import Any
 
-from app.runtime.context_compactor import summary_to_message
+from app.context.context_compactor import summary_to_message
 
 
 class ContextStore:

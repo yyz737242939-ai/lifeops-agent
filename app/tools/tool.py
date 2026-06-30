@@ -3,13 +3,13 @@
 from datetime import date, datetime
 from typing import Any
 
-from app.memory import activity_catalog, daily_log_store, expense_store, todo_store
-from app.memory.activity_catalog import ActivityGoal, CostLevel, Energy, Location, Mood
-from app.memory.daily_log_store import Energy as DailyEnergy
-from app.memory.daily_log_store import Mood as DailyMood
-from app.memory.expense_store import BudgetPeriod
-from app.memory.todo_store import Todo, TodoPriority
-from app.runtime.context_ref_store import read_context_ref as load_context_ref
+from app.domains import activity_catalog, daily_log_store, expense_store, todo_store
+from app.domains.activity_catalog import ActivityGoal, CostLevel, Energy, Location, Mood
+from app.domains.daily_log_store import Energy as DailyEnergy
+from app.domains.daily_log_store import Mood as DailyMood
+from app.domains.expense_store import BudgetPeriod
+from app.domains.todo_store import Todo, TodoPriority
+from app.context.context_ref_store import read_context_ref as load_context_ref
 from app.runtime.idempotency_store import get_result as get_idempotent_result
 from app.runtime.idempotency_store import save_result as save_idempotent_result
 from app.tools.executor import execute_tool

@@ -10,8 +10,8 @@ from app.config import (
 )
 from app.observability import app_log, events, llm_io
 from app.prompts.prompt_builder import build_system_prompt
-from app.runtime.context_engine import ContextEngine
-from app.runtime.context_manager import (
+from app.context.context_engine import ContextEngine
+from app.context.context_manager import (
     compact_tool_output,
     summarize_context_messages,
 )

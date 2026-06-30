@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from app.runtime.context_manager import (
+from app.context.context_manager import (
     compact_tool_output,
     summarize_context_messages,
 )
@@ -38,7 +38,7 @@ class ContextManagerTests(unittest.TestCase):
         original = json.dumps(result)
 
         with patch(
-            "app.runtime.context_manager.save_context_ref", return_value="ctx_test"
+            "app.context.context_manager.save_context_ref", return_value="ctx_test"
         ) as save_ref:
             compacted, metadata = compact_tool_output("list_todos", original)
         payload = json.loads(compacted)
@@ -58,7 +58,7 @@ class ContextManagerTests(unittest.TestCase):
         original = json.dumps(result)
 
         with patch(
-            "app.runtime.context_manager.save_context_ref", return_value="ctx_test"
+            "app.context.context_manager.save_context_ref", return_value="ctx_test"
         ):
             compacted, metadata = compact_tool_output(
                 "list_todos",
@@ -80,7 +80,7 @@ class ContextManagerTests(unittest.TestCase):
             },
         )
 
-    @patch("app.runtime.context_manager.save_context_ref", return_value="ctx_test")
+    @patch("app.context.context_manager.save_context_ref", return_value="ctx_test")
     def test_large_list_uses_reference(self, save_ref) -> None:
         result = {
             "ok": True,
@@ -97,7 +97,7 @@ class ContextManagerTests(unittest.TestCase):
         self.assertEqual(payload["ref_id"], "ctx_test")
         self.assertIn("read_context_ref", payload["hint"])
 
-    @patch("app.runtime.context_manager.save_context_ref")
+    @patch("app.context.context_manager.save_context_ref")
     def test_errors_and_ref_reads_are_never_compacted(self, save_ref) -> None:
         error = json.dumps({"ok": False, "error": {"code": "missing"}})
         ref_result = json.dumps(

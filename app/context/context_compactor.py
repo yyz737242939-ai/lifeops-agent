@@ -2,7 +2,7 @@ import json
 from copy import deepcopy
 from typing import Any
 
-from app.runtime.context_types import ContextUnit
+from app.context.context_types import ContextUnit
 from app.utils.json_file import parse_json_object
 from app.utils.serialization import json_safe
 

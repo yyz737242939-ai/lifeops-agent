@@ -2,10 +2,10 @@ import json
 from collections import Counter
 from typing import Any, cast
 
-from app.runtime.context_budget import ContextBudgetConfig
-from app.runtime.context_compactor import compact_units
-from app.runtime.context_store import ContextStore
-from app.runtime.context_types import (
+from app.context.context_budget import ContextBudgetConfig
+from app.context.context_compactor import compact_units
+from app.context.context_store import ContextStore
+from app.context.context_types import (
     ContextAssembly,
     ContextUnit,
     ContextUnitKind,

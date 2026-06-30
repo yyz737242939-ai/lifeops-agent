@@ -5,13 +5,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.runtime.context_ref_store import read_context_ref, save_context_ref
+from app.context.context_ref_store import read_context_ref, save_context_ref
 
 
 class ContextRefStoreTests(unittest.TestCase):
     def test_saved_ref_includes_metadata_and_payload_hash(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
-            with patch("app.runtime.context_ref_store.REF_DIR", Path(temporary_directory)):
+            with patch("app.context.context_ref_store.REF_DIR", Path(temporary_directory)):
                 ref_id = save_context_ref(
                     tool_name="list_todos",
                     full_result={"ok": True, "todos": [{"id": 1}]},
@@ -30,7 +30,7 @@ class ContextRefStoreTests(unittest.TestCase):
 
     def test_expired_ref_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
-            with patch("app.runtime.context_ref_store.REF_DIR", Path(temporary_directory)):
+            with patch("app.context.context_ref_store.REF_DIR", Path(temporary_directory)):
                 ref_id = save_context_ref(
                     tool_name="list_todos",
                     full_result={"ok": True},
