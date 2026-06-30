@@ -5,6 +5,9 @@
 本文件只保留学习结论、当前问题和下一阶段计划。项目结构、实现细节与当前行为统一放在
 `PROJECT_CONTEXT.md`，不在这里重复维护。
 
+LifeOps Agent 的最终方向是真实可用的生活管理产品；本文件只记录当前学习主线和推进顺序，
+不承载长期产品愿景本身。
+
 ## 当前阶段
 
 第一阶段的Runtime基础已经结束。当前主线是：
@@ -168,8 +171,8 @@ Context可以丢失展示细节，但不能丢失完成当前请求或后续Acti
 ## 推荐执行顺序
 
 ```text
-1. Context组成与token基线
-2. Context不变量和字段分类
+1. Context组成与token基线（已完成第一版：ContextEngine pass-through + assembly report）
+2. Context不变量和字段分类（已完成第一版：ContextUnit + function_call/observation 配对）
 3. 修复“固定5条摘要”问题
 4. Ref来源校验与生命周期
 5. 最近消息窗口 + 历史摘要

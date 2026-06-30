@@ -10,6 +10,7 @@ from app.config import (
 )
 from app.observability import app_log, events, llm_io
 from app.prompts.prompt_builder import build_system_prompt
+from app.runtime.context_engine import ContextEngine
 from app.runtime.context_manager import (
     compact_tool_output,
     summarize_context_messages,
@@ -196,6 +197,7 @@ class Agent:
         self.active_skills: tuple[str, ...] = ()
         self.loop_limits = loop_limits or DEFAULT_LOOP_LIMITS
         self.last_run_state: RunState | None = None
+        self.context_engine = ContextEngine()
 
     def cancel_current_run(self) -> bool:
         """Request cooperative cancellation at the next runtime checkpoint."""
@@ -361,9 +363,14 @@ class Agent:
         tool_schemas: tuple[dict[str, Any], ...],
     ) -> Any | None:
         """Call the model with explicit retry accounting and boundary logs."""
-        events.log_llm_requested(
-            run_state, loop_number, _context_summary(self.messages)
+        assembly = self.context_engine.assemble(
+            self.messages,
+            instructions=instructions,
+            tools=tool_schemas,
         )
+        context = _context_summary(assembly.input_messages)
+        context["context_engine"] = assembly.report
+        events.log_llm_requested(run_state, loop_number, context)
         for retry_index in range(self.loop_limits.max_llm_retries + 1):
             if run_state.chat_cancellation_requested:
                 run_state.stop(
@@ -383,17 +390,18 @@ class Agent:
                 model=LLM_MODEL,
                 instructions=instructions,
                 tools=tool_schemas,
-                input_messages=self.messages,
+                input_messages=assembly.input_messages,
                 parameters={
                     "temperature": LLM_TEMPERATURE,
                     "max_output_tokens": LLM_MAX_OUTPUT_TOKENS,
+                    "context_engine": assembly.report,
                 },
             )
             try:
                 return client.responses.create(
                     model=LLM_MODEL,
                     instructions=instructions,
-                    input=self.messages,
+                    input=assembly.input_messages,
                     tools=list(tool_schemas),
                     temperature=LLM_TEMPERATURE,
                     max_output_tokens=LLM_MAX_OUTPUT_TOKENS,

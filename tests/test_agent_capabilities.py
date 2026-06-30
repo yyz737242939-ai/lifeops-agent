@@ -44,6 +44,13 @@ class AgentCapabilityTests(unittest.TestCase):
             {schema["name"] for schema in raw_request.kwargs["tools"]},
             sent_names,
         )
+        self.assertEqual(
+            create_response.call_args.kwargs["input"],
+            raw_request.kwargs["input_messages"],
+        )
+        context_parameters = raw_request.kwargs["parameters"]["context_engine"]
+        self.assertEqual(context_parameters["mode"], "pass_through_with_units")
+        self.assertEqual(context_parameters["message_count"], 1)
 
     @patch("app.agents.agent.llm_io")
     @patch("app.agents.agent.events")
