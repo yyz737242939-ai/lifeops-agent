@@ -55,7 +55,9 @@ Conversation Summary 的目标不是恢复原文，而是让 LLM 对窗口外对
 3. Sliding Window + ContextStore：已完成第一版。
 4. Rolling Summary：已完成第一版。
 5. Tool Observation + Context Ref 升级：已完成第一版。
-6. Context Index + 按需恢复：下一步从这里开始。
+6. Context Index + 按需恢复：已完成第一版。
+7. Context Inspector：已完成第一版。
+8. 主动/被动/手动压缩触发：下一步从这里开始。
 ```
 
 ## 1. 总体架构
@@ -640,6 +642,16 @@ recent units
 
 这一步学习的是“索引不是记忆，按需恢复也不是可逆摘要”。索引只是帮你从完整历史或 ref 中找回当前请求真正需要的少量上下文；Conversation Summary 负责认知连续性，Index/Ref 负责高风险事实的精确恢复。
 
+当前完成状态：
+
+- 已新增 `app/context/context_index.py`，第一版使用确定性metadata，不使用embedding。
+- Index 会从旧 `ContextUnit` 提取 tool name、entity id、ref_id、domain关键词和action状态。
+- `ContextEngine.assemble()` 会在滑动窗口裁剪后，对 evicted old units 做按需检索，并把 retrieved unit/ref 插入本轮working context。
+- 只有当前用户请求出现精确字段、ref、日期/金额、后续写操作或“刚才第N项”等信号时才触发恢复；普通总结请求不会读取完整ref。
+- assembly report 已包含 `retrieved_unit_count`、`retrieved_units`、`retrieved_ref_count`、`retrieved_refs` 和 `retrieval_query`，用于解释恢复原因。
+- 伪造、不存在或过期ref不会插入上下文，只会在report中记录 rejected 状态。
+- 当前仍是轻量规则：不做语义向量检索，不做跨session scope校验，不保证理解所有自然语言指代。
+
 ## 8. 阶段七：Context Inspector 和可观测性
 
 ### 目标
@@ -702,6 +714,17 @@ recent units
 ### 学习重点
 
 这一步学习的是“Context 系统必须可解释”。没有 inspector，压缩 bug 会非常隐蔽。
+
+当前完成状态：
+
+- 已新增 `app/context/context_inspector.py`，不改变Context决策，只解释已有 assembly report。
+- `ContextEngine.assemble()` 会把 Inspector 输出放在 `assembly.report.inspection`。
+- Inspector 当前包含：
+  - `overview`：mode、原始/组装后消息数、近似token和节省比例。
+  - `composition`：summary、placeholder、protected、retrieved、recent、evicted 的计数。
+  - `decisions`：windowing、summary、retrieval 的决策状态和关键参数。
+  - `diagnostics`：placeholder summary、精确请求未命中、ref rejected 等调试提示。
+- 当前没有新增CLI命令；先复用现有 `llm.requested` event 中的 `context.context_engine` 日志。
 
 ## 9. 阶段八：主动、被动、手动压缩触发
 
@@ -823,9 +846,9 @@ tests/test_context_eval_cases.py
 | 3 | Sliding Window | assemble 后 input 变短 | 已完成第一版 |
 | 4 | Rolling Summary | summary state/message | 已完成第一版 |
 | 5 | Tool Observation + Ref 升级 | dynamic summary, `summary_reference`, metadata ref | 已完成第一版 |
-| 6 | Index + 按需恢复 | deterministic index, retrieved units/ref loading | 下一步 |
-| 7 | Inspector | context report/logs | 待做 |
-| 8 | Triggers | active/passive/manual compact | 待做 |
+| 6 | Index + 按需恢复 | deterministic index, retrieved units/ref loading | 已完成第一版 |
+| 7 | Inspector | context report/logs | 已完成第一版 |
+| 8 | Triggers | active/passive/manual compact | 下一步 |
 | 9 | Eval | context regression tests | 待做 |
 
 已经完成的第一刀：
@@ -841,20 +864,20 @@ tests/test_context_eval_cases.py
 
 ```text
 请阅读 AGENTS.md、PROJECT_CONTEXT.md、LEARNING_PROGRESS.md、CONTEXT_ENGINE_IMPLEMENTATION_PLAN.md。
-然后从“阶段六：Context Index 和简单检索”开始施工。
+然后从“阶段八：主动、被动、手动压缩触发”开始施工。
 要求：
-1. 先确认前五步当前实现状态，不重复重写已有 ContextEngine / ContextStore / Rolling Summary / summary_reference。
-2. 新增最小 ContextIndex，用 metadata 而不是 embedding 做第一版检索。
-3. 实现按需恢复：summary 足够时不读取完整 ref；当前请求需要精确字段时才恢复相关 unit/ref。
-4. retrieved unit/ref 必须写入 assembly report，说明恢复原因。
-5. 跑相关 Context 和 Tool Ref 测试。
+1. 先确认前七步当前实现状态，不重复重写已有 ContextEngine / ContextStore / Rolling Summary / summary_reference / ContextIndex / ContextInspector。
+2. 聚焦压缩触发生命周期：主动、被动、手动触发，不引入向量数据库或长期Memory。
+3. 优先复用现有预算、summary、index和inspector report。
+4. 如果增加 `/compact`，先保持行为可解释，并确保不覆盖完整历史事实源。
+5. 跑相关 Context 测试和全量回归。
 ```
 
-如果阶段六完成后继续：
+如果阶段八完成后继续：
 
 ```text
-继续 CONTEXT_ENGINE_IMPLEMENTATION_PLAN.md 的阶段七。
-重点是 Context Inspector 和可观测性。
+继续 CONTEXT_ENGINE_IMPLEMENTATION_PLAN.md 的阶段九。
+重点是 Context Eval 和压缩前后关键行为回归。
 不要引入向量数据库或长期Memory。
 ```
 

@@ -1,6 +1,7 @@
 import unittest
 import json
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from app.context.context_budget import ContextBudgetConfig
 from app.context.context_engine import ContextEngine
@@ -30,6 +31,14 @@ class ContextEngineTests(unittest.TestCase):
         )
         self.assertGreater(assembly.report["estimated_input_tokens"], 0)
         self.assertEqual(assembly.report["tool_schema_count"], 1)
+        self.assertEqual(
+            assembly.report["inspection"]["decisions"][0]["status"],
+            "within_recent_window",
+        )
+        self.assertEqual(
+            assembly.report["inspection"]["composition"]["recent_units"],
+            2,
+        )
 
     def test_function_call_and_observation_are_one_tool_unit(self) -> None:
         call = SimpleNamespace(
@@ -103,6 +112,11 @@ class ContextEngineTests(unittest.TestCase):
         self.assertEqual(
             assembly.report["assembled_message_count"],
             len(assembly.input_messages),
+        )
+        diagnostics = assembly.report["inspection"]["diagnostics"]
+        self.assertIn(
+            "history_compacted_without_summary",
+            [diagnostic["code"] for diagnostic in diagnostics],
         )
 
     def test_sliding_window_does_not_split_tool_call_from_observation(self) -> None:
@@ -250,6 +264,218 @@ class ContextEngineTests(unittest.TestCase):
         self.assertIn(
             {"unit_id": "u_0002", "type": "id", "value": "todo-1"},
             engine.store.summary["important_entities"],
+        )
+
+    def test_retrieves_evicted_tool_unit_by_todo_id(self) -> None:
+        call = SimpleNamespace(
+            type="function_call",
+            name="list_todos",
+            arguments="{}",
+            call_id="call-1",
+        )
+        observation = {
+            "type": "function_call_output",
+            "call_id": "call-1",
+            "output": json.dumps(
+                {
+                    "ok": True,
+                    "action": "list_todos",
+                    "todos": [
+                        {
+                            "id": 42,
+                            "title": "pay rent",
+                            "status": "todo",
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        }
+        messages = [
+            {"role": "user", "content": "old todo lookup " + ("x" * 120)},
+            call,
+            observation,
+            {"role": "assistant", "content": "I found task 42." + ("x" * 120)},
+            {"role": "user", "content": "complete todo id 42"},
+        ]
+        engine = ContextEngine(
+            budget_config=ContextBudgetConfig(recent_window_tokens=40)
+        )
+
+        assembly = engine.assemble(messages)
+
+        self.assertIn(call, assembly.input_messages)
+        self.assertIn(observation, assembly.input_messages)
+        self.assertEqual(assembly.report["retrieved_unit_count"], 1)
+        self.assertEqual(
+            assembly.report["retrieved_units"][0]["reason"],
+            "matched_entity_id",
+        )
+        self.assertIn(
+            "entity_id",
+            assembly.report["retrieved_units"][0]["matched_fields"],
+        )
+
+    def test_general_summary_does_not_retrieve_evicted_ref_unit(self) -> None:
+        call = SimpleNamespace(
+            type="function_call",
+            name="list_todos",
+            arguments="{}",
+            call_id="call-1",
+        )
+        observation = {
+            "type": "function_call_output",
+            "call_id": "call-1",
+            "output": json.dumps(
+                {
+                    "ok": True,
+                    "compacted": True,
+                    "compaction_strategy": "summary_reference",
+                    "summary": {"count": 10},
+                    "ref_id": "ctx_test",
+                },
+                ensure_ascii=False,
+            ),
+        }
+        messages = [
+            {"role": "user", "content": "old todo lookup " + ("x" * 120)},
+            call,
+            observation,
+            {"role": "assistant", "content": "I found a list." + ("x" * 120)},
+            {"role": "user", "content": "summarize the previous todo list"},
+        ]
+        engine = ContextEngine(
+            budget_config=ContextBudgetConfig(recent_window_tokens=40)
+        )
+
+        with patch("app.context.context_index.read_context_ref") as read_ref:
+            assembly = engine.assemble(messages)
+
+        read_ref.assert_not_called()
+        self.assertNotIn(call, assembly.input_messages)
+        self.assertEqual(assembly.report["retrieved_unit_count"], 0)
+        self.assertEqual(assembly.report["retrieved_ref_count"], 0)
+
+    def test_exact_followup_loads_retrieved_ref(self) -> None:
+        call = SimpleNamespace(
+            type="function_call",
+            name="list_todos",
+            arguments="{}",
+            call_id="call-1",
+        )
+        observation = {
+            "type": "function_call_output",
+            "call_id": "call-1",
+            "output": json.dumps(
+                {
+                    "ok": True,
+                    "compacted": True,
+                    "compaction_strategy": "summary_reference",
+                    "summary": {"count": 10},
+                    "ref_id": "ctx_test",
+                },
+                ensure_ascii=False,
+            ),
+        }
+        messages = [
+            {"role": "user", "content": "old todo lookup " + ("x" * 120)},
+            call,
+            observation,
+            {"role": "assistant", "content": "I found a list." + ("x" * 120)},
+            {"role": "user", "content": "complete the sixth item from before"},
+        ]
+        engine = ContextEngine(
+            budget_config=ContextBudgetConfig(recent_window_tokens=40)
+        )
+        payload = {
+            "tool_name": "list_todos",
+            "summary": {"count": 10},
+            "full_result": {
+                "ok": True,
+                "todos": [{"id": 6, "title": "sixth"}],
+            },
+        }
+
+        with patch(
+            "app.context.context_index.read_context_ref",
+            return_value=payload,
+        ) as read_ref:
+            assembly = engine.assemble(messages)
+
+        read_ref.assert_called_once_with("ctx_test")
+        self.assertEqual(assembly.report["retrieved_ref_count"], 1)
+        self.assertEqual(assembly.report["retrieved_refs"][0]["status"], "loaded")
+        self.assertTrue(
+            any(
+                isinstance(message, dict)
+                and "[Retrieved context ref]" in message.get("content", "")
+                for message in assembly.input_messages
+            )
+        )
+
+    def test_invalid_requested_ref_is_reported_but_not_inserted(self) -> None:
+        messages = [
+            {"role": "user", "content": "old note " + ("x" * 120)},
+            {"role": "assistant", "content": "old answer " + ("x" * 120)},
+            {"role": "user", "content": "open exact ref ctx_missing"},
+        ]
+        engine = ContextEngine(
+            budget_config=ContextBudgetConfig(recent_window_tokens=40)
+        )
+
+        with patch(
+            "app.context.context_index.read_context_ref",
+            return_value=None,
+        ) as read_ref:
+            assembly = engine.assemble(messages)
+
+        read_ref.assert_called_once_with("ctx_missing")
+        self.assertEqual(assembly.report["retrieved_ref_count"], 0)
+        self.assertEqual(
+            assembly.report["retrieved_refs"],
+            [
+                {
+                    "ref_id": "ctx_missing",
+                    "reason": "current_request_requires_exact_fields",
+                    "status": "rejected",
+                }
+            ],
+        )
+        self.assertIn(
+            "context_ref_rejected",
+            [
+                diagnostic["code"]
+                for diagnostic in assembly.report["inspection"]["diagnostics"]
+            ],
+        )
+        self.assertFalse(
+            any(
+                isinstance(message, dict)
+                and "[Retrieved context ref]" in message.get("content", "")
+                for message in assembly.input_messages
+            )
+        )
+
+    def test_inspector_reports_exact_request_without_retrieval_match(self) -> None:
+        messages = [
+            {"role": "user", "content": "old note " + ("x" * 120)},
+            {"role": "assistant", "content": "old answer " + ("x" * 120)},
+            {"role": "user", "content": "complete todo id 999"},
+        ]
+        engine = ContextEngine(
+            budget_config=ContextBudgetConfig(recent_window_tokens=40)
+        )
+
+        assembly = engine.assemble(messages)
+
+        inspection = assembly.report["inspection"]
+        self.assertEqual(
+            inspection["decisions"][-1]["status"],
+            "no_match",
+        )
+        self.assertIn(
+            "exact_request_without_retrieval_match",
+            [diagnostic["code"] for diagnostic in inspection["diagnostics"]],
         )
 
 

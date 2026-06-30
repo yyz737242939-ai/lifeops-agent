@@ -4,6 +4,8 @@ from typing import Any, cast
 
 from app.context.context_budget import ContextBudgetConfig
 from app.context.context_compactor import compact_units
+from app.context.context_index import ContextIndex, ContextRetrievalResult
+from app.context.context_inspector import inspect_assembly_report
 from app.context.context_store import ContextStore
 from app.context.context_types import (
     ContextAssembly,
@@ -31,9 +33,11 @@ class ContextEngine:
         *,
         budget_config: ContextBudgetConfig | None = None,
         store: ContextStore | None = None,
+        context_index: ContextIndex | None = None,
     ) -> None:
         self.budget_config = budget_config or ContextBudgetConfig()
         self.store = store or ContextStore()
+        self.context_index = context_index or ContextIndex()
 
     def assemble(
         self,
@@ -45,7 +49,8 @@ class ContextEngine:
         self.store.replace_full_messages(messages)
         units = self._build_units(messages)
         selected_units, evicted_units, recent_token_count = self._select_units(units)
-        input_messages = self._messages_from_units(selected_units)
+        retrieval = self._retrieve_evicted_context(units, selected_units, evicted_units)
+        input_messages = self._assemble_input_messages(selected_units, retrieval)
         summary_inserted = bool(evicted_units and self.store.summary_message)
         placeholder_inserted = bool(evicted_units and not self.store.summary_message)
         if summary_inserted and self.store.summary_message is not None:
@@ -59,16 +64,20 @@ class ContextEngine:
         assembled_json_char_count = len(
             json.dumps(assembled_serialized, ensure_ascii=False)
         )
+        mode = (
+            "windowed_with_summary"
+            if summary_inserted
+            else (
+                "windowed_with_placeholder_summary"
+                if evicted_units
+                else "pass_through_with_units"
+            )
+        )
+        if retrieval.units or retrieval.ref_messages or retrieval.ref_reports:
+            mode = f"{mode}_and_retrieval"
+
         report = {
-            "mode": (
-                "windowed_with_summary"
-                if summary_inserted
-                else (
-                    "windowed_with_placeholder_summary"
-                    if evicted_units
-                    else "pass_through_with_units"
-                )
-            ),
+            "mode": mode,
             "raw_message_count": len(messages),
             "message_count": len(messages),
             "assembled_message_count": len(input_messages),
@@ -101,8 +110,33 @@ class ContextEngine:
                 if self.store.summary
                 else []
             ),
+            "retrieved_unit_count": len(retrieval.units),
+            "retrieved_units": [
+                {
+                    "unit_id": retrieved.unit.unit_id,
+                    "reason": retrieved.reason,
+                    "matched_fields": list(retrieved.matched_fields),
+                    "source": "context_index",
+                }
+                for retrieved in retrieval.units
+            ],
+            "retrieved_ref_count": len(
+                [
+                    ref_report
+                    for ref_report in retrieval.ref_reports
+                    if ref_report.get("status") == "loaded"
+                ]
+            ),
+            "retrieved_refs": retrieval.ref_reports,
+            "retrieval_query": {
+                "exact_required": retrieval.query.exact_required,
+                "ref_ids": list(retrieval.query.ref_ids),
+                "entity_ids": list(retrieval.query.entity_ids),
+                "domains": list(retrieval.query.domains),
+            },
             "units": [self._unit_report(unit) for unit in units],
         }
+        report["inspection"] = inspect_assembly_report(report)
         return ContextAssembly(input_messages=input_messages, report=report)
 
     def after_turn(self, messages: list[Any]) -> dict[str, Any]:
@@ -170,6 +204,61 @@ class ContextEngine:
         for unit in units:
             messages.extend(unit.messages)
         return messages
+
+    def _retrieve_evicted_context(
+        self,
+        units: list[ContextUnit],
+        selected_units: list[ContextUnit],
+        evicted_units: list[ContextUnit],
+    ) -> ContextRetrievalResult:
+        current_request = self._latest_user_text(units)
+        if not evicted_units or not current_request:
+            return self.context_index.retrieve(
+                query_text=current_request,
+                candidate_units=[],
+            )
+        return self.context_index.retrieve(
+            query_text=current_request,
+            candidate_units=evicted_units,
+            excluded_unit_ids={unit.unit_id for unit in selected_units},
+        )
+
+    def _assemble_input_messages(
+        self,
+        selected_units: list[ContextUnit],
+        retrieval: ContextRetrievalResult,
+    ) -> list[Any]:
+        if not retrieval.units and not retrieval.ref_messages:
+            return self._messages_from_units(selected_units)
+
+        retrieved_ids = {retrieved.unit.unit_id for retrieved in retrieval.units}
+        protected_units = [
+            unit
+            for unit in selected_units
+            if unit.protected and unit.unit_id not in retrieved_ids
+        ]
+        recent_units = [
+            unit
+            for unit in selected_units
+            if not unit.protected and unit.unit_id not in retrieved_ids
+        ]
+        messages = self._messages_from_units(protected_units)
+        for retrieved in retrieval.units:
+            messages.extend(retrieved.unit.messages)
+        messages.extend(retrieval.ref_messages)
+        messages.extend(self._messages_from_units(recent_units))
+        return messages
+
+    @staticmethod
+    def _latest_user_text(units: list[ContextUnit]) -> str:
+        for unit in reversed(units):
+            if unit.kind != "user" or not unit.messages:
+                continue
+            content = _message_field(unit.messages[0], "content")
+            if isinstance(content, str):
+                return content
+            return json.dumps(json_safe(content), ensure_ascii=False)
+        return ""
 
     def _build_units(self, messages: list[Any]) -> list[ContextUnit]:
         units: list[ContextUnit] = []

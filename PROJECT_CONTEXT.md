@@ -58,6 +58,8 @@ uv run python -m unittest discover -s tests -v
 | `app/context/context_budget.py` | Context窗口预算配置，当前使用字符数近似token估算 |
 | `app/context/context_store.py` | 内存版完整历史和Rolling Summary状态存储 |
 | `app/context/context_compactor.py` | 确定性Rolling Summary生成，把被窗口排除的旧Unit压缩成结构化摘要 |
+| `app/context/context_index.py` | 基于metadata的旧Context Unit与Ref按需检索；不使用embedding |
+| `app/context/context_inspector.py` | 把Context assembly report整理成overview、composition、decisions和diagnostics，便于日志观察和测试定位 |
 | `app/context/context_types.py` | ContextAssembly、ContextUnit 和字符数到 token 的近似估算类型 |
 | `app/context/context_manager.py` | Tool Observation 的 inline、summary、reference 压缩 |
 | `app/context/context_ref_store.py` | 完整 Tool Result 的 Context Ref 存储、metadata/hash/过期校验与读取 |
@@ -168,6 +170,9 @@ RunState的主要计数字段已经显式包含作用域和统计对象：
 - 发送给模型的 `input` 已由 `ContextEngine.assemble()` 生成；短对话仍原样透传，超过最近窗口预算时只发送历史summary或占位说明、protected units 和最近完整 units。
 - `ContextEngine` 会把历史切分为 user、assistant、tool 或 protected system_note 单元，并在日志中报告原始消息数、组装后消息数、单元数、近似token数、tool schema体积、evicted unit 数、summary插入状态和 protected unit 数。
 - Function Call 与紧随其后的 `function_call_output` 会被识别为同一个 tool unit；无法配对的工具相关消息会保守标记为 `protected=True`。
+- `ContextIndex` 会为旧unit提取确定性metadata，包括tool name、ref_id、entity id、domain关键词和action状态。`ContextEngine.assemble()` 只在当前用户请求出现精确字段/后续操作信号时，从窗口外旧unit中召回少量相关内容。
+- 按需恢复会把 retrieved unit/ref 写入 assembly report，说明召回原因、匹配字段和ref加载状态；普通总结类请求不会读取完整ref。
+- `ContextInspector` 会在 `assembly.report.inspection` 中输出压缩概览、组成计数、关键决策和诊断提示，例如 placeholder summary、精确请求未召回匹配内容、ref rejected 等。
 - Skill正文不会累积进 `messages`。
 - `Agent.messages` 仍会随长对话增长；增长的是完整事实源，不再总是无脑全量发送给模型。
 - 回合完成或停止时，`ContextEngine.after_turn()` 会把窗口外旧Unit滚动压缩进结构化summary。第一版summary用确定性规则生成：记录来源unit ids、用户目标片段、工具成功/失败、重要实体和受保护项；不会把assistant口头声称的成功当作真实成功。
@@ -200,7 +205,7 @@ RunState的主要计数字段已经显式包含作用域和统计对象：
 - 当前只有工具参数中的 `limit` 会传递给摘要数量；尚未从自然语言用户请求中独立解析 requested_count。
 - 压缩策略尚未系统理解哪些字段和后续Action一定需要精确保留。
 - Summary与Reference的选择主要由体积决定，而不是信息需求决定。
-- 长对话会重复发送全部历史；UAT-064的10轮对话曾消耗约64K tokens。
+- ContextIndex目前是确定性metadata检索，不做语义向量检索；只召回窗口外相关unit/ref，不保证理解所有自然语言指代表达。
 - Runtime只能检测确定性重复，不能识别“不断微调参数但目标不变”的语义循环。
 - 模型可能构造未由Runtime签发的Ref ID；工具会返回Not Found，但调用前尚无来源校验。
 
