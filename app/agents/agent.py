@@ -301,6 +301,7 @@ class Agent:
                 else:
                     self.messages.append({"role": "assistant", "content": answer})
                 run_state.complete()
+                self.context_engine.after_turn(self.messages)
                 events.log_final_answer(run_state, answer)
                 events.log_run_completed(run_state)
                 app_log.log_info("Run %s completed", run_state.run_id)
@@ -854,6 +855,7 @@ class Agent:
     def _stopped_answer(self, run_state: RunState) -> str:
         """Log and format a controlled runtime stop exactly once."""
         answer = _runtime_stop_answer(run_state)
+        self.context_engine.after_turn(self.messages)
         events.log_run_stopped(run_state, answer)
         app_log.log_warning(
             "Run %s stopped: %s", run_state.run_id, run_state.stop_reason

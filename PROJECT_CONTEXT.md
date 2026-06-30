@@ -56,7 +56,8 @@ uv run python -m unittest discover -s tests -v
 | `app/runtime/write_policy.py` | 当前用户输入的写授权、批量删除确认和成功声明检测 |
 | `app/runtime/context_engine.py` | LLM 输入组装入口；当前支持 pass-through 与第一版滑动窗口，并输出 Context Unit 与预算报告 |
 | `app/runtime/context_budget.py` | Context窗口预算配置，当前使用字符数近似token估算 |
-| `app/runtime/context_store.py` | 内存版完整历史存储，保留完整消息事实源 |
+| `app/runtime/context_store.py` | 内存版完整历史和Rolling Summary状态存储 |
+| `app/runtime/context_compactor.py` | 确定性Rolling Summary生成，把被窗口排除的旧Unit压缩成结构化摘要 |
 | `app/runtime/context_types.py` | ContextAssembly、ContextUnit 和字符数到 token 的近似估算类型 |
 | `app/runtime/context_manager.py` | Tool Observation 的 inline、summary、reference 压缩 |
 | `app/runtime/context_ref_store.py` | 完整 Tool Result 的 Context Ref 存储与读取 |
@@ -157,19 +158,19 @@ RunState的主要计数字段已经显式包含作用域和统计对象：
 
 ## 当前Context实现
 
-当前已有第一版 ContextEngine 滑动窗口和 Tool Observation 压缩；还没有 Rolling Summary。Tool Observation 压缩解决单次工具结果过大，滑动窗口解决跨轮历史持续增长，二者不要混淆。
+当前已有第一版 ContextEngine 滑动窗口、确定性 Rolling Summary 和 Tool Observation 压缩。Tool Observation 压缩解决单次工具结果过大，滑动窗口与Rolling Summary解决跨轮历史持续增长，二者不要混淆。
 
 ### Prompt与历史消息
 
 - `instructions` 每轮重新生成，通过独立参数发送。
 - `Agent.messages` 保存跨Chat历史，包括Function Call和Tool Observation。
-- `ContextStore` 当前以内存方式镜像完整历史；完整历史仍是事实源。
-- 发送给模型的 `input` 已由 `ContextEngine.assemble()` 生成；短对话仍原样透传，超过最近窗口预算时只发送 protected units、最近完整 units 和一条历史已压缩占位说明。
-- `ContextEngine` 会把历史切分为 user、assistant、tool 或 protected system_note 单元，并在日志中报告原始消息数、组装后消息数、单元数、近似token数、tool schema体积、evicted unit 数和 protected unit 数。
+- `ContextStore` 当前以内存方式镜像完整历史和Rolling Summary；完整历史仍是事实源，summary只是派生状态。
+- 发送给模型的 `input` 已由 `ContextEngine.assemble()` 生成；短对话仍原样透传，超过最近窗口预算时只发送历史summary或占位说明、protected units 和最近完整 units。
+- `ContextEngine` 会把历史切分为 user、assistant、tool 或 protected system_note 单元，并在日志中报告原始消息数、组装后消息数、单元数、近似token数、tool schema体积、evicted unit 数、summary插入状态和 protected unit 数。
 - Function Call 与紧随其后的 `function_call_output` 会被识别为同一个 tool unit；无法配对的工具相关消息会保守标记为 `protected=True`。
 - Skill正文不会累积进 `messages`。
 - `Agent.messages` 仍会随长对话增长；增长的是完整事实源，不再总是无脑全量发送给模型。
-- 被滑动窗口排除的旧内容目前只有占位说明，没有真实历史摘要。
+- 回合完成或停止时，`ContextEngine.after_turn()` 会把窗口外旧Unit滚动压缩进结构化summary。第一版summary用确定性规则生成：记录来源unit ids、用户目标片段、工具成功/失败、重要实体和受保护项；不会把assistant口头声称的成功当作真实成功。
 
 ### Tool Observation压缩
 

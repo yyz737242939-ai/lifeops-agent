@@ -3,6 +3,7 @@ from collections import Counter
 from typing import Any, cast
 
 from app.runtime.context_budget import ContextBudgetConfig
+from app.runtime.context_compactor import compact_units
 from app.runtime.context_store import ContextStore
 from app.runtime.context_types import (
     ContextAssembly,
@@ -45,8 +46,11 @@ class ContextEngine:
         units = self._build_units(messages)
         selected_units, evicted_units, recent_token_count = self._select_units(units)
         input_messages = self._messages_from_units(selected_units)
-        placeholder_inserted = bool(evicted_units)
-        if placeholder_inserted:
+        summary_inserted = bool(evicted_units and self.store.summary_message)
+        placeholder_inserted = bool(evicted_units and not self.store.summary_message)
+        if summary_inserted and self.store.summary_message is not None:
+            input_messages.insert(0, self.store.summary_message)
+        elif placeholder_inserted:
             input_messages.insert(0, self._summary_placeholder_message())
 
         serialized = json_safe(messages)
@@ -57,9 +61,13 @@ class ContextEngine:
         )
         report = {
             "mode": (
-                "windowed_with_placeholder_summary"
-                if evicted_units
-                else "pass_through_with_units"
+                "windowed_with_summary"
+                if summary_inserted
+                else (
+                    "windowed_with_placeholder_summary"
+                    if evicted_units
+                    else "pass_through_with_units"
+                )
             ),
             "raw_message_count": len(messages),
             "message_count": len(messages),
@@ -86,17 +94,38 @@ class ContextEngine:
             "recent_window_budget_tokens": (
                 self.budget_config.effective_recent_window_tokens
             ),
+            "summary_inserted": summary_inserted,
             "placeholder_summary_inserted": placeholder_inserted,
+            "summary_source_unit_count": len(
+                self.store.summary.get("source_unit_ids", [])
+                if self.store.summary
+                else []
+            ),
             "units": [self._unit_report(unit) for unit in units],
         }
         return ContextAssembly(input_messages=input_messages, report=report)
 
     def after_turn(self, messages: list[Any]) -> dict[str, Any]:
         self.store.replace_full_messages(messages)
+        units = self._build_units(messages)
+        _selected_units, evicted_units, _recent_token_count = self._select_units(units)
+        if not evicted_units:
+            return {
+                "compacted": False,
+                "reason": "within_recent_window",
+                "message_count": len(messages),
+                "evicted_unit_count": 0,
+            }
+
+        summary = compact_units(self.store.summary, evicted_units)
+        self.store.replace_summary(summary)
         return {
-            "compacted": False,
-            "reason": "sliding_window_without_summary",
+            "compacted": True,
+            "reason": "rolling_summary_updated",
             "message_count": len(messages),
+            "evicted_unit_count": len(evicted_units),
+            "summary_source_unit_count": len(summary["source_unit_ids"]),
+            "covered_until_unit_id": summary["covered_until_unit_id"],
         }
 
     def _select_units(

@@ -1,4 +1,5 @@
 import unittest
+import json
 from types import SimpleNamespace
 
 from app.runtime.context_budget import ContextBudgetConfig
@@ -153,6 +154,103 @@ class ContextEngineTests(unittest.TestCase):
         self.assertIn(protected_call, assembly.input_messages)
         self.assertGreater(assembly.report["protected_unit_count"], 0)
         self.assertGreater(assembly.report["evicted_unit_count"], 0)
+
+    def test_after_turn_updates_summary_for_evicted_units(self) -> None:
+        messages = [
+            {"role": "user", "content": f"old goal {index} " + ("x" * 80)}
+            for index in range(12)
+        ]
+        engine = ContextEngine(
+            budget_config=ContextBudgetConfig(recent_window_tokens=120)
+        )
+
+        report = engine.after_turn(messages)
+        assembly = engine.assemble(messages)
+
+        self.assertTrue(report["compacted"])
+        self.assertEqual(report["reason"], "rolling_summary_updated")
+        self.assertIsNotNone(engine.store.summary)
+        self.assertIsNotNone(engine.store.summary_message)
+        self.assertEqual(assembly.report["mode"], "windowed_with_summary")
+        self.assertTrue(assembly.report["summary_inserted"])
+        self.assertFalse(assembly.report["placeholder_summary_inserted"])
+        self.assertEqual(assembly.input_messages[0]["role"], "system")
+        self.assertIn("[Context summary]", assembly.input_messages[0]["content"])
+
+    def test_rolling_summary_replaces_state_without_duplicate_sources(self) -> None:
+        messages = [
+            {"role": "user", "content": f"old goal {index} " + ("x" * 80)}
+            for index in range(12)
+        ]
+        engine = ContextEngine(
+            budget_config=ContextBudgetConfig(recent_window_tokens=120)
+        )
+
+        first = engine.after_turn(messages)
+        first_sources = list(engine.store.summary["source_unit_ids"])
+        second = engine.after_turn(messages)
+        second_sources = list(engine.store.summary["source_unit_ids"])
+
+        self.assertTrue(first["compacted"])
+        self.assertTrue(second["compacted"])
+        self.assertEqual(first_sources, second_sources)
+        self.assertEqual(len(second_sources), len(set(second_sources)))
+
+    def test_summary_does_not_trust_assistant_success_claim(self) -> None:
+        messages = [
+            {"role": "user", "content": "add a todo " + ("x" * 120)},
+            {"role": "assistant", "content": "Saved it successfully." + ("x" * 120)},
+            {"role": "user", "content": "new question"},
+        ]
+        engine = ContextEngine(
+            budget_config=ContextBudgetConfig(recent_window_tokens=80)
+        )
+
+        engine.after_turn(messages)
+
+        self.assertEqual(engine.store.summary["successful_actions"], [])
+
+    def test_summary_records_runtime_tool_success(self) -> None:
+        call = SimpleNamespace(
+            type="function_call",
+            name="add_todo",
+            arguments='{"title":"pay rent"}',
+            call_id="call-1",
+        )
+        observation = {
+            "type": "function_call_output",
+            "call_id": "call-1",
+            "output": json.dumps(
+                {"ok": True, "action": "add_todo", "id": "todo-1"},
+                ensure_ascii=False,
+            ),
+        }
+        messages = [
+            {"role": "user", "content": "please add a todo " + ("x" * 120)},
+            call,
+            observation,
+            {"role": "assistant", "content": "done"},
+            {"role": "user", "content": "new question"},
+        ]
+        engine = ContextEngine(
+            budget_config=ContextBudgetConfig(recent_window_tokens=80)
+        )
+
+        engine.after_turn(messages)
+
+        self.assertIn(
+            {
+                "unit_id": "u_0002",
+                "tool_name": "add_todo",
+                "call_id": "call-1",
+                "action": "add_todo",
+            },
+            engine.store.summary["successful_actions"],
+        )
+        self.assertIn(
+            {"unit_id": "u_0002", "type": "id", "value": "todo-1"},
+            engine.store.summary["important_entities"],
+        )
 
 
 if __name__ == "__main__":

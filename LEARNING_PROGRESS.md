@@ -53,7 +53,7 @@ LifeOps Agent 的最终方向是真实可用的生活管理产品；本文件只
 | System Instructions | 本轮行为规则 | 每轮动态重建 |
 | Recent Conversation | 最近用户、助手和工具交互 | 完整历史保存在 `messages`/ContextStore；发给模型的是滑动窗口后的工作上下文 |
 | Tool Observation | 工具返回的数据 | 已有none/summary/reference压缩 |
-| Conversation Summary | 被移出窗口的历史语义 | 暂用占位说明；尚未实现真实Rolling Summary |
+| Conversation Summary | 被移出窗口的历史语义 | 已有第一版确定性Rolling Summary；尚未实现LLM摘要和失效重建 |
 | Long-term Memory | 跨会话长期事实与偏好 | 尚未实现 |
 
 当前最重要的认识：
@@ -144,7 +144,7 @@ Context可以丢失展示细节，但不能丢失完成当前请求或后续Acti
 - 数据发生修改后，旧摘要中的派生结论如何失效。
 - 摘要生成失败时如何安全退回完整窗口或确定性裁剪。
 
-当前已完成第一版确定性滑动窗口：按近似token预算保留最近完整Context Unit，并总是保留 protected unit；被挤出窗口的旧内容暂时用占位说明代替，尚未生成真实摘要。
+当前已完成第一版确定性滑动窗口和Rolling Summary：按近似token预算保留最近完整Context Unit，并总是保留 protected unit；被挤出窗口的旧内容会在回合结束后滚动压缩成结构化summary，下一次assemble时优先放入历史summary message。summary是派生状态，不是事实源。
 
 ### 第五部分：Context Eval
 
@@ -176,9 +176,9 @@ Context可以丢失展示细节，但不能丢失完成当前请求或后续Acti
 1. Context组成与token基线（已完成第一版：ContextEngine pass-through + assembly report）
 2. Context不变量和字段分类（已完成第一版：ContextUnit + function_call/observation 配对）
 3. 最近消息窗口（已完成第一版：滑动窗口 + 占位摘要 + protected unit 保留）
-4. 修复“固定5条摘要”问题
-5. Ref来源校验与生命周期
-6. 历史摘要
+4. 历史摘要（已完成第一版：确定性Rolling Summary + summary message）
+5. 修复“固定5条摘要”问题
+6. Ref来源校验与生命周期
 7. 摘要更新、失效和恢复
 8. 小型Context行为回归
 ```
