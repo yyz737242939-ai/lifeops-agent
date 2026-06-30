@@ -82,6 +82,29 @@ def _update_todo_parameters() -> ToolParameters:
     return parameters
 
 
+def _list_todos_parameters() -> ToolParameters:
+    return {
+        "type": "object",
+        "properties": {
+            "limit": {
+                "type": "integer",
+                "description": "Optional maximum number of todos to return.",
+            },
+            "status": {
+                "type": "string",
+                "enum": ["todo", "done"],
+                "description": "Optional status filter.",
+            },
+            "sort": {
+                "type": "string",
+                "enum": ["priority_due", "created_at", "id"],
+                "description": "Sort order. Use priority_due for planning.",
+            },
+        },
+        "required": [],
+    }
+
+
 def _todo_to_dict(todo: Todo) -> dict[str, Any]:
     return todo.model_dump(mode="json")
 
@@ -133,12 +156,40 @@ def add_todo(
 
 @register_tool(
     name="list_todos",
-    description="List all todo tasks with their ids, status, priority, and due dates.",
-    parameters=_empty_parameters(),
+    description="List todo tasks with their ids, status, priority, and due dates.",
+    parameters=_list_todos_parameters(),
 )
-def list_todos() -> ToolResult:
+def list_todos(
+    limit: int | None = None,
+    status: str | None = None,
+    sort: str = "priority_due",
+) -> ToolResult:
     """Return all Todo records for planning or inspection."""
     todos = todo_store.list_todos()
+    if status in {"todo", "done"}:
+        todos = [todo for todo in todos if todo.status == status]
+    if sort == "priority_due":
+        priority_rank = {"high": 0, "medium": 1, "low": 2}
+        todos = sorted(
+            todos,
+            key=lambda todo: (
+                priority_rank.get(todo.priority, 1),
+                todo.due_date or "9999-99-99",
+                todo.id,
+            ),
+        )
+    elif sort == "created_at":
+        todos = sorted(todos, key=lambda todo: todo.created_at)
+    elif sort == "id":
+        todos = sorted(todos, key=lambda todo: todo.id)
+    if limit is not None:
+        if limit < 1:
+            return {
+                "ok": False,
+                "action": "list_todos",
+                "error": "limit_must_be_at_least_1",
+            }
+        todos = todos[:limit]
     return {
         "ok": True,
         "action": "list_todos",
@@ -771,6 +822,9 @@ def read_context_ref(ref_id: str) -> ToolResult:
         "action": "read_context_ref",
         "ref_id": ref_id,
         "tool_name": payload.get("tool_name"),
+        "created_at": payload.get("created_at"),
+        "expires_at": payload.get("expires_at"),
+        "payload_hash": payload.get("payload_hash"),
         "summary": payload.get("summary"),
         "full_result": payload.get("full_result"),
     }

@@ -12,15 +12,23 @@
 -> 对被压缩内容保留摘要、来源和恢复路径
 ```
 
+当前对摘要目标的修正：
+
+```text
+Conversation Summary 的目标不是恢复原文，而是让 LLM 对窗口外对话保持足够好的任务认知。
+只有工具结果、ID、金额、日期、确认范围等高风险事实，才要求精确保留或通过 Ref/Index 按需恢复。
+```
+
 ## 0. 当前事实与施工边界
 
 当前仓库的事实基线：
 
-- `app/agents/agent.py` 里 `Agent.messages` 保存跨多轮的完整历史，并直接作为 `client.responses.create(..., input=self.messages)` 的输入。
+- `app/agents/agent.py` 里 `Agent.messages` 保存跨多轮的完整历史；LLM 请求输入已经改为由 `ContextEngine.assemble()` 生成。
 - `instructions` 和 tool schemas 每轮动态生成，不直接累积进 `Agent.messages`。
-- `app/runtime/context_manager.py` 目前只做 Tool Observation 压缩：`none / summary / reference`。
-- `app/runtime/context_ref_store.py` 可以保存并读取完整 Tool Result，但目前缺少 session/run 归属、TTL、来源校验和清理策略。
-- 还没有整体对话窗口管理：没有滑动窗口、历史摘要、预算编排、索引检索、Context Inspect。
+- `app/runtime/context_manager.py` 目前做 Tool Observation 压缩：`none / summary / summary_reference / reference`。
+- `app/runtime/context_ref_store.py` 可以保存并读取完整 Tool Result，已有 metadata、payload hash 和 TTL 过期校验；session/run 归属与更严格来源校验仍可继续加强。
+- 已有第一版整体对话窗口管理：ContextEngine assemble、Context Unit、近似预算、滑动窗口、Rolling Summary 和 summary message。
+- 还没有 Context Index、旧 unit 检索、Context Inspect 和主动/被动/手动压缩触发。
 
 本阶段明确不做：
 
@@ -38,6 +46,17 @@
 - 先用字符数/近似 token 预算，后续再替换成精确 tokenizer。
 - 先做确定性 metadata index，不引入 embedding。
 - 先做 structured rolling summary，不做多层 summary DAG。
+
+当前施工进度：
+
+```text
+1. Pass-through ContextEngine：已完成第一版。
+2. Context Unit + Budget Report：已完成第一版。
+3. Sliding Window + ContextStore：已完成第一版。
+4. Rolling Summary：已完成第一版。
+5. Tool Observation + Context Ref 升级：已完成第一版。
+6. Context Index + 按需恢复：下一步从这里开始。
+```
 
 ## 1. 总体架构
 
@@ -416,9 +435,9 @@ app/runtime/context_compactor.py
 
 ### 目标
 
-把当前 `context_manager.py` 的工具结果压缩纳入 Context Engine 思路：不只是看体积，还要看用户需求和可恢复性。
+把当前 `context_manager.py` 的工具结果压缩纳入 Context Engine 思路：不只是看体积，还要看用户需求、精确保留和按需恢复。
 
-### 当前问题
+### 已解决的原始问题
 
 - Todo summary 固定 top 5，用户问 6 条时第 6 条可能丢失。
 - `summary` 策略没有 ref，摘要丢掉的字段无法恢复。
@@ -456,7 +475,7 @@ compact_tool_output(
 
 - 用户问“最值得先做的 6 项”，summary 至少保留 6 项的 title/id/priority/due_date。
 
-#### 5.3 可恢复性规则
+#### 5.3 精确保留与按需恢复规则
 
 只要结果被截断，并且后续可能需要精确字段，就生成 ref。
 
@@ -504,11 +523,28 @@ large result -> summary + ref
 
 这一步学习的是“压缩不是删除，而是替换成可恢复表示”。尤其在工具结果里，ID、金额、日期、状态这些字段不能随便丢。
 
+当前完成状态：
+
+- `list_todos` 已支持 `limit/status/sort`，可以从源头减少不必要 observation。
+- `compact_tool_output()` 已能根据用户请求条数调整摘要数量。
+- 被摘要截断但可能继续使用的工具结果会升级为 `summary_reference`，保留摘要和 ref。
+- `context_ref_store.py` 已增加 `created_at/expires_at/payload_hash`，并拒绝过期 ref。
+- 后续仍可加强 session/run 归属校验和 ref 清理策略。
+
 ## 7. 阶段六：Context Index 和简单检索
 
 ### 目标
 
-当旧内容被 summary 替代后，仍然可以按当前用户问题找回少量相关旧 unit。
+当旧内容被 summary 替代后，仍然可以按当前用户问题找回少量相关旧 unit 或有效 ref。
+
+这一阶段是下一步施工起点。它解决的不是“把所有历史重新塞回模型”，而是：
+
+```text
+当前问题需要精确信息
+-> summary 不足以回答
+-> 用 Index 判断应该恢复哪一小块旧上下文
+-> 只把相关 unit/ref 放回 working context
+```
 
 第一版不做向量，用确定性 metadata index：
 
@@ -524,6 +560,23 @@ ref_ids
 protected
 ```
 
+### 按需恢复原则
+
+按需恢复不是让摘要可逆，也不是把完整历史再次全量发送给 LLM。它只在当前请求需要精确事实时，把最小必要上下文恢复进本轮工作上下文。
+
+需要触发按需恢复的信号：
+
+- 用户提到明确 ID、ref_id、日期、金额、Todo 标题、Expense 描述等可定位字段。
+- 用户要求继续操作旧结果，例如“完成刚才第 6 个”“把那笔 38 元的消费改掉”。
+- 当前 summary 只包含概括，但缺少执行工具所需的精确参数。
+- pending confirmation、失败重试、批量操作范围等交互状态跨过了窗口边界。
+
+不应该触发按需恢复的情况：
+
+- 用户只是要普通总结、解释或闲聊。
+- summary 已经足够回答，并且不涉及写入或精确字段。
+- ref 已过期、来源不可信、跨 scope 或无法被 runtime 验证。
+
 ### 推荐新增文件
 
 ```text
@@ -538,6 +591,8 @@ app/runtime/context_index.py
 - 出现 tool/domain 关键词，如 todo、expense、sleep、activity，找对应 tool units。
 - pending confirmation 永远进入 working context。
 - 最近已经在窗口里的 unit 不重复检索。
+- 如果找到的是 `summary_reference`，优先放入摘要；只有当前请求需要精确字段时才读取完整 ref。
+- 如果需要读取 ref，必须经过 `read_context_ref` 的有效性校验，不接受模型编造的 ref_id。
 
 ### Assembly 中加入 retrieved units
 
@@ -550,16 +605,40 @@ retrieved old units
 recent units
 ```
 
+其中 `retrieved old units` 应记录恢复原因，例如：
+
+```json
+{
+  "unit_id": "u_123",
+  "reason": "matched_todo_id",
+  "matched_fields": ["todo_id"],
+  "source": "context_index"
+}
+```
+
+如果恢复的是 ref，report 中应记录：
+
+```json
+{
+  "ref_id": "ctx_abc",
+  "reason": "current_request_requires_exact_fields",
+  "status": "loaded"
+}
+```
+
 ### 验收标准
 
-- 摘要后用户追问某个 Todo ID，能找回相关旧 unit 或 ref。
+- 摘要后用户追问某个 Todo ID，能找回相关旧 unit 或有效 ref。
 - 检索数量有预算限制。
 - retrieved units 出现在 inspect/report 里。
 - 没找到时明确不编造。
+- summary 足够回答时，不读取完整 ref。
+- ref 过期、伪造或不属于允许 scope 时，拒绝恢复并给出安全错误。
+- 按需恢复不会破坏 function_call / observation 配对，也不会把无关旧历史重新塞回模型。
 
 ### 学习重点
 
-这一步学习的是“索引不是记忆”。索引只是帮你从完整历史或 ref 中找回相关上下文。
+这一步学习的是“索引不是记忆，按需恢复也不是可逆摘要”。索引只是帮你从完整历史或 ref 中找回当前请求真正需要的少量上下文；Conversation Summary 负责认知连续性，Index/Ref 负责高风险事实的精确恢复。
 
 ## 8. 阶段七：Context Inspector 和可观测性
 
@@ -714,7 +793,9 @@ tests/test_context_eval_cases.py
 8. 历史 summary 只包含成功 WRITE，不包含失败写入或模型口头成功。
 9. 批量删除确认跨压缩后，确认范围不能丢失。
 10. 编造/过期/跨 session ref 不能读取。
-11. 压缩前后 tool choice 和 tool arguments 保持关键一致。
+11. summary 足够回答时不读取完整 ref；summary 不足且涉及精确字段时才按需恢复。
+12. 按需恢复只带回相关旧 unit/ref，不把完整历史重新塞回模型。
+13. 压缩前后 tool choice 和 tool arguments 保持关键一致。
 
 ### 验收标准
 
@@ -737,17 +818,17 @@ tests/test_context_eval_cases.py
 
 | 顺序 | 阶段 | 主要产物 | 行为是否改变 |
 |---|---|---|---|
-| 1 | Pass-through Engine | `context_engine.py`, `context_types.py` | 不应改变 |
-| 2 | Unit + Budget Report | unit breakdown, token estimate | 不应改变 |
-| 3 | Sliding Window | assemble 后 input 变短 | 开始改变 |
-| 4 | Rolling Summary | summary state/message | 改变 |
-| 5 | Tool Observation + Ref 升级 | dynamic summary, metadata ref | 改变 |
-| 6 | Index + Retrieval | deterministic index | 改变 |
-| 7 | Inspector | context report/logs | 不应改变业务行为 |
-| 8 | Triggers | active/passive/manual compact | 改变 |
-| 9 | Eval | context regression tests | 不改变 |
+| 1 | Pass-through Engine | `context_engine.py`, `context_types.py` | 已完成第一版 |
+| 2 | Unit + Budget Report | unit breakdown, token estimate | 已完成第一版 |
+| 3 | Sliding Window | assemble 后 input 变短 | 已完成第一版 |
+| 4 | Rolling Summary | summary state/message | 已完成第一版 |
+| 5 | Tool Observation + Ref 升级 | dynamic summary, `summary_reference`, metadata ref | 已完成第一版 |
+| 6 | Index + 按需恢复 | deterministic index, retrieved units/ref loading | 下一步 |
+| 7 | Inspector | context report/logs | 待做 |
+| 8 | Triggers | active/passive/manual compact | 待做 |
+| 9 | Eval | context regression tests | 待做 |
 
-最关键的第一刀：
+已经完成的第一刀：
 
 ```text
 先让 Agent 的 LLM input 只从 ContextEngine.assemble() 出来。
@@ -760,21 +841,21 @@ tests/test_context_eval_cases.py
 
 ```text
 请阅读 AGENTS.md、PROJECT_CONTEXT.md、LEARNING_PROGRESS.md、CONTEXT_ENGINE_IMPLEMENTATION_PLAN.md。
-然后从“阶段一：建立 pass-through ContextEngine”开始施工。
+然后从“阶段六：Context Index 和简单检索”开始施工。
 要求：
-1. 先确认当前 agent.py 里 LLM input 的位置。
-2. 新增最小 ContextEngine，不改变现有行为。
-3. 接入日志里的 context assembly report。
-4. 跑现有测试。
-5. 不要实现滑动窗口，阶段一只迁移控制点。
+1. 先确认前五步当前实现状态，不重复重写已有 ContextEngine / ContextStore / Rolling Summary / summary_reference。
+2. 新增最小 ContextIndex，用 metadata 而不是 embedding 做第一版检索。
+3. 实现按需恢复：summary 足够时不读取完整 ref；当前请求需要精确字段时才恢复相关 unit/ref。
+4. retrieved unit/ref 必须写入 assembly report，说明恢复原因。
+5. 跑相关 Context 和 Tool Ref 测试。
 ```
 
-如果阶段一完成后继续：
+如果阶段六完成后继续：
 
 ```text
-继续 CONTEXT_ENGINE_IMPLEMENTATION_PLAN.md 的阶段二。
-重点是 ContextUnit 切分、function_call + observation 配对、预算报告。
-不要开始裁剪上下文。
+继续 CONTEXT_ENGINE_IMPLEMENTATION_PLAN.md 的阶段七。
+重点是 Context Inspector 和可观测性。
+不要引入向量数据库或长期Memory。
 ```
 
 ## 13. 完成标准
@@ -786,8 +867,9 @@ tests/test_context_eval_cases.py
 - Function Call + Observation 配对不会被破坏。
 - 长对话有滑动窗口和历史摘要。
 - 被压缩的工具结果有真实、受控、可过期的恢复路径。
+- 当前请求需要精确字段时，可以通过 Index/Ref 按需恢复少量相关旧上下文。
+- 普通对话摘要不要求可逆恢复原文，但要维持用户目标、偏好、决定、开放问题和当前任务的认知连续性。
 - 摘要有来源、版本和可解释的更新规则。
 - 当前用户问题可以从旧历史中召回少量相关 unit。
 - 每轮日志能解释 context 的组成、预算和压缩原因。
 - 压缩前后关键工具选择、写入安全、事实字段和确认状态有回归测试保护。
-

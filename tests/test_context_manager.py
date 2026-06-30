@@ -29,7 +29,7 @@ class ContextManagerTests(unittest.TestCase):
         self.assertEqual(compacted, original)
         self.assertEqual(metadata["strategy"], "none")
 
-    def test_medium_list_uses_domain_summary(self) -> None:
+    def test_medium_list_uses_domain_summary_with_recovery_ref(self) -> None:
         result = {
             "ok": True,
             "action": "list_todos",
@@ -37,12 +37,48 @@ class ContextManagerTests(unittest.TestCase):
         }
         original = json.dumps(result)
 
-        compacted, metadata = compact_tool_output("list_todos", original)
+        with patch(
+            "app.runtime.context_manager.save_context_ref", return_value="ctx_test"
+        ) as save_ref:
+            compacted, metadata = compact_tool_output("list_todos", original)
         payload = json.loads(compacted)
 
-        self.assertEqual(metadata["strategy"], "summary")
+        save_ref.assert_called_once()
+        self.assertEqual(metadata["strategy"], "summary_reference")
         self.assertEqual(payload["summary"]["open"], 9)
         self.assertEqual(len(payload["summary"]["top_open_items"]), 5)
+        self.assertEqual(payload["ref_id"], "ctx_test")
+
+    def test_requested_count_controls_todo_summary_size(self) -> None:
+        result = {
+            "ok": True,
+            "action": "list_todos",
+            "todos": [_todo(i) for i in range(9)],
+        }
+        original = json.dumps(result)
+
+        with patch(
+            "app.runtime.context_manager.save_context_ref", return_value="ctx_test"
+        ):
+            compacted, metadata = compact_tool_output(
+                "list_todos",
+                original,
+                requested_count=6,
+            )
+        payload = json.loads(compacted)
+
+        self.assertEqual(metadata["strategy"], "summary_reference")
+        self.assertEqual(len(payload["summary"]["top_open_items"]), 6)
+        sixth = payload["summary"]["top_open_items"][5]
+        self.assertEqual(
+            {key: sixth[key] for key in ("id", "title", "priority", "due_date")},
+            {
+                "id": 5,
+                "title": "Task 5",
+                "priority": "medium",
+                "due_date": None,
+            },
+        )
 
     @patch("app.runtime.context_manager.save_context_ref", return_value="ctx_test")
     def test_large_list_uses_reference(self, save_ref) -> None:

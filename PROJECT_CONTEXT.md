@@ -60,7 +60,7 @@ uv run python -m unittest discover -s tests -v
 | `app/runtime/context_compactor.py` | 确定性Rolling Summary生成，把被窗口排除的旧Unit压缩成结构化摘要 |
 | `app/runtime/context_types.py` | ContextAssembly、ContextUnit 和字符数到 token 的近似估算类型 |
 | `app/runtime/context_manager.py` | Tool Observation 的 inline、summary、reference 压缩 |
-| `app/runtime/context_ref_store.py` | 完整 Tool Result 的 Context Ref 存储与读取 |
+| `app/runtime/context_ref_store.py` | 完整 Tool Result 的 Context Ref 存储、metadata/hash/过期校验与读取 |
 | `app/runtime/idempotency_store.py` | 写工具成功结果的幂等存储与重放 |
 | `app/skills/skill_router.py` | 当前输入的确定性 Skill 路由 |
 | `app/skills/skill_state.py` | Skill 继承、替换、清理和 Ref-only 状态 |
@@ -174,26 +174,31 @@ RunState的主要计数字段已经显式包含作用域和统计对象：
 
 ### Tool Observation压缩
 
-`compact_tool_output()`在工具成功后，根据字符数和主列表长度选择：
+`compact_tool_output()`在工具成功后，根据字符数、主列表长度和请求数量选择：
 
 1. `none`：小结果完整进入Context。
 2. `summary`：中等结果替换成领域结构化摘要。
-3. `reference`：大结果保存完整值，只把摘要、`ref_id`和读取提示放入Context。
+3. `summary_reference`：中等结果使用摘要进入Context，同时保存完整结果到Ref以便恢复。
+4. `reference`：大结果保存完整值，只把摘要、`ref_id`和读取提示放入Context。
 
 当前阈值使用字符数和列表条数，不是精确token数。Todo、Expense、Daily Log和Activity
-有领域摘要；错误结果与 `read_context_ref` 返回值不再次压缩。
+有领域摘要；Todo/Expense摘要可根据工具参数中的 `limit` 保留更多条关键记录。错误结果与 `read_context_ref` 返回值不再次压缩。
+
+`list_todos` 支持 `limit`、`status` 和 `sort` 参数，优先从工具源头减少Observation体积。
 
 ### Context Ref
 
-- Reference策略会把完整结果写入本地Ref Store。
+- Reference和Summary+Reference策略会把完整结果写入本地Ref Store。
 - LLM只有在工具结果明确提供真实 `ref_id` 后，才应调用 `read_context_ref`。
-- 当前Ref没有过期、清理、会话归属和访问范围策略。
-- Summary策略不会创建Ref，因此摘要丢失的记录目前无法按需展开。
+- Ref记录包含 `created_at`、`expires_at`、`tool_name`、`summary`、`full_result` 和 `payload_hash`。
+- `read_context_ref` 会拒绝非 `ctx_` 前缀、不存在或已过期的Ref。
+- 当前Ref还没有session/run归属和更细访问范围策略。
+- Summary+Reference策略已经能让被摘要丢掉的完整结果按需展开；纯Summary仍不创建Ref。
 
 ### 已确认的Context缺口
 
-- Todo摘要固定保留5条；用户要求6条时，第6条真实字段不可用。
-- 压缩策略不了解用户当前需要多少条、哪些字段和后续Action。
+- 当前只有工具参数中的 `limit` 会传递给摘要数量；尚未从自然语言用户请求中独立解析 requested_count。
+- 压缩策略尚未系统理解哪些字段和后续Action一定需要精确保留。
 - Summary与Reference的选择主要由体积决定，而不是信息需求决定。
 - 长对话会重复发送全部历史；UAT-064的10轮对话曾消耗约64K tokens。
 - Runtime只能检测确定性重复，不能识别“不断微调参数但目标不变”的语义循环。

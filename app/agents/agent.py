@@ -141,6 +141,11 @@ def _parse_result_object(result: str) -> dict[str, Any] | None:
     return parse_json_object(result)
 
 
+def _requested_count_from_arguments(arguments: dict[str, Any]) -> int | None:
+    limit = arguments.get("limit")
+    return limit if isinstance(limit, int) and limit > 0 else None
+
+
 def _runtime_stop_answer(run_state: RunState) -> str:
     reason_messages = {
         StopReason.LLM_BUDGET_EXHAUSTED: "模型调用轮数已达到限制。",
@@ -558,6 +563,7 @@ class Agent:
         compacted_result, compaction = compact_tool_output(
             function_call.name,
             execution.content,
+            requested_count=_requested_count_from_arguments(arguments),
         )
         action_succeeded = bool(
             execution.parsed is not None and execution.parsed.get("ok") is True

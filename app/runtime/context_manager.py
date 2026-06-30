@@ -16,6 +16,7 @@ SUMMARY_LIST_THRESHOLDS = {
     "list_daily_logs": 8,
     "recommend_activities": 3,
 }
+DEFAULT_SUMMARY_ITEM_LIMIT = 5
 
 
 def _safe_date(value: str | None) -> date | None:
@@ -27,11 +28,23 @@ def _safe_date(value: str | None) -> date | None:
         return None
 
 
-def _top_items(items: list[dict[str, Any]], limit: int = 5) -> list[dict[str, Any]]:
+def _top_items(
+    items: list[dict[str, Any]], limit: int = DEFAULT_SUMMARY_ITEM_LIMIT
+) -> list[dict[str, Any]]:
     return items[:limit]
 
 
-def _summarize_todos(result: dict[str, Any]) -> dict[str, Any]:
+def _summary_item_limit(requested_count: int | None) -> int:
+    if requested_count is None:
+        return DEFAULT_SUMMARY_ITEM_LIMIT
+    return max(DEFAULT_SUMMARY_ITEM_LIMIT, requested_count)
+
+
+def _summarize_todos(
+    result: dict[str, Any],
+    *,
+    requested_count: int | None = None,
+) -> dict[str, Any]:
     todos = result.get("todos", [])
     if not isinstance(todos, list):
         return {"count": result.get("count", 0)}
@@ -69,7 +82,10 @@ def _summarize_todos(result: dict[str, Any]) -> dict[str, Any]:
         "high_priority_open": len(high_open),
         "due_today": len(due_today),
         "overdue": len(overdue),
-        "top_open_items": _top_items(open_todos),
+        "top_open_items": _top_items(
+            open_todos,
+            limit=_summary_item_limit(requested_count),
+        ),
     }
 
 
@@ -98,7 +114,11 @@ def _summarize_daily_logs(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _summarize_expenses(result: dict[str, Any]) -> dict[str, Any]:
+def _summarize_expenses(
+    result: dict[str, Any],
+    *,
+    requested_count: int | None = None,
+) -> dict[str, Any]:
     expenses = result.get("expenses", [])
     if isinstance(expenses, list):
         category_totals: dict[str, float] = {}
@@ -121,7 +141,10 @@ def _summarize_expenses(result: dict[str, Any]) -> dict[str, Any]:
                 2,
             ),
             "category_totals": category_totals,
-            "recent_expenses": _top_items(expenses, limit=5),
+            "recent_expenses": _top_items(
+                expenses,
+                limit=_summary_item_limit(requested_count),
+            ),
         }
 
     summary = result.get("summary")
@@ -148,7 +171,12 @@ def _summarize_generic(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def summarize_tool_result(tool_name: str, result: dict[str, Any]) -> dict[str, Any]:
+def summarize_tool_result(
+    tool_name: str,
+    result: dict[str, Any],
+    *,
+    requested_count: int | None = None,
+) -> dict[str, Any]:
     """Build a domain-aware summary while preserving action-relevant fields."""
     summarizers = {
         "list_todos": _summarize_todos,
@@ -157,7 +185,10 @@ def summarize_tool_result(tool_name: str, result: dict[str, Any]) -> dict[str, A
         "summarize_spending": _summarize_expenses,
         "recommend_activities": _summarize_activities,
     }
-    return summarizers.get(tool_name, _summarize_generic)(result)
+    summarizer = summarizers.get(tool_name, _summarize_generic)
+    if summarizer in {_summarize_todos, _summarize_expenses}:
+        return summarizer(result, requested_count=requested_count)
+    return summarizer(result)
 
 
 def _primary_list_count(result: dict[str, Any]) -> int:
@@ -214,7 +245,7 @@ def _build_compacted_payload(
         "compaction_strategy": strategy,
         "summary": summary,
     }
-    if strategy == "reference":
+    if ref_id is not None:
         payload.update(
             {
                 "ref_id": ref_id,
@@ -222,6 +253,14 @@ def _build_compacted_payload(
             }
         )
     return payload
+
+
+def _summary_truncates_result(summary: dict[str, Any], list_count: int) -> bool:
+    for key in ("top_open_items", "recent_expenses", "recent_logs", "top_activities"):
+        value = summary.get(key)
+        if isinstance(value, list):
+            return len(value) < list_count
+    return False
 
 
 def _finish_compaction(
@@ -245,7 +284,12 @@ def _finish_compaction(
     return compacted_json, metadata
 
 
-def compact_tool_output(tool_name: str, result_json: str) -> tuple[str, dict[str, Any]]:
+def compact_tool_output(
+    tool_name: str,
+    result_json: str,
+    *,
+    requested_count: int | None = None,
+) -> tuple[str, dict[str, Any]]:
     """Compact a successful tool result without losing later-action essentials."""
     parsed_result = parse_json_object(result_json)
     original_chars = len(result_json)
@@ -260,7 +304,11 @@ def compact_tool_output(tool_name: str, result_json: str) -> tuple[str, dict[str
     if parsed_result.get("ok") is False:
         return result_json, metadata
 
-    summary = summarize_tool_result(tool_name, parsed_result)
+    summary = summarize_tool_result(
+        tool_name,
+        parsed_result,
+        requested_count=requested_count,
+    )
     list_count = _primary_list_count(parsed_result)
     strategy = _select_compaction_strategy(
         tool_name,
@@ -290,17 +338,28 @@ def compact_tool_output(tool_name: str, result_json: str) -> tuple[str, dict[str
         )
 
     if strategy == "summary":
+        ref_id = None
+        effective_strategy = strategy
+        if _summary_truncates_result(summary, list_count):
+            ref_id = save_context_ref(
+                tool_name=tool_name,
+                full_result=parsed_result,
+                summary=summary,
+            )
+            effective_strategy = "summary_reference"
         payload = _build_compacted_payload(
             tool_name,
             parsed_result,
             summary,
-            strategy=strategy,
+            strategy=effective_strategy,
+            ref_id=ref_id,
         )
         return _finish_compaction(
             payload,
             metadata,
-            strategy=strategy,
+            strategy=effective_strategy,
             summary=summary,
+            ref_id=ref_id,
         )
 
     return result_json, metadata

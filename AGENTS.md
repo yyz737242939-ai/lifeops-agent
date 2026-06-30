@@ -4,7 +4,11 @@
 
 - 本仓库既是 Agent Runtime 机制学习项目，也是 LifeOps 个人生活管理产品的早期版本。
 - 开始规划或修改前，先阅读 `PROJECT_CONTEXT.md` 了解当前事实，再阅读 `LEARNING_PROGRESS.md` 了解当前学习主线和下一步。
-- 本文件保持简洁。稳定的项目事实写入 `PROJECT_CONTEXT.md`，学习计划和推进顺序写入 `LEARNING_PROGRESS.md`。
+- 本文件保持简洁。稳定的项目事实写入 `PROJECT_CONTEXT.md`，未来的学习计划和推进顺序写入 `LEARNING_PROGRESS.md`。
+- `LEARNING_PROGRESS.md`随着项目的推进以及计划内的功能实现，可以被实时更改。将实现的计划目标删掉，并添加到`PROJECT_CONTEXT.md`。
+- `PROJECT_CONTEXT.md`用于快速了解项目架构以及记录项目的重要功能推进全过程，是后续生成学习报告的历史参考资料，因此要尽可能的把重点全标明出来
+- 一般来说，当用户下达指令开始做某一个功能的时候，更新完代码后相应的功能就需要记录到`PROJECT_CONTEXT.md`
+- 重要的阶段更新需写进CHANGELOG.md，具体格式参考文件本身。这里的阶段更新比`PROJECT_CONTEXT.md`中的功能实现要更大
 - 所有重要学习内容、关键设计理解、实现变更和验证结果都需要留下记录。这些记录未来会被整理成一份 Agent 学习报告，用来囊括学习过程中的知识点并服务于面试复盘；当前阶段只需要持续、准确地记录，不需要提前整理成报告正文。
 - 本仓库的 Markdown 文件使用 UTF-8 编码。
 
