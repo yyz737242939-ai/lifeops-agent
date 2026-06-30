@@ -1,6 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
+from app.runtime.context_budget import ContextBudgetConfig
 from app.runtime.context_engine import ContextEngine
 
 
@@ -78,6 +79,80 @@ class ContextEngineTests(unittest.TestCase):
         self.assertEqual(tool_unit["kind"], "tool")
         self.assertTrue(tool_unit["protected"])
         self.assertFalse(tool_unit["metadata"]["paired_observation"])
+
+    def test_sliding_window_limits_assembled_input_but_keeps_full_store(self) -> None:
+        messages = [
+            {"role": "user", "content": f"old user message {index} " + ("x" * 80)}
+            for index in range(20)
+        ]
+        engine = ContextEngine(
+            budget_config=ContextBudgetConfig(recent_window_tokens=120)
+        )
+
+        assembly = engine.assemble(messages)
+
+        self.assertLess(len(assembly.input_messages), len(messages))
+        self.assertEqual(engine.store.full_messages, messages)
+        self.assertEqual(
+            assembly.input_messages[0]["content"],
+            ContextEngine.COMPACTED_HISTORY_NOTE,
+        )
+        self.assertEqual(assembly.report["mode"], "windowed_with_placeholder_summary")
+        self.assertGreater(assembly.report["evicted_unit_count"], 0)
+        self.assertEqual(
+            assembly.report["assembled_message_count"],
+            len(assembly.input_messages),
+        )
+
+    def test_sliding_window_does_not_split_tool_call_from_observation(self) -> None:
+        call = SimpleNamespace(
+            type="function_call",
+            name="list_todos",
+            arguments="{}",
+            call_id="call-1",
+        )
+        observation = {
+            "type": "function_call_output",
+            "call_id": "call-1",
+            "output": '{"ok":true,"items":[{"id":"todo-1"}]}',
+        }
+        messages = [
+            {"role": "user", "content": "old " + ("x" * 200)},
+            {"role": "assistant", "content": "old answer " + ("x" * 200)},
+            call,
+            observation,
+            {"role": "assistant", "content": "todo-1"},
+        ]
+        engine = ContextEngine(
+            budget_config=ContextBudgetConfig(recent_window_tokens=140)
+        )
+
+        assembly = engine.assemble(messages)
+
+        self.assertIn(call, assembly.input_messages)
+        self.assertIn(observation, assembly.input_messages)
+        self.assertLess(len(assembly.input_messages), len(messages) + 1)
+
+    def test_protected_old_units_are_kept_outside_recent_window(self) -> None:
+        protected_call = SimpleNamespace(
+            type="function_call",
+            name="list_todos",
+            arguments="{}",
+            call_id="call-protected",
+        )
+        messages = [protected_call] + [
+            {"role": "user", "content": f"recent {index} " + ("x" * 120)}
+            for index in range(10)
+        ]
+        engine = ContextEngine(
+            budget_config=ContextBudgetConfig(recent_window_tokens=80)
+        )
+
+        assembly = engine.assemble(messages)
+
+        self.assertIn(protected_call, assembly.input_messages)
+        self.assertGreater(assembly.report["protected_unit_count"], 0)
+        self.assertGreater(assembly.report["evicted_unit_count"], 0)
 
 
 if __name__ == "__main__":

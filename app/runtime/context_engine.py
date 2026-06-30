@@ -2,6 +2,8 @@ import json
 from collections import Counter
 from typing import Any, cast
 
+from app.runtime.context_budget import ContextBudgetConfig
+from app.runtime.context_store import ContextStore
 from app.runtime.context_types import (
     ContextAssembly,
     ContextUnit,
@@ -14,9 +16,23 @@ from app.utils.serialization import json_safe
 class ContextEngine:
     """Build model input from full conversation history.
 
-    The first implementation is intentionally pass-through: it reports units and
-    budget estimates but does not crop, summarize, or reorder messages.
+    Full history remains the source of truth; assemble returns the current
+    working context that should be sent to the model.
     """
+
+    COMPACTED_HISTORY_NOTE = (
+        "[Context note] Earlier conversation exists but has been compacted. "
+        "Detailed summary is not available yet."
+    )
+
+    def __init__(
+        self,
+        *,
+        budget_config: ContextBudgetConfig | None = None,
+        store: ContextStore | None = None,
+    ) -> None:
+        self.budget_config = budget_config or ContextBudgetConfig()
+        self.store = store or ContextStore()
 
     def assemble(
         self,
@@ -25,15 +41,38 @@ class ContextEngine:
         instructions: str | None = None,
         tools: list[Any] | tuple[Any, ...] | None = None,
     ) -> ContextAssembly:
+        self.store.replace_full_messages(messages)
         units = self._build_units(messages)
+        selected_units, evicted_units, recent_token_count = self._select_units(units)
+        input_messages = self._messages_from_units(selected_units)
+        placeholder_inserted = bool(evicted_units)
+        if placeholder_inserted:
+            input_messages.insert(0, self._summary_placeholder_message())
+
         serialized = json_safe(messages)
         json_char_count = len(json.dumps(serialized, ensure_ascii=False))
+        assembled_serialized = json_safe(input_messages)
+        assembled_json_char_count = len(
+            json.dumps(assembled_serialized, ensure_ascii=False)
+        )
         report = {
-            "mode": "pass_through_with_units",
+            "mode": (
+                "windowed_with_placeholder_summary"
+                if evicted_units
+                else "pass_through_with_units"
+            ),
+            "raw_message_count": len(messages),
             "message_count": len(messages),
+            "assembled_message_count": len(input_messages),
             "unit_count": len(units),
+            "selected_unit_count": len(selected_units),
+            "evicted_unit_count": len(evicted_units),
             "estimated_input_tokens": estimate_tokens_from_chars(json_char_count),
+            "assembled_estimated_input_tokens": estimate_tokens_from_chars(
+                assembled_json_char_count
+            ),
             "json_char_count": json_char_count,
+            "assembled_json_char_count": assembled_json_char_count,
             "instruction_chars": len(instructions or ""),
             "tool_schema_count": len(tools or ()),
             "tool_schema_chars": len(
@@ -41,16 +80,67 @@ class ContextEngine:
             ),
             "unit_breakdown": dict(Counter(unit.kind for unit in units)),
             "protected_unit_count": sum(1 for unit in units if unit.protected),
+            "selected_unit_ids": [unit.unit_id for unit in selected_units],
+            "evicted_unit_ids": [unit.unit_id for unit in evicted_units],
+            "recent_window_tokens": recent_token_count,
+            "recent_window_budget_tokens": (
+                self.budget_config.effective_recent_window_tokens
+            ),
+            "placeholder_summary_inserted": placeholder_inserted,
             "units": [self._unit_report(unit) for unit in units],
         }
-        return ContextAssembly(input_messages=list(messages), report=report)
+        return ContextAssembly(input_messages=input_messages, report=report)
 
     def after_turn(self, messages: list[Any]) -> dict[str, Any]:
+        self.store.replace_full_messages(messages)
         return {
             "compacted": False,
-            "reason": "pass_through",
+            "reason": "sliding_window_without_summary",
             "message_count": len(messages),
         }
+
+    def _select_units(
+        self, units: list[ContextUnit]
+    ) -> tuple[list[ContextUnit], list[ContextUnit], int]:
+        if not units:
+            return [], [], 0
+
+        selected_indexes = {
+            index for index, unit in enumerate(units) if unit.protected
+        }
+        recent_token_budget = self.budget_config.effective_recent_window_tokens
+        recent_token_count = 0
+        newest_index = len(units) - 1
+
+        for index in range(newest_index, -1, -1):
+            unit = units[index]
+            must_keep_newest = index == newest_index
+            if (
+                not must_keep_newest
+                and recent_token_count + unit.token_estimate > recent_token_budget
+            ):
+                break
+            selected_indexes.add(index)
+            recent_token_count += unit.token_estimate
+
+        selected_units = [
+            unit for index, unit in enumerate(units) if index in selected_indexes
+        ]
+        evicted_units = [
+            unit for index, unit in enumerate(units) if index not in selected_indexes
+        ]
+        return selected_units, evicted_units, recent_token_count
+
+    @classmethod
+    def _summary_placeholder_message(cls) -> dict[str, str]:
+        return {"role": "system", "content": cls.COMPACTED_HISTORY_NOTE}
+
+    @staticmethod
+    def _messages_from_units(units: list[ContextUnit]) -> list[Any]:
+        messages: list[Any] = []
+        for unit in units:
+            messages.extend(unit.messages)
+        return messages
 
     def _build_units(self, messages: list[Any]) -> list[ContextUnit]:
         units: list[ContextUnit] = []
