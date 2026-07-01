@@ -3,6 +3,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.agents.agent import Agent
+from app.context.context_budget import ContextBudgetConfig
+from app.context.context_engine import ContextEngine
 from app.runtime.run_state import (
     ActionStatus,
     LoopLimits,
@@ -51,6 +53,40 @@ class AgentLoopSkeletonTests(unittest.TestCase):
         started_state = log_event.log_run_started.call_args.args[0]
         completed_state = log_event.log_run_completed.call_args.args[0]
         self.assertEqual(started_state.run_id, completed_state.run_id)
+
+    @patch("app.agents.agent.llm_io")
+    @patch("app.agents.agent.events")
+    @patch("app.agents.agent.client.responses.create")
+    def test_manual_compact_updates_summary_with_llm_soft_summary(
+        self,
+        create_response,
+        log_event,
+        _log_raw_event,
+    ) -> None:
+        create_response.return_value = SimpleNamespace(
+            output=[],
+            output_text="User wants to keep todo context.",
+        )
+        agent = Agent()
+        agent.context_engine = ContextEngine(
+            budget_config=ContextBudgetConfig(recent_window_tokens=40)
+        )
+        agent.messages = [
+            {"role": "user", "content": f"old goal {index} " + ("x" * 120)}
+            for index in range(8)
+        ]
+
+        answer = agent.compact_context()
+
+        self.assertIn("generated", answer)
+        self.assertNotIn({"role": "user", "content": "/compact"}, agent.messages)
+        self.assertIsNotNone(agent.context_engine.store.summary)
+        assert agent.context_engine.store.summary is not None
+        natural = agent.context_engine.store.summary["natural_language_summary"]
+        self.assertEqual(natural["status"], "generated")
+        self.assertEqual(natural["text"], "User wants to keep todo context.")
+        create_response.assert_called_once()
+        self.assertTrue(log_event.log_context_compaction.called)
 
     @patch("app.agents.agent.llm_io")
     @patch("app.agents.agent.events")

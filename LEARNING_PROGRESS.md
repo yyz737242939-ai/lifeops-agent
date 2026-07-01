@@ -10,11 +10,11 @@ LifeOps Agent 的最终方向是真实可用的生活管理产品；本文件只
 
 ## 当前阶段
 
-第一阶段的Runtime基础已经结束。当前主线是：
+第一阶段的Runtime基础已经结束。Context压缩与长期窗口阶段已经完成第一轮收口。当前主线准备切换到：
 
-> Context压缩、长期消息窗口、压缩后的认知连续性，以及高风险事实的精确保留/按需恢复。
+> 最小Memory State：用户明确授权保存的长期事实和偏好，以及它与Context Summary、业务数据的边界。
 
-暂不横向增加业务工具，也不立即进入长期Memory、MCP或Multi-Agent。
+暂不横向增加业务工具，也不立即进入MCP或Multi-Agent。进入Memory代码实现前，应先补一份具体实现计划。
 
 ## 第一阶段已经建立的认识
 
@@ -61,27 +61,36 @@ LifeOps Agent 的最终方向是真实可用的生活管理产品；本文件只
 > Tool Result压缩解决“一次Observation太大”；长期Context管理解决“历史消息不断累积”。
 > 两者相关，但不是同一个机制。
 
-## 下一阶段：Context压缩与长期窗口
+## 已完成阶段：Context压缩与长期窗口
 
 具体 Context 学习方案和施工清单统一维护在 `CONTEXT_ENGINE_IMPLEMENTATION_PLAN.md`。
-本文件只保留总方向：
+本文件只保留总方向和完成结论：
 
 - Context 当前主线已经从“压缩后可逆恢复原文”修正为“压缩后保持认知连续性”。
 - 普通对话摘要允许有损，重点是让 LLM 知道窗口外的用户目标、偏好、已做决定、开放问题和当前任务。
 - 工具结果、ID、金额、日期、确认范围等高风险事实不能只靠自然语言摘要，应通过结构化字段、Ref、Index 或按需恢复路径精确保留。
-- 已完成 Context 执行计划的前七步；下一步从第八步开始，重点学习主动、被动和手动压缩触发。
+- 已完成 Context 执行计划的前九步，包括Context Eval自动化回归；当前验证重点覆盖压缩前后关键行为、事实字段、Ref恢复、失败写入摘要和protected确认状态。
+
+## 下一阶段：最小Memory State
+
+下一步先制定 `MEMORY_STATE_IMPLEMENTATION_PLAN.md`，再动代码。第一版Memory应保持小而清晰：
+
+- 只保存用户当前输入中明确授权长期记住的事实或偏好。
+- 支持查看和删除已保存Memory。
+- 后续请求可以读取相关Memory，但不能把Conversation Summary自动升级为长期Memory。
+- Memory、Context Summary和Todo/Expense/Sleep等业务数据必须保持边界清晰。
+- 自动化测试至少覆盖未授权不记、授权后可记、可查看、可删除、删除后不再使用，以及Memory不混入普通Context摘要。
 
 ## Context之后的路线
 
-Context阶段完成后，再按以下顺序推进：
+Memory阶段完成后，再按以下顺序推进：
 
-1. 最小Memory State：用户明确授权保存的长期事实和偏好。
-2. Interaction/Safety State：跨轮确认、取消、范围修改和过期。
-3. Skill References与受控只读脚本。
-4. Task State：跨Chat的长期目标、步骤和恢复。
-5. 高级Memory Retrieval。
-6. MCP。
-7. 复杂规划与Multi-Agent。
+1. Interaction/Safety State：跨轮确认、取消、范围修改和过期。
+2. Skill References与受控只读脚本。
+3. Task State：跨Chat的长期目标、步骤和恢复。
+4. 高级Memory Retrieval。
+5. MCP。
+6. 复杂规划与Multi-Agent。
 
 继续暂缓：正式Routing Eval、向量数据库、自动记忆提取、任意Shell、复杂Planner和
 大规模LLM-as-judge评测。

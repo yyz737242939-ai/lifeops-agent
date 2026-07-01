@@ -12,10 +12,22 @@
 - 动态Tool Schema、最小Capability和Runtime二次授权。
 - 单次Chat RunState、结构化Action、预算、重试、超时、取消和停止原因。
 - 工具错误归一化、写入幂等重放和确定性循环检测。
+- Context Engine的滑动窗口、Rolling Summary、Context Index、Inspector、主动/被动/手动压缩触发和Context Eval回归。
 - Tool Observation的inline、summary和Context Ref压缩。
 - 当前输入写授权、批量删除确认和最终写入声明校验。
 - Event、LLM I/O、Application三通道日志及本地Viewer。
-- 79项自动化回归测试。
+- 108项自动化回归测试。
+
+## [Milestone 1.2] - 2026-07-01
+
+### Added
+
+- 完成Context Engine阶段九Eval，新增压缩前后关键不变量的自动化回归测试。
+- 覆盖精确Todo后续操作只召回相关旧Unit、Expense金额/日期恢复、失败WRITE不进入成功摘要、protected确认状态跨窗口保留，以及Ref恢复不重新塞回完整历史。
+
+### Changed
+
+- Context阶段从“功能施工”收口为“已由自动化Eval保护的当前对话窗口管理能力”，下一阶段转入最小Memory State设计。
 
 ## [Milestone 1.1] - 2026-06-24
 

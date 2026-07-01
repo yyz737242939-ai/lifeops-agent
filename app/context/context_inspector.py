@@ -74,6 +74,27 @@ def _decision_summary(
         }
     ]
 
+    passive_compaction = report.get("passive_compaction") or {}
+    if passive_compaction.get("triggered"):
+        decisions.append(
+            {
+                "name": "passive_compaction",
+                "status": passive_compaction.get("reason"),
+                "strategy": passive_compaction.get("strategy"),
+                "hard_limit_tokens": passive_compaction.get(
+                    "hard_limit_tokens"
+                ),
+            }
+        )
+    else:
+        decisions.append(
+            {
+                "name": "passive_compaction",
+                "status": "within_hard_limit",
+                "hard_limit_tokens": report.get("hard_limit_tokens"),
+            }
+        )
+
     if report.get("summary_inserted"):
         decisions.append(
             {

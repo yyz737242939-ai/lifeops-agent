@@ -54,9 +54,9 @@ uv run python -m unittest discover -s tests -v
 | `app/runtime/run_state.py` | 单次 `Agent.chat()` 的 RunState、ActionRecord、预算与终态 |
 | `app/runtime/errors.py` | LLM/Tool 错误分类与结构化错误 |
 | `app/runtime/write_policy.py` | 当前用户输入的写授权、批量删除确认和成功声明检测 |
-| `app/context/context_engine.py` | LLM 输入组装入口；当前支持 pass-through 与第一版滑动窗口，并输出 Context Unit 与预算报告 |
-| `app/context/context_budget.py` | Context窗口预算配置，当前使用字符数近似token估算 |
-| `app/context/context_store.py` | 内存版完整历史和Rolling Summary状态存储 |
+| `app/context/context_engine.py` | LLM 输入组装入口；当前支持 pass-through、滑动窗口、按需恢复，以及主动/被动/手动压缩触发 |
+| `app/context/context_budget.py` | Context窗口预算配置，当前使用字符数近似token估算，并区分 soft limit / hard limit |
+| `app/context/context_store.py` | 内存版完整历史、Rolling Summary和手动LLM自然语言摘要状态存储 |
 | `app/context/context_compactor.py` | 确定性Rolling Summary生成，把被窗口排除的旧Unit压缩成结构化摘要 |
 | `app/context/context_index.py` | 基于metadata的旧Context Unit与Ref按需检索；不使用embedding |
 | `app/context/context_inspector.py` | 把Context assembly report整理成overview、composition、decisions和diagnostics，便于日志观察和测试定位 |
@@ -75,7 +75,7 @@ uv run python -m unittest discover -s tests -v
 | `app/domains/*` | Todo、日状态、消费预算和活动目录的本地业务数据 |
 | `app/observability/*` | 三通道日志及安全序列化 |
 | `app/log_viewer/*` | 本地日志查看器，支持普通会话和UAT目录格式 |
-| `tests/*` | 核心 Runtime、Context、安全、Skill、日志与工具的回归测试 |
+| `tests/*` | 核心 Runtime、Context、安全、Skill、日志与工具的回归测试，其中 `tests/test_context_eval_cases.py` 覆盖Context压缩前后关键不变量 |
 
 ## 状态与生命周期
 
@@ -160,7 +160,9 @@ RunState的主要计数字段已经显式包含作用域和统计对象：
 
 ## 当前Context实现
 
-当前已有第一版 ContextEngine 滑动窗口、确定性 Rolling Summary 和 Tool Observation 压缩。Tool Observation 压缩解决单次工具结果过大，滑动窗口与Rolling Summary解决跨轮历史持续增长，二者不要混淆。
+当前已有第一版 ContextEngine 滑动窗口、确定性 Rolling Summary、主动/被动/手动压缩触发和 Tool Observation 压缩。Tool Observation 压缩解决单次工具结果过大，滑动窗口与Rolling Summary解决跨轮历史持续增长，二者不要混淆。
+
+Context Engine 执行计划的前九步已经完成第一轮收口：除了功能机制本身，已新增Context Eval自动化回归，用来验证压缩前后关键行为、事实字段、Ref恢复和安全状态不被破坏。当前Context阶段不继续横向扩展向量检索、长期Memory或复杂LLM评测，下一阶段进入最小Memory State设计。
 
 ### Prompt与历史消息
 
@@ -168,14 +170,17 @@ RunState的主要计数字段已经显式包含作用域和统计对象：
 - `Agent.messages` 保存跨Chat历史，包括Function Call和Tool Observation。
 - `ContextStore` 当前以内存方式镜像完整历史和Rolling Summary；完整历史仍是事实源，summary只是派生状态。
 - 发送给模型的 `input` 已由 `ContextEngine.assemble()` 生成；短对话仍原样透传，超过最近窗口预算时只发送历史summary或占位说明、protected units 和最近完整 units。
-- `ContextEngine` 会把历史切分为 user、assistant、tool 或 protected system_note 单元，并在日志中报告原始消息数、组装后消息数、单元数、近似token数、tool schema体积、evicted unit 数、summary插入状态和 protected unit 数。
+- `ContextEngine` 会把历史切分为 user、assistant、tool 或 protected system_note 单元，并在日志中报告原始消息数、组装后消息数、单元数、近似token数、tool schema体积、evicted unit 数、summary插入状态、protected unit 数和被动压缩决策。
 - Function Call 与紧随其后的 `function_call_output` 会被识别为同一个 tool unit；无法配对的工具相关消息会保守标记为 `protected=True`。
 - `ContextIndex` 会为旧unit提取确定性metadata，包括tool name、ref_id、entity id、domain关键词和action状态。`ContextEngine.assemble()` 只在当前用户请求出现精确字段/后续操作信号时，从窗口外旧unit中召回少量相关内容。
 - 按需恢复会把 retrieved unit/ref 写入 assembly report，说明召回原因、匹配字段和ref加载状态；普通总结类请求不会读取完整ref。
 - `ContextInspector` 会在 `assembly.report.inspection` 中输出压缩概览、组成计数、关键决策和诊断提示，例如 placeholder summary、精确请求未召回匹配内容、ref rejected 等。
+- `tests/test_context_eval_cases.py` 验证压缩不变量：精确Todo后续操作只召回相关旧Unit、Expense金额/日期可恢复、失败WRITE只进入失败摘要、protected确认状态跨窗口/被动压缩保留，以及Ref恢复不会重新插入完整历史。
 - Skill正文不会累积进 `messages`。
 - `Agent.messages` 仍会随长对话增长；增长的是完整事实源，不再总是无脑全量发送给模型。
-- 回合完成或停止时，`ContextEngine.after_turn()` 会把窗口外旧Unit滚动压缩进结构化summary。第一版summary用确定性规则生成：记录来源unit ids、用户目标片段、工具成功/失败、重要实体和受保护项；不会把assistant口头声称的成功当作真实成功。
+- 回合完成或停止时，`ContextEngine.after_turn()` 只在完整历史超过 soft limit 后主动触发确定性 rolling summary，不调用LLM。第一版summary用确定性规则生成：记录来源unit ids、用户目标片段、工具成功/失败、重要实体和受保护项；不会把assistant口头声称的成功当作真实成功。
+- `ContextEngine.assemble()` 会在请求前检查 hard limit；如果组装后的输入仍超过预算，会被动缩小 recent window，作为预算保护路径。被动触发不生成新summary，也不调用LLM。
+- CLI 支持内部命令 `/compact`。该命令不会作为普通用户消息进入 `Agent.messages`，而是立即执行手动压缩：先更新 deterministic summary，再用一次无工具LLM调用生成 `natural_language_summary`。该自然语言摘要只是软上下文，结构化summary和完整历史仍是事实源。
 
 ### Tool Observation压缩
 

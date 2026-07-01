@@ -24,6 +24,10 @@ def main() -> None:
             if user_input.lower() in ["exit", "quit"]:
                 print("Bye!")
                 break
+            if user_input.strip().lower() == "/compact":
+                answer = agent.compact_context()
+                print(f"\nAgent: {answer}")
+                continue
 
             answer = agent.chat(user_input)
             print(f"\nAgent: {answer}")

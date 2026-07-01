@@ -204,6 +204,9 @@ class EventLogger:
             action=action,
         )
 
+    def log_context_compaction(self, run_state: Any, report: Any) -> None:
+        self._write_log_event("context.compaction", run_state, report=report)
+
     def log_final_answer(self, run_state: Any, content: str) -> None:
         self._write_log_event("run.final_answer", run_state, role="assistant", content=content)
 

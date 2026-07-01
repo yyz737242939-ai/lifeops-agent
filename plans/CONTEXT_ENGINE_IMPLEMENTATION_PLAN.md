@@ -28,7 +28,7 @@ Conversation Summary 的目标不是恢复原文，而是让 LLM 对窗口外对
 - `app/context/context_manager.py` 目前做 Tool Observation 压缩：`none / summary / summary_reference / reference`。
 - `app/context/context_ref_store.py` 可以保存并读取完整 Tool Result，已有 metadata、payload hash 和 TTL 过期校验；session/run 归属与更严格来源校验仍可继续加强。
 - 已有第一版整体对话窗口管理：ContextEngine assemble、Context Unit、近似预算、滑动窗口、Rolling Summary 和 summary message。
-- 还没有 Context Index、旧 unit 检索、Context Inspect 和主动/被动/手动压缩触发。
+- 已有 Context Index、旧 unit 检索、Context Inspect 和主动/被动/手动压缩触发。
 
 本阶段明确不做：
 
@@ -57,7 +57,8 @@ Conversation Summary 的目标不是恢复原文，而是让 LLM 对窗口外对
 5. Tool Observation + Context Ref 升级：已完成第一版。
 6. Context Index + 按需恢复：已完成第一版。
 7. Context Inspector：已完成第一版。
-8. 主动/被动/手动压缩触发：下一步从这里开始。
+8. 主动/被动/手动压缩触发：已完成第一版。
+9. Context Eval：已完成第一版。
 ```
 
 ## 1. 总体架构
@@ -539,7 +540,7 @@ large result -> summary + ref
 
 当旧内容被 summary 替代后，仍然可以按当前用户问题找回少量相关旧 unit 或有效 ref。
 
-这一阶段是下一步施工起点。它解决的不是“把所有历史重新塞回模型”，而是：
+这一阶段已经完成第一版。它解决的不是“把所有历史重新塞回模型”，而是：
 
 ```text
 当前问题需要精确信息
@@ -787,6 +788,15 @@ assemble()
 
 这一步学习的是“压缩是生命周期管理，不是单次函数”。真正的系统需要在不同时间点做不同强度的决策。
 
+当前完成状态：
+
+- `ContextBudgetConfig` 已区分 `soft_limit_tokens` 和 `hard_limit_tokens`。
+- 主动触发发生在 `ContextEngine.after_turn()`：只有完整历史超过 soft limit 时，才把窗口外旧Unit滚动压缩进 deterministic summary；不调用LLM。
+- 被动触发发生在 `ContextEngine.assemble()`：如果组装后的输入超过 hard limit，会缩小 recent window 做预算保护；不生成新summary，不调用LLM。
+- 手动触发发生在 CLI `/compact`：命令不进入普通 `Agent.messages`，而是调用 `Agent.compact_context()` 执行内部维护。
+- 手动 `/compact` 会先更新 deterministic summary，再用一次无工具LLM请求生成 `natural_language_summary`；该字段只作为软上下文，结构化summary和完整历史仍是事实源。
+- `context.compaction` event 会记录主动或手动压缩报告；`llm.request/response` 会记录手动LLM summary边界。
+
 ## 10. 阶段九：Context Eval
 
 ### 目标
@@ -835,6 +845,12 @@ tests/test_context_eval_cases.py
 
 这一步学习的是“Context Eval 要测不变量”。不要只测回答好不好听，要测压缩前后事实、权限、ID、状态是否一致。
 
+当前完成状态：
+
+- 已新增 `tests/test_context_eval_cases.py` 作为Context阶段九Eval测试层，不调用真实LLM，重点验证确定性压缩不变量。
+- Eval覆盖精确Todo后续操作只召回相关旧Unit、Expense金额/日期恢复、失败WRITE只进入失败摘要、protected确认状态跨窗口和被动压缩保留，以及Ref恢复不重新插入完整历史。
+- 与既有 `tests/test_context_engine.py`、`tests/test_context_manager.py`、`tests/test_context_ref_store.py` 一起形成Context回归套件。
+
 ## 11. 推荐施工顺序总表
 
 按这个顺序施工，风险最低：
@@ -848,8 +864,8 @@ tests/test_context_eval_cases.py
 | 5 | Tool Observation + Ref 升级 | dynamic summary, `summary_reference`, metadata ref | 已完成第一版 |
 | 6 | Index + 按需恢复 | deterministic index, retrieved units/ref loading | 已完成第一版 |
 | 7 | Inspector | context report/logs | 已完成第一版 |
-| 8 | Triggers | active/passive/manual compact | 下一步 |
-| 9 | Eval | context regression tests | 待做 |
+| 8 | Triggers | active/passive/manual compact | 已完成第一版 |
+| 9 | Eval | context regression tests | 已完成第一版 |
 
 已经完成的第一刀：
 
@@ -860,25 +876,25 @@ tests/test_context_eval_cases.py
 
 ## 12. 后续新 Chat 的建议开场指令
 
-后续施工时，可以这样开新 Chat：
+Context阶段已经完成第一轮收口。后续如果要回看Context问题，可以这样开新 Chat：
 
 ```text
 请阅读 AGENTS.md、PROJECT_CONTEXT.md、LEARNING_PROGRESS.md、CONTEXT_ENGINE_IMPLEMENTATION_PLAN.md。
-然后从“阶段八：主动、被动、手动压缩触发”开始施工。
+然后检查Context Eval测试与当前Context实现是否仍一致。
 要求：
-1. 先确认前七步当前实现状态，不重复重写已有 ContextEngine / ContextStore / Rolling Summary / summary_reference / ContextIndex / ContextInspector。
-2. 聚焦压缩触发生命周期：主动、被动、手动触发，不引入向量数据库或长期Memory。
-3. 优先复用现有预算、summary、index和inspector report。
-4. 如果增加 `/compact`，先保持行为可解释，并确保不覆盖完整历史事实源。
+1. 不重复重写已有 ContextEngine / ContextStore / Rolling Summary / summary_reference / ContextIndex / ContextInspector / Triggers。
+2. 聚焦压缩前后关键行为回归，不引入向量数据库或长期Memory。
+3. 优先复用现有预算、summary、index、inspector report 和 `/compact` 触发。
+4. Eval 重点验证 tool choice、tool arguments、写入安全、ID/金额/日期、pending confirmation 和 ref 恢复是否一致。
 5. 跑相关 Context 测试和全量回归。
 ```
 
-如果阶段八完成后继续：
+如果继续下一阶段：
 
 ```text
-继续 CONTEXT_ENGINE_IMPLEMENTATION_PLAN.md 的阶段九。
-重点是 Context Eval 和压缩前后关键行为回归。
-不要引入向量数据库或长期Memory。
+请阅读 AGENTS.md、PROJECT_CONTEXT.md、LEARNING_PROGRESS.md。
+先制定 MEMORY_STATE_IMPLEMENTATION_PLAN.md。
+重点是最小Memory State：明确授权保存、查看、删除、后续读取，以及和Context Summary/业务数据的边界。
 ```
 
 ## 13. 完成标准

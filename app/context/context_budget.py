@@ -7,6 +7,8 @@ class ContextBudgetConfig:
     reserved_output_tokens: int = 4000
     safety_margin_tokens: int = 2000
     recent_window_tokens: int = 12000
+    soft_limit_tokens: int = 24000
+    hard_limit_tokens: int = 30000
 
     @property
     def working_input_tokens(self) -> int:
@@ -20,3 +22,11 @@ class ContextBudgetConfig:
     @property
     def effective_recent_window_tokens(self) -> int:
         return min(self.recent_window_tokens, self.working_input_tokens)
+
+    @property
+    def effective_soft_limit_tokens(self) -> int:
+        return min(self.soft_limit_tokens, self.working_input_tokens)
+
+    @property
+    def effective_hard_limit_tokens(self) -> int:
+        return min(self.hard_limit_tokens, self.working_input_tokens)

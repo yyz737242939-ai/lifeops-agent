@@ -213,6 +213,58 @@ class Agent:
         self.last_run_state.request_cancel()
         return True
 
+    def compact_context(self) -> str:
+        """Manually compact old context and add a soft LLM-written summary."""
+        run_state = RunState()
+        self.last_run_state = run_state
+        events.log_run_started(run_state, self.loop_limits.to_dict())
+        events.log_user_input(run_state, "/compact")
+        app_log.log_info("Manual context compaction %s started", run_state.run_id)
+
+        first_report = self.context_engine.manual_compact(
+            self.messages,
+            natural_language_status="pending",
+        )
+        if not first_report["compacted"]:
+            run_state.complete()
+            events.log_context_compaction(run_state, first_report)
+            events.log_run_completed(run_state)
+            return "没有需要压缩的窗口外上下文。"
+
+        natural_summary = None
+        natural_status = "failed"
+        try:
+            natural_summary = self._request_manual_context_summary(run_state)
+            natural_status = "generated" if natural_summary else "empty"
+        except Exception as exception:
+            events.log_llm_failed(
+                run_state,
+                1,
+                run_state.chat_llm_request_count,
+                {
+                    "type": "manual_context_summary_failed",
+                    "message": str(exception),
+                },
+            )
+            app_log.log_warning(
+                "Manual context summary failed for %s: %s",
+                run_state.run_id,
+                exception,
+            )
+
+        final_report = self.context_engine.manual_compact(
+            self.messages,
+            natural_language_summary=natural_summary,
+            natural_language_status=natural_status,
+        )
+        events.log_context_compaction(run_state, final_report)
+        run_state.complete()
+        events.log_run_completed(run_state)
+        return (
+            "已完成手动压缩：deterministic summary 已更新，"
+            f"LLM natural_language_summary 状态为 {natural_status}。"
+        )
+
     def chat(self, user_input: str) -> str:
         """Execute one user turn and return either an answer or stop summary."""
         run_state = RunState()
@@ -306,7 +358,7 @@ class Agent:
                 else:
                     self.messages.append({"role": "assistant", "content": answer})
                 run_state.complete()
-                self.context_engine.after_turn(self.messages)
+                self._record_after_turn_compaction(run_state)
                 events.log_final_answer(run_state, answer)
                 events.log_run_completed(run_state)
                 app_log.log_info("Run %s completed", run_state.run_id)
@@ -423,6 +475,54 @@ class Agent:
                     return None
                 time.sleep(self.loop_limits.retry_backoff_seconds)
         return None
+
+    def _request_manual_context_summary(self, run_state: RunState) -> str:
+        """Use the normal model boundary for a manual context-maintenance task."""
+        summary = self.context_engine.store.summary or {}
+        instructions = (
+            "You are summarizing prior conversation for an agent runtime. "
+            "Write a concise natural-language continuity summary. "
+            "Do not invent facts. Treat structured fields as the source of truth. "
+            "Return plain text only."
+        )
+        input_messages = [
+            {
+                "role": "user",
+                "content": (
+                    "Summarize this deterministic context summary for future "
+                    "conversation continuity:\n"
+                    + json.dumps(json_safe(summary), ensure_ascii=False, sort_keys=True)
+                ),
+            }
+        ]
+        request_number = run_state.start_llm_request()
+        events.log_llm_attempted(run_state, 1, request_number, 0)
+        llm_io.log_request(
+            run_state,
+            1,
+            request_number,
+            model=LLM_MODEL,
+            instructions=instructions,
+            tools=(),
+            input_messages=input_messages,
+            parameters={
+                "temperature": 0.0,
+                "max_output_tokens": LLM_MAX_OUTPUT_TOKENS,
+                "purpose": "manual_context_compaction",
+            },
+        )
+        response = client.responses.create(
+            model=LLM_MODEL,
+            instructions=instructions,
+            input=input_messages,
+            tools=[],
+            temperature=0.0,
+            max_output_tokens=LLM_MAX_OUTPUT_TOKENS,
+        )
+        events.log_llm_responded(run_state, 1, _response_summary(response.output))
+        llm_io.log_response(run_state, 1, response)
+        output_text = getattr(response, "output_text", None)
+        return output_text.strip() if isinstance(output_text, str) else ""
 
     def _handle_llm_failure(
         self,
@@ -858,10 +958,14 @@ class Agent:
             }
         )
 
+    def _record_after_turn_compaction(self, run_state: RunState) -> None:
+        report = self.context_engine.after_turn(self.messages)
+        events.log_context_compaction(run_state, report)
+
     def _stopped_answer(self, run_state: RunState) -> str:
         """Log and format a controlled runtime stop exactly once."""
         answer = _runtime_stop_answer(run_state)
-        self.context_engine.after_turn(self.messages)
+        self._record_after_turn_compaction(run_state)
         events.log_run_stopped(run_state, answer)
         app_log.log_warning(
             "Run %s stopped: %s", run_state.run_id, run_state.stop_reason

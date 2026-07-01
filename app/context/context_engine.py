@@ -48,6 +48,11 @@ class ContextEngine:
     ) -> ContextAssembly:
         self.store.replace_full_messages(messages)
         units = self._build_units(messages)
+        passive_compaction: dict[str, Any] = {
+            "triggered": False,
+            "reason": "within_hard_limit",
+            "hard_limit_tokens": self.budget_config.effective_hard_limit_tokens,
+        }
         selected_units, evicted_units, recent_token_count = self._select_units(units)
         retrieval = self._retrieve_evicted_context(units, selected_units, evicted_units)
         input_messages = self._assemble_input_messages(selected_units, retrieval)
@@ -64,6 +69,23 @@ class ContextEngine:
         assembled_json_char_count = len(
             json.dumps(assembled_serialized, ensure_ascii=False)
         )
+        assembled_estimated_tokens = estimate_tokens_from_chars(
+            assembled_json_char_count
+        )
+        if assembled_estimated_tokens > self.budget_config.effective_hard_limit_tokens:
+            (
+                selected_units,
+                evicted_units,
+                recent_token_count,
+                retrieval,
+                input_messages,
+                summary_inserted,
+                placeholder_inserted,
+                assembled_json_char_count,
+                assembled_estimated_tokens,
+                passive_compaction,
+            ) = self._apply_hard_limit(units)
+
         mode = (
             "windowed_with_summary"
             if summary_inserted
@@ -85,9 +107,7 @@ class ContextEngine:
             "selected_unit_count": len(selected_units),
             "evicted_unit_count": len(evicted_units),
             "estimated_input_tokens": estimate_tokens_from_chars(json_char_count),
-            "assembled_estimated_input_tokens": estimate_tokens_from_chars(
-                assembled_json_char_count
-            ),
+            "assembled_estimated_input_tokens": assembled_estimated_tokens,
             "json_char_count": json_char_count,
             "assembled_json_char_count": assembled_json_char_count,
             "instruction_chars": len(instructions or ""),
@@ -103,6 +123,9 @@ class ContextEngine:
             "recent_window_budget_tokens": (
                 self.budget_config.effective_recent_window_tokens
             ),
+            "soft_limit_tokens": self.budget_config.effective_soft_limit_tokens,
+            "hard_limit_tokens": self.budget_config.effective_hard_limit_tokens,
+            "passive_compaction": passive_compaction,
             "summary_inserted": summary_inserted,
             "placeholder_summary_inserted": placeholder_inserted,
             "summary_source_unit_count": len(
@@ -142,12 +165,27 @@ class ContextEngine:
     def after_turn(self, messages: list[Any]) -> dict[str, Any]:
         self.store.replace_full_messages(messages)
         units = self._build_units(messages)
+        raw_token_count = self._estimated_tokens_for_messages(messages)
+        if raw_token_count <= self.budget_config.effective_soft_limit_tokens:
+            return {
+                "compacted": False,
+                "trigger": "active_after_turn",
+                "reason": "below_soft_limit",
+                "message_count": len(messages),
+                "estimated_input_tokens": raw_token_count,
+                "soft_limit_tokens": self.budget_config.effective_soft_limit_tokens,
+                "evicted_unit_count": 0,
+            }
+
         _selected_units, evicted_units, _recent_token_count = self._select_units(units)
         if not evicted_units:
             return {
                 "compacted": False,
-                "reason": "within_recent_window",
+                "trigger": "active_after_turn",
+                "reason": "no_evicted_units",
                 "message_count": len(messages),
+                "estimated_input_tokens": raw_token_count,
+                "soft_limit_tokens": self.budget_config.effective_soft_limit_tokens,
                 "evicted_unit_count": 0,
             }
 
@@ -155,15 +193,65 @@ class ContextEngine:
         self.store.replace_summary(summary)
         return {
             "compacted": True,
-            "reason": "rolling_summary_updated",
+            "trigger": "active_after_turn",
+            "reason": "soft_limit_after_turn",
+            "strategy": "deterministic_rolling_summary",
             "message_count": len(messages),
+            "estimated_input_tokens": raw_token_count,
+            "soft_limit_tokens": self.budget_config.effective_soft_limit_tokens,
             "evicted_unit_count": len(evicted_units),
             "summary_source_unit_count": len(summary["source_unit_ids"]),
             "covered_until_unit_id": summary["covered_until_unit_id"],
         }
 
+    def manual_compact(
+        self,
+        messages: list[Any],
+        *,
+        natural_language_summary: str | None = None,
+        natural_language_status: str = "not_requested",
+    ) -> dict[str, Any]:
+        self.store.replace_full_messages(messages)
+        units = self._build_units(messages)
+        _selected_units, evicted_units, _recent_token_count = self._select_units(units)
+        if not evicted_units:
+            return {
+                "compacted": False,
+                "trigger": "manual_compact",
+                "reason": "no_evicted_units",
+                "message_count": len(messages),
+                "evicted_unit_count": 0,
+                "natural_language_summary": {
+                    "status": natural_language_status,
+                    "text": natural_language_summary,
+                },
+            }
+
+        summary = compact_units(self.store.summary, evicted_units)
+        summary["natural_language_summary"] = {
+            "status": natural_language_status,
+            "text": natural_language_summary,
+            "generated_by": "llm" if natural_language_summary else None,
+            "source_unit_ids": [unit.unit_id for unit in evicted_units],
+        }
+        self.store.replace_summary(summary)
+        return {
+            "compacted": True,
+            "trigger": "manual_compact",
+            "reason": "manual_request",
+            "strategy": "deterministic_summary_with_llm_natural_language_summary",
+            "message_count": len(messages),
+            "evicted_unit_count": len(evicted_units),
+            "summary_source_unit_count": len(summary["source_unit_ids"]),
+            "covered_until_unit_id": summary["covered_until_unit_id"],
+            "natural_language_summary": summary["natural_language_summary"],
+        }
+
     def _select_units(
-        self, units: list[ContextUnit]
+        self,
+        units: list[ContextUnit],
+        *,
+        recent_token_budget: int | None = None,
     ) -> tuple[list[ContextUnit], list[ContextUnit], int]:
         if not units:
             return [], [], 0
@@ -171,7 +259,8 @@ class ContextEngine:
         selected_indexes = {
             index for index, unit in enumerate(units) if unit.protected
         }
-        recent_token_budget = self.budget_config.effective_recent_window_tokens
+        if recent_token_budget is None:
+            recent_token_budget = self.budget_config.effective_recent_window_tokens
         recent_token_count = 0
         newest_index = len(units) - 1
 
@@ -194,9 +283,139 @@ class ContextEngine:
         ]
         return selected_units, evicted_units, recent_token_count
 
+    def _apply_hard_limit(
+        self,
+        units: list[ContextUnit],
+    ) -> tuple[
+        list[ContextUnit],
+        list[ContextUnit],
+        int,
+        ContextRetrievalResult,
+        list[Any],
+        bool,
+        bool,
+        int,
+        int,
+        dict[str, Any],
+    ]:
+        hard_limit = self.budget_config.effective_hard_limit_tokens
+        original_budget = self.budget_config.effective_recent_window_tokens
+        candidate_budgets = [
+            max(original_budget // 2, 0),
+            max(original_budget // 4, 0),
+            0,
+        ]
+        best_result: tuple[
+            list[ContextUnit],
+            list[ContextUnit],
+            int,
+            ContextRetrievalResult,
+            list[Any],
+            bool,
+            bool,
+            int,
+            int,
+        ] | None = None
+
+        for budget in candidate_budgets:
+            selected_units, evicted_units, recent_token_count = self._select_units(
+                units,
+                recent_token_budget=budget,
+            )
+            retrieval = self._retrieve_evicted_context(
+                units,
+                selected_units,
+                evicted_units,
+            )
+            input_messages, summary_inserted, placeholder_inserted = (
+                self._input_messages_with_summary(
+                    selected_units,
+                    evicted_units,
+                    retrieval,
+                )
+            )
+            assembled_json_char_count = len(
+                json.dumps(json_safe(input_messages), ensure_ascii=False)
+            )
+            assembled_estimated_tokens = estimate_tokens_from_chars(
+                assembled_json_char_count
+            )
+            best_result = (
+                selected_units,
+                evicted_units,
+                recent_token_count,
+                retrieval,
+                input_messages,
+                summary_inserted,
+                placeholder_inserted,
+                assembled_json_char_count,
+                assembled_estimated_tokens,
+            )
+            if assembled_estimated_tokens <= hard_limit:
+                break
+
+        assert best_result is not None
+        (
+            selected_units,
+            evicted_units,
+            recent_token_count,
+            retrieval,
+            input_messages,
+            summary_inserted,
+            placeholder_inserted,
+            assembled_json_char_count,
+            assembled_estimated_tokens,
+        ) = best_result
+        passive_compaction = {
+            "triggered": True,
+            "reason": (
+                "hard_limit_shrink_recent_window"
+                if assembled_estimated_tokens <= hard_limit
+                else "minimum_window_still_over_hard_limit"
+            ),
+            "strategy": "budget_protection_shrink_recent_window",
+            "hard_limit_tokens": hard_limit,
+            "original_recent_window_budget_tokens": original_budget,
+            "effective_recent_window_budget_tokens": recent_token_count,
+            "assembled_estimated_input_tokens": assembled_estimated_tokens,
+        }
+        return (
+            selected_units,
+            evicted_units,
+            recent_token_count,
+            retrieval,
+            input_messages,
+            summary_inserted,
+            placeholder_inserted,
+            assembled_json_char_count,
+            assembled_estimated_tokens,
+            passive_compaction,
+        )
+
+    def _input_messages_with_summary(
+        self,
+        selected_units: list[ContextUnit],
+        evicted_units: list[ContextUnit],
+        retrieval: ContextRetrievalResult,
+    ) -> tuple[list[Any], bool, bool]:
+        input_messages = self._assemble_input_messages(selected_units, retrieval)
+        summary_inserted = bool(evicted_units and self.store.summary_message)
+        placeholder_inserted = bool(evicted_units and not self.store.summary_message)
+        if summary_inserted and self.store.summary_message is not None:
+            input_messages.insert(0, self.store.summary_message)
+        elif placeholder_inserted:
+            input_messages.insert(0, self._summary_placeholder_message())
+        return input_messages, summary_inserted, placeholder_inserted
+
     @classmethod
     def _summary_placeholder_message(cls) -> dict[str, str]:
         return {"role": "system", "content": cls.COMPACTED_HISTORY_NOTE}
+
+    @staticmethod
+    def _estimated_tokens_for_messages(messages: list[Any]) -> int:
+        serialized = json_safe(messages)
+        json_char_count = len(json.dumps(serialized, ensure_ascii=False))
+        return estimate_tokens_from_chars(json_char_count)
 
     @staticmethod
     def _messages_from_units(units: list[ContextUnit]) -> list[Any]:

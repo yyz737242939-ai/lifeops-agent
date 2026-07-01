@@ -175,14 +175,18 @@ class ContextEngineTests(unittest.TestCase):
             for index in range(12)
         ]
         engine = ContextEngine(
-            budget_config=ContextBudgetConfig(recent_window_tokens=120)
+            budget_config=ContextBudgetConfig(
+                recent_window_tokens=120,
+                soft_limit_tokens=1,
+            )
         )
 
         report = engine.after_turn(messages)
         assembly = engine.assemble(messages)
 
         self.assertTrue(report["compacted"])
-        self.assertEqual(report["reason"], "rolling_summary_updated")
+        self.assertEqual(report["reason"], "soft_limit_after_turn")
+        self.assertEqual(report["strategy"], "deterministic_rolling_summary")
         self.assertIsNotNone(engine.store.summary)
         self.assertIsNotNone(engine.store.summary_message)
         self.assertEqual(assembly.report["mode"], "windowed_with_summary")
@@ -197,7 +201,10 @@ class ContextEngineTests(unittest.TestCase):
             for index in range(12)
         ]
         engine = ContextEngine(
-            budget_config=ContextBudgetConfig(recent_window_tokens=120)
+            budget_config=ContextBudgetConfig(
+                recent_window_tokens=120,
+                soft_limit_tokens=1,
+            )
         )
 
         first = engine.after_turn(messages)
@@ -217,7 +224,10 @@ class ContextEngineTests(unittest.TestCase):
             {"role": "user", "content": "new question"},
         ]
         engine = ContextEngine(
-            budget_config=ContextBudgetConfig(recent_window_tokens=80)
+            budget_config=ContextBudgetConfig(
+                recent_window_tokens=80,
+                soft_limit_tokens=1,
+            )
         )
 
         engine.after_turn(messages)
@@ -247,7 +257,10 @@ class ContextEngineTests(unittest.TestCase):
             {"role": "user", "content": "new question"},
         ]
         engine = ContextEngine(
-            budget_config=ContextBudgetConfig(recent_window_tokens=80)
+            budget_config=ContextBudgetConfig(
+                recent_window_tokens=80,
+                soft_limit_tokens=1,
+            )
         )
 
         engine.after_turn(messages)
@@ -265,6 +278,45 @@ class ContextEngineTests(unittest.TestCase):
             {"unit_id": "u_0002", "type": "id", "value": "todo-1"},
             engine.store.summary["important_entities"],
         )
+
+    def test_after_turn_below_soft_limit_does_not_compact(self) -> None:
+        messages = [
+            {"role": "user", "content": f"old goal {index} " + ("x" * 80)}
+            for index in range(12)
+        ]
+        engine = ContextEngine(
+            budget_config=ContextBudgetConfig(
+                recent_window_tokens=120,
+                soft_limit_tokens=99999,
+            )
+        )
+
+        report = engine.after_turn(messages)
+
+        self.assertFalse(report["compacted"])
+        self.assertEqual(report["reason"], "below_soft_limit")
+        self.assertIsNone(engine.store.summary)
+
+    def test_assemble_hard_limit_shrinks_recent_window_without_summary(self) -> None:
+        messages = [
+            {"role": "user", "content": f"old goal {index} " + ("x" * 80)}
+            for index in range(20)
+        ]
+        engine = ContextEngine(
+            budget_config=ContextBudgetConfig(
+                recent_window_tokens=400,
+                hard_limit_tokens=120,
+            )
+        )
+
+        assembly = engine.assemble(messages)
+
+        self.assertTrue(assembly.report["passive_compaction"]["triggered"])
+        self.assertEqual(
+            assembly.report["passive_compaction"]["strategy"],
+            "budget_protection_shrink_recent_window",
+        )
+        self.assertLess(len(assembly.input_messages), len(messages))
 
     def test_retrieves_evicted_tool_unit_by_todo_id(self) -> None:
         call = SimpleNamespace(

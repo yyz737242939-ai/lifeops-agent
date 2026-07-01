@@ -24,6 +24,7 @@ def empty_summary() -> dict[str, Any]:
         "important_entities": [],
         "open_questions": [],
         "notes": [],
+        "natural_language_summary": None,
     }
 
 
