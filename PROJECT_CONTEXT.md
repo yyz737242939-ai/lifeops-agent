@@ -72,7 +72,7 @@ uv run python -m unittest discover -s tests -v
 | `app/skills/skill_router.py` | 当前输入的确定性 Skill 路由 |
 | `app/skills/skill_state.py` | Skill 继承、替换、清理和 Ref-only 状态 |
 | `app/skills/skill_loader.py` | Skill 元数据发现和完整正文按需加载 |
-| `app/skills/*/SKILL.md` | Todo、Finance、Wellbeing、Activity 领域规则 |
+| `app/skills/*/SKILL.md` | Todo、Finance、Wellbeing、Activity、News 领域规则 |
 | `app/prompts/prompt_builder.py` | 根据本轮 Skill 动态构建 Prompt |
 | `app/tools/capability_builder.py` | 根据 Skill 和写授权生成本轮工具可见性与权限 |
 | `app/tools/registry.py` | 工具定义、副作用、幂等、重试和超时元数据 |
@@ -147,6 +147,7 @@ RunState的主要计数字段已经显式包含作用域和统计对象：
 - Prompt每次Chat重新构建，不把Skill正文追加到历史消息。
 - LLM只看到本轮允许的Tool Schema，Executor在执行前再次校验权限。
 - 当前输入没有明确授权时，写工具不会暴露给模型。
+- `news` Skill 已有骨架和确定性路由，可识别 Hugging Face、论文、Blog、AI简报等请求；当前阶段尚未暴露网络读取、Reference 或 helper 工具，因此只会提供入口规则和边界提醒。
 
 ### 写入安全
 

@@ -6,6 +6,12 @@ from app.skills.skill_loader import discover_skills, load_skill
 
 
 class SkillLoaderTests(unittest.TestCase):
+    def test_discovers_news_skill_metadata(self) -> None:
+        skills = discover_skills()
+
+        self.assertIn("news", skills)
+        self.assertIn("AI news", skills["news"].description)
+
     def test_discovers_metadata_and_loads_body_separately(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             skill_dir = Path(temp_dir) / "example"

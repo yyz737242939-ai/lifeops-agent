@@ -51,6 +51,12 @@ ROUTING_RULES: dict[str, tuple[RoutingRule, ...]] = {
         _rule(r"(?:不花钱|低成本).*(?:活动|放松|恢复)|(?:活动|放松|恢复).*(?:不花钱|低成本)", "活动成本约束"),
         _rule(r"\b(?:activity|break|exercise|recover|relax)\b", "Activity 关键词"),
     ),
+    "news": (
+        _rule(r"Hugging\s*Face|HF\s+(?:Daily\s+)?Papers?|HF\s+Blog", "Hugging Face 新闻来源", 3),
+        _rule(r"论文|博客|新闻|简报|资讯|热点|热门|AI\s*简报|新闻简报", "新闻简报意图", 2),
+        _rule(r"\b(?:papers?|blog|news|briefing|newsletter)\b", "News 关键词"),
+        _rule(r"\b(?:LLM|agent|multimodal|AI)\b.*\b(?:papers?|blog|news|briefing)\b", "AI 新闻主题"),
+    ),
 }
 
 

@@ -38,6 +38,13 @@ class CapabilityBuilderTests(unittest.TestCase):
         self.assertTrue(result.allowed_tool_names.isdisjoint(SKILL_TOOL_NAMES["activity"]))
         self.assertFalse(result.fallback_used)
 
+    def test_news_skill_currently_exposes_only_common_read_tools(self) -> None:
+        result = build_capabilities(("news",))
+
+        self.assertEqual(result.allowed_tool_names, _read_tools(COMMON_TOOL_NAMES))
+        self.assertEqual(SKILL_TOOL_NAMES["news"], frozenset())
+        self.assertFalse(result.fallback_used)
+
     def test_cross_domain_request_merges_tools_without_duplicates(self) -> None:
         result = build_capabilities(("todo", "finance", "todo"))
         schema_names = [schema["name"] for schema in result.tool_schemas]

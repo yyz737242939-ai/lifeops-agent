@@ -19,6 +19,8 @@ class SkillRouterTests(unittest.TestCase):
         self.assert_routes("我昨晚只睡了 5 小时，今天能量低", {"wellbeing"})
         self.assert_routes("我今天花了 35 元吃饭，记一笔", {"finance"})
         self.assert_routes("推荐一个不花钱的恢复活动", {"activity"})
+        self.assert_routes("总结今天 Hugging Face 上的热门论文和博客", {"news"})
+        self.assert_routes("把 HF Daily Papers 整理成中文 AI 简报", {"news"})
 
     def test_routes_cross_domain_request(self) -> None:
         decision = route_skills(
