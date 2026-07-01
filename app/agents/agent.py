@@ -15,6 +15,13 @@ from app.context.context_manager import (
     compact_tool_output,
     summarize_context_messages,
 )
+from app.memory.memory_context import (
+    profile_context_message,
+    profile_context_report,
+    semantic_memory_context_message,
+)
+from app.memory.memory_retriever import MemoryRetriever
+from app.memory.profile_loader import ProfileLoader
 from app.runtime.errors import (
     ErrorType,
     ExecutionError,
@@ -57,6 +64,7 @@ class TurnContext:
     allowed_tool_names: frozenset[str]
     loaded_skills: tuple[str, ...]
     bulk_delete_confirmation_required: bool
+    user_input: str
 
 
 @dataclass(frozen=True)
@@ -97,7 +105,7 @@ def _message_summary(message: Any) -> dict[str, Any]:
     }
 
 
-def _context_summary(messages: list[Any]) -> dict[str, Any]:
+def _llm_input_diagnostics(messages: list[Any]) -> dict[str, Any]:
     serialized = json_safe(messages)
     summary = {
         "message_count": len(messages),
@@ -203,6 +211,8 @@ class Agent:
         self.loop_limits = loop_limits or DEFAULT_LOOP_LIMITS
         self.last_run_state: RunState | None = None
         self.context_engine = ContextEngine()
+        self.profile_loader = ProfileLoader()
+        self.memory_retriever = MemoryRetriever()
 
     def cancel_current_run(self) -> bool:
         """Request cooperative cancellation at the next runtime checkpoint."""
@@ -320,6 +330,7 @@ class Agent:
             allowed_tool_names=capability_result.allowed_tool_names,
             loaded_skills=prompt_result.loaded_skills,
             bulk_delete_confirmation_required=bulk_delete_confirmation_required,
+            user_input=user_input,
         )
 
     def _run_agent_loop(self, run_state: RunState, turn: TurnContext) -> str:
@@ -338,6 +349,7 @@ class Agent:
                 loop_number=loop_number,
                 instructions=turn.instructions,
                 tool_schemas=turn.tool_schemas,
+                user_input=turn.user_input,
             )
             if response is None:
                 return self._stopped_answer(run_state)
@@ -419,6 +431,7 @@ class Agent:
         loop_number: int,
         instructions: str,
         tool_schemas: tuple[dict[str, Any], ...],
+        user_input: str,
     ) -> Any | None:
         """Call the model with explicit retry accounting and boundary logs."""
         assembly = self.context_engine.assemble(
@@ -426,8 +439,26 @@ class Agent:
             instructions=instructions,
             tools=tool_schemas,
         )
-        context = _context_summary(assembly.input_messages)
+        profile = self.profile_loader.load()
+        profile_message = profile_context_message(profile)
+        semantic_memories = self.memory_retriever.retrieve(user_input)
+        semantic_message = semantic_memory_context_message(semantic_memories)
+        input_messages = list(assembly.input_messages)
+        if profile_message is not None:
+            input_messages.insert(0, profile_message)
+        if semantic_message is not None:
+            insert_index = 1 if profile_message is not None else 0
+            input_messages.insert(insert_index, semantic_message)
+
+        memory_report = profile_context_report(
+            profile,
+            profile_message,
+            semantic_memories,
+            semantic_message,
+        )
+        context = _llm_input_diagnostics(input_messages)
         context["context_engine"] = assembly.report
+        context["memory"] = memory_report
         events.log_llm_requested(run_state, loop_number, context)
         for retry_index in range(self.loop_limits.max_llm_retries + 1):
             if run_state.chat_cancellation_requested:
@@ -448,18 +479,19 @@ class Agent:
                 model=LLM_MODEL,
                 instructions=instructions,
                 tools=tool_schemas,
-                input_messages=assembly.input_messages,
+                input_messages=input_messages,
                 parameters={
                     "temperature": LLM_TEMPERATURE,
                     "max_output_tokens": LLM_MAX_OUTPUT_TOKENS,
                     "context_engine": assembly.report,
+                    "memory": memory_report,
                 },
             )
             try:
                 return client.responses.create(
                     model=LLM_MODEL,
                     instructions=instructions,
-                    input=assembly.input_messages,
+                    input=input_messages,
                     tools=list(tool_schemas),
                     temperature=LLM_TEMPERATURE,
                     max_output_tokens=LLM_MAX_OUTPUT_TOKENS,

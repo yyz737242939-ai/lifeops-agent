@@ -9,6 +9,8 @@ from app.domains.daily_log_store import Energy as DailyEnergy
 from app.domains.daily_log_store import Mood as DailyMood
 from app.domains.expense_store import BudgetPeriod
 from app.domains.todo_store import Todo, TodoPriority
+from app.memory.memory_store import SemanticMemoryStore
+from app.memory.memory_types import MemoryType
 from app.context.context_ref_store import read_context_ref as load_context_ref
 from app.runtime.idempotency_store import get_result as get_idempotent_result
 from app.runtime.idempotency_store import save_result as save_idempotent_result
@@ -21,6 +23,9 @@ from app.tools.registry import (
     ToolResult,
     register_tool,
 )
+
+
+memory_store = SemanticMemoryStore()
 
 
 def _empty_parameters() -> ToolParameters:
@@ -105,6 +110,60 @@ def _list_todos_parameters() -> ToolParameters:
     }
 
 
+def _memory_parameters(required: list[str]) -> ToolParameters:
+    return {
+        "type": "object",
+        "properties": {
+            "type": {
+                "type": "string",
+                "enum": ["fact", "preference", "goal", "constraint"],
+                "description": "Semantic memory type.",
+            },
+            "content": {
+                "type": "string",
+                "description": "Concise user-authorized long-term memory content.",
+            },
+            "tags": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional simple tags for later filtering.",
+            },
+        },
+        "required": required,
+    }
+
+
+def _list_memories_parameters() -> ToolParameters:
+    return {
+        "type": "object",
+        "properties": {
+            "type": {
+                "type": "string",
+                "enum": ["fact", "preference", "goal", "constraint"],
+                "description": "Optional memory type filter.",
+            },
+            "tag": {
+                "type": "string",
+                "description": "Optional tag filter.",
+            },
+        },
+        "required": [],
+    }
+
+
+def _delete_memory_parameters() -> ToolParameters:
+    return {
+        "type": "object",
+        "properties": {
+            "memory_id": {
+                "type": "string",
+                "description": "Memory id returned by list_memories or save_memory.",
+            }
+        },
+        "required": ["memory_id"],
+    }
+
+
 def _todo_to_dict(todo: Todo) -> dict[str, Any]:
     return todo.model_dump(mode="json")
 
@@ -126,6 +185,82 @@ def get_current_time() -> ToolResult:
         "action": "get_current_time",
         "current_time": now.strftime("%Y-%m-%d %H:%M:%S"),
         "current_date": now.date().isoformat(),
+    }
+
+
+@register_tool(
+    name="save_memory",
+    description=(
+        "Save a long-term semantic memory only when the current user message "
+        "explicitly asks to remember or save a fact, preference, goal, or constraint."
+    ),
+    parameters=_memory_parameters(required=["type", "content"]),
+    effect=ToolEffect.WRITE,
+    idempotent=False,
+    retryable=False,
+)
+def save_memory(
+    type: MemoryType,
+    content: str,
+    tags: list[str] | None = None,
+) -> ToolResult:
+    """Persist one user-authorized Semantic Memory item."""
+    memory = memory_store.save_memory(
+        memory_type=type,
+        content=content,
+        tags=tags,
+    )
+    return {
+        "ok": True,
+        "action": "save_memory",
+        "memory": _model_to_dict(memory),
+    }
+
+
+@register_tool(
+    name="list_memories",
+    description="List active long-term semantic memories, optionally filtered by type or tag.",
+    parameters=_list_memories_parameters(),
+)
+def list_memories(
+    type: MemoryType | None = None,
+    tag: str | None = None,
+) -> ToolResult:
+    """Return active Semantic Memory items."""
+    memories = memory_store.list_memories(memory_type=type, tag=tag)
+    return {
+        "ok": True,
+        "action": "list_memories",
+        "memories": [_model_to_dict(memory) for memory in memories],
+    }
+
+
+@register_tool(
+    name="delete_memory",
+    description=(
+        "Soft-delete a long-term semantic memory when the current user message "
+        "explicitly asks to forget or delete that memory."
+    ),
+    parameters=_delete_memory_parameters(),
+    effect=ToolEffect.WRITE,
+    idempotent=True,
+    retryable=False,
+)
+def delete_memory(memory_id: str) -> ToolResult:
+    """Soft-delete one Semantic Memory item."""
+    memory = memory_store.delete_memory(memory_id)
+    if memory is None:
+        return {
+            "ok": False,
+            "action": "delete_memory",
+            "error": "memory_not_found",
+            "memory_id": memory_id,
+        }
+
+    return {
+        "ok": True,
+        "action": "delete_memory",
+        "memory": _model_to_dict(memory),
     }
 
 

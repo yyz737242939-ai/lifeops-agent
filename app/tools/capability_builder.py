@@ -8,7 +8,10 @@ from app.tools.tool import TOOLS, ToolEffect
 COMMON_TOOL_NAMES = frozenset(
     {
         "get_current_time",
+        "list_memories",
         "read_context_ref",
+        "save_memory",
+        "delete_memory",
     }
 )
 
@@ -78,23 +81,31 @@ def build_capabilities(
 ) -> CapabilityBuildResult:
     """Map loaded Skills to visible schemas and allowed tool names."""
     _validate_configuration()
+    authorized_writes = authorized_write_tool_names or frozenset()
 
     unknown_skills = set(loaded_skills) - set(SKILL_TOOL_NAMES)
     if unknown_skills:
         raise ValueError(f"Unknown skills in capability request: {sorted(unknown_skills)}")
 
-    sources: dict[str, list[str]] = {
-        tool_name: ["common"] for tool_name in COMMON_TOOL_NAMES
-    }
-    allowed = set(COMMON_TOOL_NAMES)
+    sources: dict[str, list[str]] = {}
+    allowed: set[str] = set()
+
+    for tool_name in COMMON_TOOL_NAMES:
+        tool = TOOLS[tool_name]
+        if (
+            tool.effect == ToolEffect.WRITE
+            and tool_name not in authorized_writes
+        ):
+            continue
+        allowed.add(tool_name)
+        sources.setdefault(tool_name, []).append("common")
 
     for skill_name in dict.fromkeys(loaded_skills):
         for tool_name in SKILL_TOOL_NAMES[skill_name]:
             tool = TOOLS[tool_name]
             if (
-                authorized_write_tool_names is not None
-                and tool.effect == ToolEffect.WRITE
-                and tool_name not in authorized_write_tool_names
+                tool.effect == ToolEffect.WRITE
+                and tool_name not in authorized_writes
             ):
                 continue
             allowed.add(tool_name)

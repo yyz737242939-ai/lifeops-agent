@@ -11,8 +11,16 @@ def _tool_names(call) -> set[str]:
     return {schema["name"] for schema in call.kwargs["tools"]}
 
 
+def _common_read_tools() -> set[str]:
+    return {
+        name
+        for name in COMMON_TOOL_NAMES
+        if TOOLS[name].effect == ToolEffect.READ
+    }
+
+
 def _read_tools(skill_name: str) -> set[str]:
-    return set(COMMON_TOOL_NAMES) | {
+    return _common_read_tools() | {
         name
         for name in SKILL_TOOL_NAMES[skill_name]
         if TOOLS[name].effect == ToolEffect.READ
@@ -71,7 +79,7 @@ class AgentSkillStateTests(unittest.TestCase):
             _read_tools("finance"),
         )
         self.assertTrue(finance_tools.isdisjoint(SKILL_TOOL_NAMES["todo"]))
-        self.assertEqual(fallback_tools, set(COMMON_TOOL_NAMES))
+        self.assertEqual(fallback_tools, _common_read_tools())
         self.assertEqual(agent.active_skills, ())
 
         routing_calls = log_event.log_routing_resolved.call_args_list
@@ -100,7 +108,7 @@ class AgentSkillStateTests(unittest.TestCase):
 
         ref_tools = _tool_names(create_response.call_args_list[1])
         continued_tools = _tool_names(create_response.call_args_list[2])
-        self.assertEqual(ref_tools, set(COMMON_TOOL_NAMES))
+        self.assertEqual(ref_tools, _common_read_tools())
         self.assertEqual(
             continued_tools,
             _read_tools("finance"),

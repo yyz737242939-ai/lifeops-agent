@@ -9,6 +9,8 @@ WRITE_TOOL_NAMES = frozenset(
         "delete_todo",
         "record_daily_state",
         "record_expense",
+        "save_memory",
+        "delete_memory",
         "set_budget",
     }
 )
@@ -41,6 +43,16 @@ def authorized_write_tools(user_input: str) -> frozenset[str]:
     if re.search(r"预算", text) and re.search(r"设置|设为|设成|定为|修改|更新|调整|set", text):
         authorized.add("set_budget")
 
+    memory_delete_cue = _has_memory_delete_cue(text)
+    if memory_delete_cue:
+        authorized.add("delete_memory")
+
+    if _has_memory_save_cue(text) and not memory_delete_cue:
+        authorized.add("save_memory")
+
+    if memory_delete_cue and not re.search(r"待办|任务|todo", text):
+        authorized.discard("delete_todo")
+
     if requires_bulk_delete_confirmation(text):
         authorized.discard("delete_todo")
     return frozenset(authorized)
@@ -66,6 +78,31 @@ def requires_bulk_delete_confirmation(user_input: str) -> bool:
     bulk = bool(re.search(r"所有|全部|全都|整个|清空|all|everything", text))
     confirmed = bool(re.search(r"确认|确定|我确认|继续删除|是的.*删除|confirm", text))
     return destructive and bulk and not confirmed
+
+
+def _has_memory_save_cue(text: str) -> bool:
+    return bool(
+        re.search(
+            r"长期记住|请记住|帮我记住|给我记住|记住"
+            r"|以后默认|之后默认|以后都"
+            r"|保存.{0,20}(?:偏好|事实|目标|约束|记忆)"
+            r"|把.{0,30}(?:偏好|事实|目标|约束|习惯).{0,20}(?:保存|记下来|记住)"
+            r"|save (?:this )?(?:memory|preference|fact|goal|constraint)",
+            text,
+        )
+    )
+
+
+def _has_memory_delete_cue(text: str) -> bool:
+    return bool(
+        re.search(
+            r"忘掉|别再记|不要再记|不用再记"
+            r"|删除.{0,20}(?:记忆|memory)"
+            r"|移除.{0,20}(?:记忆|memory)"
+            r"|delete .{0,20}memory|forget",
+            text,
+        )
+    )
 
 
 def has_write_success_claim(answer: str) -> bool:

@@ -49,6 +49,23 @@ class WritePolicyTests(unittest.TestCase):
 
         self.assertIn("record_expense", tools)
 
+    def test_descriptive_preference_does_not_authorize_memory_write(self) -> None:
+        tools = authorized_write_tools("我喜欢早上学习。")
+
+        self.assertNotIn("save_memory", tools)
+
+    def test_explicit_memory_save_authorizes_save_memory(self) -> None:
+        tools = authorized_write_tools("记住我喜欢早上学习。")
+
+        self.assertIn("save_memory", tools)
+
+    def test_explicit_memory_delete_authorizes_delete_memory_only(self) -> None:
+        tools = authorized_write_tools("忘掉这条记忆。")
+
+        self.assertIn("delete_memory", tools)
+        self.assertNotIn("save_memory", tools)
+        self.assertNotIn("delete_todo", tools)
+
     def test_bulk_delete_requires_confirmation(self) -> None:
         self.assertTrue(requires_bulk_delete_confirmation("删除所有待办。"))
         self.assertNotIn("delete_todo", authorized_write_tools("删除所有待办。"))
