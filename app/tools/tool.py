@@ -14,6 +14,7 @@ from app.memory.memory_types import MemoryType
 from app.context.context_ref_store import read_context_ref as load_context_ref
 from app.runtime.idempotency_store import get_result as get_idempotent_result
 from app.runtime.idempotency_store import save_result as save_idempotent_result
+from app.skills.reference_loader import SkillReferenceError, load_skill_reference
 from app.tools.executor import execute_tool
 from app.tools.registry import (
     TOOLS,
@@ -161,6 +162,22 @@ def _delete_memory_parameters() -> ToolParameters:
             }
         },
         "required": ["memory_id"],
+    }
+
+
+def _skill_reference_parameters() -> ToolParameters:
+    return {
+        "type": "object",
+        "properties": {
+            "ref_id": {
+                "type": "string",
+                "description": (
+                    "Declared reference id from the currently loaded Skill, "
+                    "for example: briefing_policy."
+                ),
+            }
+        },
+        "required": ["ref_id"],
     }
 
 
@@ -962,6 +979,39 @@ def read_context_ref(ref_id: str) -> ToolResult:
         "payload_hash": payload.get("payload_hash"),
         "summary": payload.get("summary"),
         "full_result": payload.get("full_result"),
+    }
+
+
+@register_tool(
+    name="read_skill_reference",
+    description=(
+        "Read a declared Markdown reference for the loaded news Skill. "
+        "Use this for briefing rules, source boundaries, copyright policy, "
+        "output templates, or topic filters before preparing a news briefing."
+    ),
+    parameters=_skill_reference_parameters(),
+)
+def read_skill_reference(ref_id: str) -> ToolResult:
+    try:
+        reference = load_skill_reference("news", ref_id)
+    except SkillReferenceError as error:
+        return {
+            "ok": False,
+            "action": "read_skill_reference",
+            "error": error.code,
+            "message": error.message,
+            "ref_id": ref_id,
+        }
+
+    return {
+        "ok": True,
+        "action": "read_skill_reference",
+        "skill": reference.skill_name,
+        "ref_id": reference.ref_id,
+        "path": reference.relative_path,
+        "description": reference.description,
+        "chars": reference.chars,
+        "content": reference.content,
     }
 
 

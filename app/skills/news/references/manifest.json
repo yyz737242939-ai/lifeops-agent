@@ -1,0 +1,24 @@
+{
+  "references": {
+    "briefing_policy": {
+      "path": "references/briefing_policy.md",
+      "description": "Rules for concise Chinese AI news briefings."
+    },
+    "source_policy": {
+      "path": "references/source_policy.md",
+      "description": "Boundaries for source-linked Hugging Face list-page summaries."
+    },
+    "copyright_policy": {
+      "path": "references/copyright_policy.md",
+      "description": "Copyright and quotation limits for news briefing output."
+    },
+    "output_templates": {
+      "path": "references/output_templates.md",
+      "description": "Recommended output shapes for daily AI briefings."
+    },
+    "topic_agent_llm": {
+      "path": "references/topic_agent_llm.md",
+      "description": "Topic filters for agent and LLM related items."
+    }
+  }
+}

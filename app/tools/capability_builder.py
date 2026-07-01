@@ -43,7 +43,7 @@ SKILL_TOOL_NAMES: dict[str, frozenset[str]] = {
         }
     ),
     "activity": frozenset({"recommend_activities"}),
-    "news": frozenset(),
+    "news": frozenset({"read_skill_reference"}),
 }
 
 

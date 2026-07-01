@@ -201,6 +201,27 @@ def _error_json(
     )
 
 
+def _history_safe_tool_result(tool_name: str, result_json: str) -> str:
+    """Remove ephemeral reference bodies before storing observations long term."""
+    if tool_name != "read_skill_reference":
+        return result_json
+    parsed = parse_json_object(result_json)
+    if not isinstance(parsed, dict) or parsed.get("ok") is not True:
+        return result_json
+    payload = {
+        "ok": True,
+        "action": "read_skill_reference",
+        "skill": parsed.get("skill"),
+        "ref_id": parsed.get("ref_id"),
+        "path": parsed.get("path"),
+        "description": parsed.get("description"),
+        "chars": parsed.get("chars"),
+        "content_omitted": True,
+        "compaction_strategy": "ephemeral_reference",
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
 class Agent:
     """Coordinate skill routing, LLM rounds, tools, and per-request RunState."""
 
@@ -369,6 +390,7 @@ class Agent:
                     self.messages += response.output
                 else:
                     self.messages.append({"role": "assistant", "content": answer})
+                self._sanitize_ephemeral_tool_outputs()
                 run_state.complete()
                 self._record_after_turn_compaction(run_state)
                 events.log_final_answer(run_state, answer)
@@ -697,6 +719,16 @@ class Agent:
             execution.content,
             requested_count=_requested_count_from_arguments(arguments),
         )
+        recorded_result = _history_safe_tool_result(
+            function_call.name,
+            compacted_result,
+        )
+        if recorded_result != compacted_result:
+            compaction = {
+                **compaction,
+                "strategy": "ephemeral_reference",
+                "compacted_chars": len(recorded_result),
+            }
         action_succeeded = bool(
             execution.parsed is not None and execution.parsed.get("ok") is True
         )
@@ -711,7 +743,7 @@ class Agent:
             status=(
                 ActionStatus.COMPLETED if action_succeeded else ActionStatus.FAILED
             ),
-            result=compacted_result,
+            result=recorded_result,
             error=(execution.error.to_dict() if execution.error else None),
             tool_call_signature=signature,
             tool_observation_signature=observation_signature,
@@ -997,9 +1029,24 @@ class Agent:
     def _stopped_answer(self, run_state: RunState) -> str:
         """Log and format a controlled runtime stop exactly once."""
         answer = _runtime_stop_answer(run_state)
+        self._sanitize_ephemeral_tool_outputs()
         self._record_after_turn_compaction(run_state)
         events.log_run_stopped(run_state, answer)
         app_log.log_warning(
             "Run %s stopped: %s", run_state.run_id, run_state.stop_reason
         )
         return answer
+
+    def _sanitize_ephemeral_tool_outputs(self) -> None:
+        for message in self.messages:
+            if not isinstance(message, dict):
+                continue
+            if message.get("type") != "function_call_output":
+                continue
+            output = message.get("output")
+            if not isinstance(output, str):
+                continue
+            message["output"] = _history_safe_tool_result(
+                "read_skill_reference",
+                output,
+            )

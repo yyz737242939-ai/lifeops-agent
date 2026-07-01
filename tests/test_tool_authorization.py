@@ -55,6 +55,53 @@ class ToolAuthorizationTests(unittest.TestCase):
         self.assertEqual(result["error"]["type"], "not_found")
         self.assertEqual(result["error"]["code"], "tool_not_found")
 
+    def test_skill_reference_requires_news_skill_capability(self) -> None:
+        capability = build_capabilities(())
+
+        result = json.loads(
+            call_tool(
+                "read_skill_reference",
+                {"ref_id": "briefing_policy"},
+                allowed_tool_names=capability.allowed_tool_names,
+            )
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"]["type"], "permission_denied")
+        self.assertEqual(result["error"]["code"], "tool_not_allowed")
+
+    def test_skill_reference_reads_declared_news_markdown(self) -> None:
+        capability = build_capabilities(("news",))
+
+        result = json.loads(
+            call_tool(
+                "read_skill_reference",
+                {"ref_id": "briefing_policy"},
+                allowed_tool_names=capability.allowed_tool_names,
+            )
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["action"], "read_skill_reference")
+        self.assertEqual(result["skill"], "news")
+        self.assertEqual(result["path"], "references/briefing_policy.md")
+        self.assertIn("Briefing Policy", result["content"])
+
+    def test_skill_reference_rejects_undeclared_ref_id(self) -> None:
+        capability = build_capabilities(("news",))
+
+        result = json.loads(
+            call_tool(
+                "read_skill_reference",
+                {"ref_id": "../PROJECT_CONTEXT.md"},
+                allowed_tool_names=capability.allowed_tool_names,
+            )
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"]["type"], "not_found")
+        self.assertEqual(result["error"]["code"], "skill_reference_not_found")
+
 
 if __name__ == "__main__":
     unittest.main()

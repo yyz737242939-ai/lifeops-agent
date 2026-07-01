@@ -121,6 +121,58 @@ class AgentSkillStateTests(unittest.TestCase):
         self.assertEqual(ref_state.loaded_skills, ())
         self.assertEqual(continued_state.inherited_skills, ("finance",))
 
+    @patch("app.agents.agent.llm_io")
+    @patch("app.agents.agent.events")
+    @patch("app.agents.agent.client.responses.create")
+    def test_news_turn_exposes_skill_reference_but_not_network_tools(
+        self,
+        create_response,
+        _log_event,
+        _log_raw_event,
+    ) -> None:
+        create_response.return_value = SimpleNamespace(output=[], output_text="done")
+        agent = Agent()
+
+        agent.chat("总结今天 Hugging Face 上的热门论文和博客")
+
+        tools = _tool_names(create_response.call_args)
+        self.assertIn("read_skill_reference", tools)
+        self.assertNotIn("fetch_news_source", tools)
+        self.assertEqual(agent.active_skills, ("news",))
+
+    @patch("app.agents.agent.llm_io")
+    @patch("app.agents.agent.events")
+    @patch("app.agents.agent.client.responses.create")
+    def test_skill_reference_body_is_ephemeral_within_news_turn(
+        self,
+        create_response,
+        _log_event,
+        _log_raw_event,
+    ) -> None:
+        reference_call = SimpleNamespace(
+            type="function_call",
+            name="read_skill_reference",
+            arguments='{"ref_id": "briefing_policy"}',
+            call_id="call_ref_1",
+        )
+        create_response.side_effect = [
+            SimpleNamespace(output=[reference_call], output_text=""),
+            SimpleNamespace(output=[], output_text="done"),
+        ]
+        agent = Agent()
+
+        agent.chat("总结今天 Hugging Face 上的热门论文和博客")
+
+        outputs = [
+            message["output"]
+            for message in agent.messages
+            if isinstance(message, dict)
+            and message.get("type") == "function_call_output"
+        ]
+        self.assertEqual(len(outputs), 1)
+        self.assertIn("content_omitted", outputs[0])
+        self.assertNotIn("Briefing Policy", outputs[0])
+
 
 if __name__ == "__main__":
     unittest.main()

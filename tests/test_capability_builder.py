@@ -41,8 +41,12 @@ class CapabilityBuilderTests(unittest.TestCase):
     def test_news_skill_currently_exposes_only_common_read_tools(self) -> None:
         result = build_capabilities(("news",))
 
-        self.assertEqual(result.allowed_tool_names, _read_tools(COMMON_TOOL_NAMES))
-        self.assertEqual(SKILL_TOOL_NAMES["news"], frozenset())
+        self.assertEqual(
+            result.allowed_tool_names,
+            _read_tools(COMMON_TOOL_NAMES | SKILL_TOOL_NAMES["news"]),
+        )
+        self.assertEqual(SKILL_TOOL_NAMES["news"], frozenset({"read_skill_reference"}))
+        self.assertIn("read_skill_reference", result.allowed_tool_names)
         self.assertFalse(result.fallback_used)
 
     def test_cross_domain_request_merges_tools_without_duplicates(self) -> None:

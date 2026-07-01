@@ -147,7 +147,7 @@ RunState的主要计数字段已经显式包含作用域和统计对象：
 - Prompt每次Chat重新构建，不把Skill正文追加到历史消息。
 - LLM只看到本轮允许的Tool Schema，Executor在执行前再次校验权限。
 - 当前输入没有明确授权时，写工具不会暴露给模型。
-- `news` Skill 已有骨架和确定性路由，可识别 Hugging Face、论文、Blog、AI简报等请求；当前阶段尚未暴露网络读取、Reference 或 helper 工具，因此只会提供入口规则和边界提醒。
+- `news` Skill 已有骨架和确定性路由，可识别 Hugging Face、论文、Blog、AI简报等请求；当前阶段可通过 `read_skill_reference(ref_id)` 读取 Skill 自有目录下 manifest 声明过的 Markdown reference，但尚未暴露网络读取或 helper 工具。
 
 ### 写入安全
 
