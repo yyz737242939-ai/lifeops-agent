@@ -16,10 +16,38 @@
 - Memory v1：只读Profile、用户授权Semantic Memory、Memory工具、简单检索和本轮上下文注入。
 - Skill References、受控News Source和只读News Helper，用于Hugging Face AI简报。
 - MCP v1：Mock Package Tracking Server、Agent侧Adapter、全局READ Tool Bridge和自然语言Agent闭环。
+- 本地产品 UI：Dashboard、Todo、Wellbeing、Finance、Activity、Memory 和 Ask LifeOps 操作入口。
 - Tool Observation的inline、summary和Context Ref压缩。
 - 当前输入写授权、批量删除确认和最终写入声明校验。
 - Event、LLM I/O、Application三通道日志及本地Viewer。
-- 176项自动化回归测试。
+- 194项自动化回归测试。
+
+## [Milestone 1.3.1] - 2026-07-02
+
+### Added
+
+- 新增独立本地产品 UI 入口 `product_ui.py`，默认启动 `http://127.0.0.1:8787`，不复用开发用 `log_viewer`。
+- 新增 `app/product_ui/*`，通过本地 HTTP API 调用现有 domain store，前端不直接读写业务 JSON 文件。
+- 新增 Dashboard 页面，展示今日待办、消费概览、最近 Wellbeing 状态和基于当前状态的活动建议。
+- 新增 Todo 产品操作界面，支持新增、完成、删除、open/done/all 筛选，以及编辑标题、优先级和截止日期。
+- 新增 Wellbeing 产品操作界面，支持每日 check-in、按日期窗口查询，以及编辑历史状态记录。
+- 新增 Finance 产品操作界面，支持新增消费、按分类和日期范围筛选、设置分类预算和检查预算状态。
+- 新增 Activity 推荐界面，支持按能量、心情、预算、地点、时间和目标筛选推荐。
+- 新增 Memory UI，支持查看 active Semantic Memory、按 type/tag 过滤和软删除；不提供绕过授权语义的自由保存 Memory 表单。
+- 新增 Ask LifeOps 面板，通过现有 `Agent.chat()` 提供自然语言交互，并展示本次 RunState、工具 Action 和 WRITE Action 摘要。
+- 新增产品 UI 回归测试 `tests/test_product_ui.py`，覆盖产品 API、domain 写入/查询、预算、Memory 软删除、Agent 面板协议和前端支撑边界。
+
+### Changed
+
+- `PROJECT_CONTEXT.md` 增加产品 UI 入口、模块职责、功能范围和边界说明。
+- Ask LifeOps 复用服务进程内 Agent 实例，在当前 UI 服务生命周期内保持对话连续性；重启后清空对话内存状态，业务数据仍由 domain JSON 持久化。
+- 产品 UI 明确区分结构化表单写入和 Agent 对话：表单直接调用 domain 函数，Ask LifeOps 仍经过现有 Runtime、Capability 和写入授权规则。
+- 当前产品 UI 暂不提前实现 Interaction/Safety State 或 Task State 页面，等待后端 Runtime 状态成为事实源后再接入。
+
+### Fixed
+
+- 避免把产品 UI 混入日志查看器：`app/log_viewer/*` 继续只作为开发观察工具，产品 UI 独立演进。
+- 避免前端凭 assistant 文本判断写入事实：Ask LifeOps 面板展示 Runtime Action 摘要，真实写入仍以成功 WRITE Action 或结构化表单提交为准。
 
 ## [Milestone 1.3] - 2026-07-02
 

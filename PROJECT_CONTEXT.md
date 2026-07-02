@@ -41,6 +41,9 @@ uv run python main.py
 # 查看日志
 uv run python log_viewer.py
 
+# 运行产品 UI
+uv run python product_ui.py
+
 # 运行自动化测试
 uv run python -m unittest discover -s tests -v
 ```
@@ -82,6 +85,7 @@ uv run python -m unittest discover -s tests -v
 | `mcp_servers/mock_package_server.py` | MCP v1 学习用的只读 Mock Package Tracking Server，提供包裹查询工具 |
 | `app/observability/*` | 三通道日志及安全序列化 |
 | `app/log_viewer/*` | 本地日志查看器，支持普通会话和UAT目录格式 |
+| `app/product_ui/*` | 本地产品 UI，提供面向用户的 Dashboard、Todo、Wellbeing、Finance 和 Activity 操作入口 |
 | `tests/*` | 核心 Runtime、Context、安全、Skill、日志与工具的回归测试，其中 `tests/test_context_eval_cases.py` 覆盖Context压缩前后关键不变量 |
 
 ## 状态与生命周期
@@ -141,6 +145,26 @@ RunState的主要计数字段已经显式包含作用域和统计对象：
 - Wellbeing：记录与查询睡眠、心情、能量和备注。
 - Finance：记录、查询、汇总消费，设置和检查分类预算。
 - Activity：按时间、地点、预算、心情、能量和目标推荐本地活动。
+
+### 产品 UI
+
+- `product_ui.py` 启动独立本地产品界面，默认地址为 `http://127.0.0.1:8787`。
+- 第一版不复用 `app/log_viewer`，日志查看器仍是开发观察工具，产品 UI 是面向用户的操作界面。
+- 产品 UI 通过 `app/product_ui/server.py` 暴露本地 HTTP API，再调用 `app/domains/*` 现有业务函数；前端不直接读写 JSON 文件。
+- 当前页面包含 Dashboard、Todo、Wellbeing、Finance、Activity 推荐和 Ask LifeOps：
+  - Dashboard 展示今日待办、消费概览、最近状态和基于当前状态的活动建议。
+  - Todo 支持新增、完成、删除和列表查看。
+  - Todo 支持筛选 open/done/all，并可编辑标题、优先级和截止日期。
+  - Wellbeing 支持每日睡眠、心情、能量和备注记录，可按日期窗口查看，并可编辑历史状态记录。
+  - Finance 支持新增消费、查看近期消费和当前汇总。
+  - Finance 支持按分类和日期范围筛选，并支持设置/检查分类预算。
+  - Activity 支持按能量、心情、预算、地点、时间和目标筛选推荐。
+  - Memory 支持查看 active Semantic Memory，并支持软删除；产品 UI 不提供绕过授权语义的自由保存 Memory 表单。
+  - Ask LifeOps 通过 `Agent.chat()` 提供自然语言对话，并在界面中展示本次 RunState 摘要。
+- 产品 UI 的结构化表单和 Ask LifeOps 是两个交互面：表单直接调用 domain 函数；Ask LifeOps 走现有 Agent Runtime、Capability 和写入授权规则。
+- 产品 UI 服务进程内维护一个 Agent 实例，使 Ask LifeOps 在当前服务生命周期内具有对话连续性；重启产品 UI 后该对话内存状态会清空，已写入的业务数据仍由 domain JSON 持久化保存。
+- Ask LifeOps 支持清空当前 UI 进程内 Agent 会话，并展示本轮工具 Action 与 WRITE Action 摘要；assistant 口头声称保存仍不构成事实，真实业务写入仍以成功 WRITE Action 或结构化表单提交为准。
+- 产品 UI 暂不提前实现 Interaction/Safety State 或 Task State 页面；这些页面需要等待后端 Runtime 状态成为事实源后再接入。
 
 ### Skill与Capability
 
