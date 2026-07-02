@@ -151,6 +151,8 @@ System Instructions
 6. 将只读脚本纳入 Capability：只有当前选中 Skill 声明的 read-only helper 才可见，Executor 二次校验。
 7. 增加测试：未选中 Skill 不可读、未声明 reference 拒绝、路径穿越拒绝、脚本不可写、超时/异常结构化、不会污染历史和 Memory。
 
+当前进展：Skill Reference、Hugging Face Source Manifest、受控 `fetch_news_source`、News helper manifest、`run_news_helper` 和 Hugging Face News Briefing 闭环已完成第一版实现。学习重点已覆盖：Skill 如何从 Prompt 规则扩展为声明式 reference、受控 source 和只读 helper，以及 Runtime 如何通过 Capability、Executor、结构化错误、日志链路和上下文清理维持边界。下一步可进入 MCP 或 Interaction / Safety State。
+
 ## 后续路线
 
 1. Interaction / Safety State：跨轮确认、取消、范围修改、授权过期和危险操作保护。

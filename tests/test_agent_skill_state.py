@@ -124,7 +124,7 @@ class AgentSkillStateTests(unittest.TestCase):
     @patch("app.agents.agent.llm_io")
     @patch("app.agents.agent.events")
     @patch("app.agents.agent.client.responses.create")
-    def test_news_turn_exposes_skill_reference_but_not_network_tools(
+    def test_news_turn_exposes_reference_source_and_helper_tools(
         self,
         create_response,
         _log_event,
@@ -137,7 +137,8 @@ class AgentSkillStateTests(unittest.TestCase):
 
         tools = _tool_names(create_response.call_args)
         self.assertIn("read_skill_reference", tools)
-        self.assertNotIn("fetch_news_source", tools)
+        self.assertIn("fetch_news_source", tools)
+        self.assertIn("run_news_helper", tools)
         self.assertEqual(agent.active_skills, ("news",))
 
     @patch("app.agents.agent.llm_io")

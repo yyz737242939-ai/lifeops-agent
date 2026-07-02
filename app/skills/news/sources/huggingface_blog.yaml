@@ -1,0 +1,6 @@
+id: hf_blog
+name: Hugging Face Blog
+url: https://huggingface.co/blog
+kind: html
+allowed: true
+description: Hugging Face community and team blog articles.

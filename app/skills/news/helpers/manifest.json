@@ -1,0 +1,59 @@
+{
+  "helpers": {
+    "parse_hf_daily_papers": {
+      "module": "app.skills.news.helpers.news_helpers",
+      "function": "parse_hf_daily_papers",
+      "read_only": true,
+      "timeout_seconds": 3,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "html": { "type": "string" },
+          "limit": { "type": "integer" }
+        },
+        "required": ["html", "limit"]
+      }
+    },
+    "parse_hf_blog": {
+      "module": "app.skills.news.helpers.news_helpers",
+      "function": "parse_hf_blog",
+      "read_only": true,
+      "timeout_seconds": 3,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "html": { "type": "string" },
+          "limit": { "type": "integer" }
+        },
+        "required": ["html", "limit"]
+      }
+    },
+    "rank_news_items": {
+      "module": "app.skills.news.helpers.news_helpers",
+      "function": "rank_news_items",
+      "read_only": true,
+      "timeout_seconds": 3,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "items": { "type": "array" },
+          "limit": { "type": "integer" }
+        },
+        "required": ["items", "limit"]
+      }
+    },
+    "dedupe_news_items": {
+      "module": "app.skills.news.helpers.news_helpers",
+      "function": "dedupe_news_items",
+      "read_only": true,
+      "timeout_seconds": 3,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "items": { "type": "array" }
+        },
+        "required": ["items"]
+      }
+    }
+  }
+}

@@ -1,0 +1,6 @@
+id: hf_daily_papers
+name: Hugging Face Daily Papers
+url: https://huggingface.co/papers
+kind: html
+allowed: true
+description: Trending AI papers from Hugging Face Daily Papers.

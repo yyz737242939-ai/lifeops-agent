@@ -38,15 +38,26 @@ class CapabilityBuilderTests(unittest.TestCase):
         self.assertTrue(result.allowed_tool_names.isdisjoint(SKILL_TOOL_NAMES["activity"]))
         self.assertFalse(result.fallback_used)
 
-    def test_news_skill_currently_exposes_only_common_read_tools(self) -> None:
+    def test_news_skill_exposes_declared_reference_source_and_helper_tools(self) -> None:
         result = build_capabilities(("news",))
 
         self.assertEqual(
             result.allowed_tool_names,
             _read_tools(COMMON_TOOL_NAMES | SKILL_TOOL_NAMES["news"]),
         )
-        self.assertEqual(SKILL_TOOL_NAMES["news"], frozenset({"read_skill_reference"}))
+        self.assertEqual(
+            SKILL_TOOL_NAMES["news"],
+            frozenset(
+                {
+                    "read_skill_reference",
+                    "fetch_news_source",
+                    "run_news_helper",
+                }
+            ),
+        )
         self.assertIn("read_skill_reference", result.allowed_tool_names)
+        self.assertIn("fetch_news_source", result.allowed_tool_names)
+        self.assertIn("run_news_helper", result.allowed_tool_names)
         self.assertFalse(result.fallback_used)
 
     def test_cross_domain_request_merges_tools_without_duplicates(self) -> None:

@@ -14,7 +14,9 @@ from app.memory.memory_types import MemoryType
 from app.context.context_ref_store import read_context_ref as load_context_ref
 from app.runtime.idempotency_store import get_result as get_idempotent_result
 from app.runtime.idempotency_store import save_result as save_idempotent_result
+from app.skills.helper_loader import run_skill_helper
 from app.skills.reference_loader import SkillReferenceError, load_skill_reference
+from app.skills.source_loader import fetch_skill_source
 from app.tools.executor import execute_tool
 from app.tools.registry import (
     TOOLS,
@@ -178,6 +180,48 @@ def _skill_reference_parameters() -> ToolParameters:
             }
         },
         "required": ["ref_id"],
+    }
+
+
+def _news_source_parameters() -> ToolParameters:
+    return {
+        "type": "object",
+        "properties": {
+            "source_id": {
+                "type": "string",
+                "enum": ["hf_daily_papers", "hf_blog"],
+                "description": (
+                    "Declared news source id. Do not pass arbitrary URLs."
+                ),
+            }
+        },
+        "required": ["source_id"],
+    }
+
+
+def _news_helper_parameters() -> ToolParameters:
+    return {
+        "type": "object",
+        "properties": {
+            "helper_id": {
+                "type": "string",
+                "enum": [
+                    "parse_hf_daily_papers",
+                    "parse_hf_blog",
+                    "rank_news_items",
+                    "dedupe_news_items",
+                ],
+                "description": "Declared read-only helper id for the loaded news Skill.",
+            },
+            "arguments": {
+                "type": "object",
+                "description": (
+                    "Helper arguments matching the helper manifest schema. "
+                    "Parsing helpers expect html and limit."
+                ),
+            },
+        },
+        "required": ["helper_id", "arguments"],
     }
 
 
@@ -1013,6 +1057,32 @@ def read_skill_reference(ref_id: str) -> ToolResult:
         "chars": reference.chars,
         "content": reference.content,
     }
+
+
+@register_tool(
+    name="fetch_news_source",
+    description=(
+        "Fetch a declared read-only Hugging Face news source for the loaded "
+        "news Skill. Use source_id only; arbitrary URLs are not accepted."
+    ),
+    parameters=_news_source_parameters(),
+    timeout_seconds=10,
+)
+def fetch_news_source(source_id: str) -> ToolResult:
+    return fetch_skill_source("news", source_id)
+
+
+@register_tool(
+    name="run_news_helper",
+    description=(
+        "Run a declared read-only helper for the loaded news Skill. Use it to "
+        "parse fetched Hugging Face HTML, rank items, or dedupe items."
+    ),
+    parameters=_news_helper_parameters(),
+    timeout_seconds=5,
+)
+def run_news_helper(helper_id: str, arguments: dict[str, Any]) -> ToolResult:
+    return run_skill_helper("news", helper_id, arguments)
 
 
 def get_tool_schemas() -> list[dict[str, Any]]:

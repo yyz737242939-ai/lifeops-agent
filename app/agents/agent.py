@@ -222,6 +222,36 @@ def _history_safe_tool_result(tool_name: str, result_json: str) -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
+def _after_turn_safe_tool_result(result_json: str) -> str:
+    parsed = parse_json_object(result_json)
+    if not isinstance(parsed, dict) or parsed.get("ok") is not True:
+        return result_json
+
+    action = parsed.get("action")
+    if action == "read_skill_reference":
+        return _history_safe_tool_result("read_skill_reference", result_json)
+    if action != "fetch_news_source":
+        return result_json
+
+    payload = {
+        "ok": True,
+        "action": "fetch_news_source",
+        "skill": parsed.get("skill"),
+        "source_id": parsed.get("source_id"),
+        "name": parsed.get("name"),
+        "url": parsed.get("url"),
+        "kind": parsed.get("kind"),
+        "fetched_at": parsed.get("fetched_at"),
+        "status": parsed.get("status"),
+        "content_type": parsed.get("content_type"),
+        "chars": parsed.get("chars"),
+        "truncated": parsed.get("truncated"),
+        "content_omitted": True,
+        "compaction_strategy": "ephemeral_source",
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
 class Agent:
     """Coordinate skill routing, LLM rounds, tools, and per-request RunState."""
 
@@ -1046,7 +1076,4 @@ class Agent:
             output = message.get("output")
             if not isinstance(output, str):
                 continue
-            message["output"] = _history_safe_tool_result(
-                "read_skill_reference",
-                output,
-            )
+            message["output"] = _after_turn_safe_tool_result(output)
