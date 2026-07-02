@@ -14,10 +14,37 @@
 - 工具错误归一化、写入幂等重放和确定性循环检测。
 - Context Engine的滑动窗口、Rolling Summary、Context Index、Inspector、主动/被动/手动压缩触发和Context Eval回归。
 - Memory v1：只读Profile、用户授权Semantic Memory、Memory工具、简单检索和本轮上下文注入。
+- Skill References、受控News Source和只读News Helper，用于Hugging Face AI简报。
+- MCP v1：Mock Package Tracking Server、Agent侧Adapter、全局READ Tool Bridge和自然语言Agent闭环。
 - Tool Observation的inline、summary和Context Ref压缩。
 - 当前输入写授权、批量删除确认和最终写入声明校验。
 - Event、LLM I/O、Application三通道日志及本地Viewer。
-- 131项自动化回归测试。
+- 176项自动化回归测试。
+
+## [Milestone 1.3] - 2026-07-02
+
+### Added
+
+- 新增 News Skill Reference 机制：Skill 可以声明只读 Markdown reference，Runtime 只允许读取当前 Skill 声明过的文件，并拒绝路径穿越、未声明 reference 和非 Markdown 文件。
+- 新增 Hugging Face News Source Manifest：通过 `source_id` 读取白名单来源，避免模型传入任意 URL。
+- 新增 `fetch_news_source` 和 `run_news_helper` 只读工具，支持 Hugging Face Papers / Blog 简报的受控来源读取、HTML解析、排序和去重。
+- 新增 News Briefing 闭环测试，覆盖 reference / source / helper 串联、失败读取、上下文清理和不污染长期 Memory。
+- 新增 MCP v1 学习切片：`mcp_servers/mock_package_server.py` 提供只读 Mock Package Tracking MCP Server，使用 stdio JSON-RPC 暴露 `track_package`、`list_package_updates` 和 `estimate_delivery_window`。
+- 新增 `app/mcp/*` Agent侧 MCP Adapter，负责启动本地 MCP Server、调用 `tools/list` / `tools/call`，并归一化协议错误、server不可用、超时和非法响应。
+- 新增全局 READ MCP Tool Bridge：`track_package_via_mcp`、`list_package_updates_via_mcp`、`estimate_delivery_window_via_mcp`。
+- 新增 Agent MCP 回归测试，验证自然语言对话中 MCP tools 通过 Capability、Executor、Adapter、MCP Server 和 Tool Observation 完成闭环。
+
+### Changed
+
+- 当前学习阶段从 Skill References / Memory 之后推进到 MCP v1，并在 MCP v1 完成后准备进入 Interaction / Safety State。
+- Package Tracking MCP 第一版明确不属于 Todo、Finance、Daily Log 或 Activity domain，也不新增 Skill；它作为外部只读能力接入层存在。
+- 全局 common capability 增加三个 MCP READ tools；它们默认可见，但仍经过 Runtime capability 和 executor 二次边界。
+- `PROJECT_CONTEXT.md`、`LEARNING_PROGRESS.md` 和 `plans/MCP_IMPLEMENTATION_PLAN.md` 更新为 MCP v1 已完成闭环状态。
+
+### Fixed
+
+- 明确并测试 MCP package not found 不会被模型当作成功查询；Runtime 保留结构化 `package_not_found` 失败结果。
+- 明确 MCP 查询结果不会写入 Memory 或内部业务数据，保持外部 Tool Observation 与长期状态的边界。
 
 ## [Milestone 1.2] - 2026-07-01
 

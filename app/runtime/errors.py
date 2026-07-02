@@ -62,6 +62,11 @@ _KNOWN_TOOL_ERRORS: dict[str, tuple[ErrorType, bool]] = {
     "tool_not_allowed": (ErrorType.PERMISSION_DENIED, False),
     "tool_timeout": (ErrorType.TIMEOUT, True),
     "tool_failed": (ErrorType.INTERNAL_ERROR, False),
+    "mcp_protocol_error": (ErrorType.INVALID_ARGUMENTS, False),
+    "mcp_server_unavailable": (ErrorType.TRANSIENT_ERROR, True),
+    "mcp_timeout": (ErrorType.TIMEOUT, True),
+    "mcp_invalid_response": (ErrorType.INTERNAL_ERROR, False),
+    "package_not_found": (ErrorType.NOT_FOUND, False),
 }
 
 

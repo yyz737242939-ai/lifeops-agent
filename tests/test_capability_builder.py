@@ -98,6 +98,9 @@ class CapabilityBuilderTests(unittest.TestCase):
         self.assertTrue(result.fallback_used)
         self.assertIn("read_context_ref", result.allowed_tool_names)
         self.assertIn("list_memories", result.allowed_tool_names)
+        self.assertIn("track_package_via_mcp", result.allowed_tool_names)
+        self.assertIn("list_package_updates_via_mcp", result.allowed_tool_names)
+        self.assertIn("estimate_delivery_window_via_mcp", result.allowed_tool_names)
         self.assertNotIn("save_memory", result.allowed_tool_names)
 
     def test_schema_order_follows_stable_registry_order(self) -> None:

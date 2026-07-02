@@ -12,6 +12,9 @@ COMMON_TOOL_NAMES = frozenset(
         "read_context_ref",
         "save_memory",
         "delete_memory",
+        "track_package_via_mcp",
+        "list_package_updates_via_mcp",
+        "estimate_delivery_window_via_mcp",
     }
 )
 

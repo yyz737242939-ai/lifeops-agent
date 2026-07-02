@@ -1,0 +1,46 @@
+[
+  {
+    "tracking_number": "PKG-001",
+    "carrier": "MockShip",
+    "status": "in_transit",
+    "current_location": "Shanghai sorting center",
+    "estimated_delivery_date": "2026-07-04",
+    "estimated_delivery_window": "14:00-18:00",
+    "updates": [
+      {
+        "timestamp": "2026-07-01T09:15:00+08:00",
+        "location": "Hangzhou fulfillment center",
+        "status": "picked_up",
+        "detail": "Package was picked up by MockShip."
+      },
+      {
+        "timestamp": "2026-07-02T08:40:00+08:00",
+        "location": "Shanghai sorting center",
+        "status": "in_transit",
+        "detail": "Package arrived at the regional sorting center."
+      }
+    ]
+  },
+  {
+    "tracking_number": "PKG-002",
+    "carrier": "Parcel Demo",
+    "status": "out_for_delivery",
+    "current_location": "Pudong local delivery station",
+    "estimated_delivery_date": "2026-07-02",
+    "estimated_delivery_window": "16:00-20:00",
+    "updates": [
+      {
+        "timestamp": "2026-07-01T21:20:00+08:00",
+        "location": "Suzhou transfer hub",
+        "status": "in_transit",
+        "detail": "Package departed the transfer hub."
+      },
+      {
+        "timestamp": "2026-07-02T10:05:00+08:00",
+        "location": "Pudong local delivery station",
+        "status": "out_for_delivery",
+        "detail": "Package is out for delivery."
+      }
+    ]
+  }
+]

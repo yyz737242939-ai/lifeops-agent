@@ -12,6 +12,8 @@ from app.domains.todo_store import Todo, TodoPriority
 from app.memory.memory_store import SemanticMemoryStore
 from app.memory.memory_types import MemoryType
 from app.context.context_ref_store import read_context_ref as load_context_ref
+from app.mcp.client import package_tracking_client
+from app.mcp.errors import McpClientError
 from app.runtime.idempotency_store import get_result as get_idempotent_result
 from app.runtime.idempotency_store import save_result as save_idempotent_result
 from app.skills.helper_loader import run_skill_helper
@@ -222,6 +224,22 @@ def _news_helper_parameters() -> ToolParameters:
             },
         },
         "required": ["helper_id", "arguments"],
+    }
+
+
+def _tracking_number_parameters() -> ToolParameters:
+    return {
+        "type": "object",
+        "properties": {
+            "tracking_number": {
+                "type": "string",
+                "description": (
+                    "Mock package tracking number from the Package Tracking "
+                    "MCP server, for example PKG-001."
+                ),
+            }
+        },
+        "required": ["tracking_number"],
     }
 
 
@@ -1083,6 +1101,115 @@ def fetch_news_source(source_id: str) -> ToolResult:
 )
 def run_news_helper(helper_id: str, arguments: dict[str, Any]) -> ToolResult:
     return run_skill_helper("news", helper_id, arguments)
+
+
+def _call_package_mcp_tool(
+    *,
+    action: str,
+    mcp_tool_name: str,
+    arguments: dict[str, Any],
+) -> ToolResult:
+    try:
+        result = package_tracking_client().call_tool(mcp_tool_name, arguments)
+    except McpClientError as error:
+        return {
+            "ok": False,
+            "action": action,
+            "error": error.code,
+            "message": str(error),
+            "mcp": {
+                "server_id": "mock_package_tracking",
+                "tool_name": mcp_tool_name,
+            },
+        }
+
+    structured = result.structured_content or {}
+    if result.is_error:
+        raw_error = structured.get("error")
+        error_code = (
+            raw_error.get("code")
+            if isinstance(raw_error, dict)
+            else "mcp_tool_error"
+        )
+        message = (
+            raw_error.get("message")
+            if isinstance(raw_error, dict)
+            else "MCP tool returned an error"
+        )
+        return {
+            "ok": False,
+            "action": action,
+            "error": error_code,
+            "message": message,
+            "mcp": {
+                "server_id": result.server_id,
+                "tool_name": result.tool_name,
+                "content": result.content,
+            },
+            "structured_content": structured,
+        }
+
+    return {
+        "ok": True,
+        "action": action,
+        "mcp": {
+            "server_id": result.server_id,
+            "tool_name": result.tool_name,
+            "content": result.content,
+        },
+        "result": structured,
+    }
+
+
+@register_tool(
+    name="track_package_via_mcp",
+    description=(
+        "Query the external Mock Package Tracking MCP server for the current "
+        "status of a package. This is a global read-only external tool."
+    ),
+    parameters=_tracking_number_parameters(),
+    timeout_seconds=8,
+)
+def track_package_via_mcp(tracking_number: str) -> ToolResult:
+    return _call_package_mcp_tool(
+        action="track_package_via_mcp",
+        mcp_tool_name="track_package",
+        arguments={"tracking_number": tracking_number},
+    )
+
+
+@register_tool(
+    name="list_package_updates_via_mcp",
+    description=(
+        "Query the external Mock Package Tracking MCP server for package "
+        "tracking history. This is a global read-only external tool."
+    ),
+    parameters=_tracking_number_parameters(),
+    timeout_seconds=8,
+)
+def list_package_updates_via_mcp(tracking_number: str) -> ToolResult:
+    return _call_package_mcp_tool(
+        action="list_package_updates_via_mcp",
+        mcp_tool_name="list_package_updates",
+        arguments={"tracking_number": tracking_number},
+    )
+
+
+@register_tool(
+    name="estimate_delivery_window_via_mcp",
+    description=(
+        "Query the external Mock Package Tracking MCP server for the estimated "
+        "delivery date and time window. This is a global read-only external tool."
+    ),
+    parameters=_tracking_number_parameters(),
+    timeout_seconds=8,
+)
+def estimate_delivery_window_via_mcp(tracking_number: str) -> ToolResult:
+    return _call_package_mcp_tool(
+        action="estimate_delivery_window_via_mcp",
+        mcp_tool_name="estimate_delivery_window",
+        arguments={"tracking_number": tracking_number},
+    )
 
 
 def get_tool_schemas() -> list[dict[str, Any]]:
