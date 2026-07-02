@@ -219,7 +219,9 @@ def _news_helper_parameters() -> ToolParameters:
                 "type": "object",
                 "description": (
                     "Helper arguments matching the helper manifest schema. "
-                    "Parsing helpers expect html and limit."
+                    "Parsing helpers expect html and limit. For large fetched "
+                    "sources, pass source_ref_id with the ctx_ ref returned by "
+                    "fetch_news_source instead of copying full HTML."
                 ),
             },
         },
@@ -1100,7 +1102,98 @@ def fetch_news_source(source_id: str) -> ToolResult:
     timeout_seconds=5,
 )
 def run_news_helper(helper_id: str, arguments: dict[str, Any]) -> ToolResult:
-    return run_skill_helper("news", helper_id, arguments)
+    normalized_arguments, error = _normalize_news_helper_arguments(helper_id, arguments)
+    if error is not None:
+        return error
+
+    result = run_skill_helper("news", helper_id, normalized_arguments)
+    if (
+        helper_id in {"parse_hf_daily_papers", "parse_hf_blog"}
+        and result.get("ok") is True
+        and result.get("result") == []
+    ):
+        return {
+            "ok": False,
+            "action": "run_news_helper",
+            "error": "news_helper_empty_result",
+            "message": (
+                "The source was fetched, but the parser did not find any "
+                "declared Hugging Face list items."
+            ),
+            "helper_id": helper_id,
+            "result": [],
+        }
+    return result
+
+
+def _normalize_news_helper_arguments(
+    helper_id: str, arguments: dict[str, Any]
+) -> tuple[dict[str, Any], ToolResult | None]:
+    if helper_id not in {"parse_hf_daily_papers", "parse_hf_blog"}:
+        return arguments, None
+    if not isinstance(arguments, dict):
+        return arguments, None
+
+    normalized = dict(arguments)
+    ref_id = (
+        normalized.pop("source_ref_id", None)
+        or normalized.pop("context_ref_id", None)
+        or normalized.pop("ref_id", None)
+    )
+    html = normalized.get("html")
+    if isinstance(html, str) and html.startswith("ctx_"):
+        ref_id = html
+        html = None
+
+    if not isinstance(html, str) and ref_id is not None:
+        html, error = _html_from_news_source_ref(ref_id, helper_id)
+        if error is not None:
+            return normalized, error
+        normalized["html"] = html
+    return normalized, None
+
+
+def _html_from_news_source_ref(
+    ref_id: Any, helper_id: str
+) -> tuple[str | None, ToolResult | None]:
+    if not isinstance(ref_id, str) or not ref_id.startswith("ctx_"):
+        return None, {
+            "ok": False,
+            "action": "run_news_helper",
+            "error": "invalid_source_ref",
+            "message": "source_ref_id must be a Runtime-issued ctx_ reference.",
+            "helper_id": helper_id,
+        }
+
+    payload = load_context_ref(ref_id)
+    if payload is None:
+        return None, {
+            "ok": False,
+            "action": "run_news_helper",
+            "error": "source_ref_not_found",
+            "message": f"Context source ref {ref_id!r} was not found or expired.",
+            "helper_id": helper_id,
+        }
+    if payload.get("tool_name") != "fetch_news_source":
+        return None, {
+            "ok": False,
+            "action": "run_news_helper",
+            "error": "invalid_source_ref",
+            "message": "source_ref_id must point to a fetch_news_source result.",
+            "helper_id": helper_id,
+        }
+
+    full_result = payload.get("full_result")
+    content = full_result.get("content") if isinstance(full_result, dict) else None
+    if not isinstance(content, str) or not content:
+        return None, {
+            "ok": False,
+            "action": "run_news_helper",
+            "error": "source_ref_missing_html",
+            "message": "The referenced source result does not contain HTML content.",
+            "helper_id": helper_id,
+        }
+    return content, None
 
 
 def _call_package_mcp_tool(

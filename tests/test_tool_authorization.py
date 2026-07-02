@@ -2,6 +2,7 @@ import json
 import unittest
 from unittest.mock import patch
 
+from app.context.context_ref_store import save_context_ref
 from app.tools.capability_builder import build_capabilities
 from app.tools.tool import call_tool
 
@@ -155,6 +156,55 @@ class ToolAuthorizationTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["action"], "run_news_helper")
         self.assertEqual(result["result"][0]["source_id"], "hf_blog")
+
+    def test_news_helper_can_parse_runtime_source_ref(self) -> None:
+        capability = build_capabilities(("news",))
+        ref_id = save_context_ref(
+            tool_name="fetch_news_source",
+            full_result={
+                "ok": True,
+                "action": "fetch_news_source",
+                "source_id": "hf_blog",
+                "content": '<a href="/blog/test">Agent workflow update</a>',
+            },
+            summary={"source_id": "hf_blog"},
+        )
+
+        result = json.loads(
+            call_tool(
+                "run_news_helper",
+                {
+                    "helper_id": "parse_hf_blog",
+                    "arguments": {"source_ref_id": ref_id, "limit": 2},
+                },
+                allowed_tool_names=capability.allowed_tool_names,
+            )
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["result"][0]["source_id"], "hf_blog")
+
+    def test_news_helper_rejects_non_source_ref(self) -> None:
+        capability = build_capabilities(("news",))
+        ref_id = save_context_ref(
+            tool_name="list_todos",
+            full_result={"ok": True, "todos": []},
+            summary={"count": 0},
+        )
+
+        result = json.loads(
+            call_tool(
+                "run_news_helper",
+                {
+                    "helper_id": "parse_hf_blog",
+                    "arguments": {"source_ref_id": ref_id, "limit": 2},
+                },
+                allowed_tool_names=capability.allowed_tool_names,
+            )
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"]["code"], "invalid_source_ref")
 
 
 if __name__ == "__main__":

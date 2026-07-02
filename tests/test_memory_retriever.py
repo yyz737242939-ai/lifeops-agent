@@ -62,6 +62,20 @@ class MemoryRetrieverTests(unittest.TestCase):
 
         self.assertEqual(result, [])
 
+    def test_retrieves_learning_tag_for_chinese_study_question(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = SemanticMemoryStore(Path(directory) / "semantic_memories.json")
+            memory = store.save_memory(
+                memory_type="preference",
+                content="学习 Agent Runtime 时喜欢先看生命周期，再看代码。",
+                tags=["learning", "runtime"],
+            )
+            retriever = MemoryRetriever(store)
+
+            result = retriever.retrieve("解释一下 MCP tool bridge，我应该怎么学？")
+
+        self.assertEqual([matched.item.id for matched in result], [memory.id])
+
 
 if __name__ == "__main__":
     unittest.main()

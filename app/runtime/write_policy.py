@@ -21,9 +21,20 @@ def authorized_write_tools(user_input: str) -> frozenset[str]:
     text = user_input.strip().lower()
     authorized: set[str] = set()
 
-    if re.search(r"提醒我|(?:添加|新增|创建|加入|加到).*待办|再加一个|add (?:a )?todo", text):
+    if re.search(
+        r"提醒我"
+        r"|(?:添加|新增|创建|加入|加到).*(?:待办|todo)"
+        r"|再(?:添加|新增|创建|加)一个"
+        r"|add (?:a )?todo",
+        text,
+    ):
         authorized.add("add_todo")
-    if re.search(r"(?:完成|标记为已?完成|勾选完成).*(?:待办|任务|[“\"'])|^(?:完成|标记为已?完成|勾选完成)", text):
+    if re.search(
+        r"(?:完成|标记为已?完成|标记完成|勾选完成).*(?:待办|任务|[“\"'])"
+        r"|^把.*(?:标记为已?完成|标记完成)"
+        r"|^(?:完成|标记为已?完成|标记完成|勾选完成)",
+        text,
+    ):
         authorized.add("complete_todo")
     if re.search(r"(?:修改|更新|调整|改成|改到|重命名).*(?:待办|任务|日期|优先级|[“\"'])|^把.*(?:改成|改到)", text):
         authorized.add("update_todo")
@@ -107,11 +118,19 @@ def _has_memory_delete_cue(text: str) -> bool:
 
 def has_write_success_claim(answer: str) -> bool:
     """Detect user-facing claims that persisted data was successfully changed."""
+    lowered = answer.lower()
+    negative_or_explanatory = (
+        r"(?:不能|无法|没有|未).{0,20}(?:保存|修改|写入|记录|删除|设置)",
+        r"(?:保存|修改|写入|记录|删除|设置).{0,12}(?:不能|无法|不算|不等于)",
+        r"(?:才|才能).{0,12}(?:证明|确认).{0,20}(?:保存|修改|写入|记录|删除|设置)",
+        r"write action.{0,40}(?:证明|confirm|prove)",
+    )
+    if any(re.search(pattern, lowered, re.IGNORECASE) for pattern in negative_or_explanatory):
+        return False
     patterns = (
         r"已(?:成功)?(?:为你)?(?:添加|记录|保存|更新|修改|删除|设置)",
         r"(?:添加|记录|保存|更新|修改|删除|设置)(?:成功|完成)",
         r"(?:待办|任务).{0,16}(?:已完成|标记为完成)",
         r"(?:successfully\s+)?(?:added|recorded|saved|updated|deleted|set)\b",
     )
-    lowered = answer.lower()
     return any(re.search(pattern, lowered, re.IGNORECASE) for pattern in patterns)

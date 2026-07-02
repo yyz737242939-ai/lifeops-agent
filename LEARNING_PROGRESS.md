@@ -193,3 +193,39 @@ Skill References（已完成）
 ## 当前学习原则
 
 每增加一类能力，都要先判断它属于 `Prompt / Skill / Tool / Capability / Context / Memory / Runtime State / Business Data / Logs`。边界清楚，Agent 才能安全、可观察、可恢复地成长。
+
+
+## 学习以及面试准备
+初级 Agent Engineer：
+Agent Loop
+-> Tool
+-> Capability
+-> Write Safety
+-> Skill
+-> Skill References
+-> Context Engine
+-> Memory v1
+
+中级 Agent Engineer：
+MCP
+-> Safety State
+-> Task State
+-> Recovery
+-> Planner
+-> LangGraph / LangChain 对照
+
+强中级 / 准高级：
+Human-in-the-loop
+-> Scheduling / Background Agent
+-> Eval Harness
+-> Inspector / Debugger
+-> MCP Security
+
+高级 Agent / Agent Platform Engineer：
+Cost / Token / Latency Budget
+-> Async / Concurrency Runtime
+-> Advanced Memory
+-> RAG / Knowledge System
+-> Multi-Agent
+-> Plugin System
+-> Product Layer

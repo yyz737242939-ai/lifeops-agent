@@ -44,6 +44,21 @@ class WritePolicyTests(unittest.TestCase):
 
         self.assertIn("add_todo", tools)
 
+    def test_mixed_language_todo_add_authorizes_write(self) -> None:
+        tools = authorized_write_tools("请帮我添加一个 todo：明天上午复盘 MCP 测试计划。")
+
+        self.assertIn("add_todo", tools)
+
+    def test_repeat_mixed_language_todo_add_authorizes_write(self) -> None:
+        tools = authorized_write_tools("请再添加一个 todo：整理 ContextEngine 学习笔记。")
+
+        self.assertIn("add_todo", tools)
+
+    def test_mark_quoted_todo_complete_authorizes_write(self) -> None:
+        tools = authorized_write_tools("把刚才那个“复盘 MCP 测试计划”的 todo 标记为完成。")
+
+        self.assertIn("complete_todo", tools)
+
     def test_explicit_expense_record_authorizes_write(self) -> None:
         tools = authorized_write_tools("今天午饭花了35元，记到餐饮。")
 
@@ -79,6 +94,9 @@ class WritePolicyTests(unittest.TestCase):
     def test_success_claim_detection_ignores_failure_message(self) -> None:
         self.assertTrue(has_write_success_claim("已记录今天早餐18元。"))
         self.assertFalse(has_write_success_claim("抱歉，无法记录这笔消费。"))
+        self.assertFalse(
+            has_write_success_claim("只有成功的 WRITE action 才能证明真的保存了。")
+        )
 
     @patch("app.agents.agent.llm_io")
     @patch("app.agents.agent.events")

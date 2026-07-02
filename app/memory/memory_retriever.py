@@ -13,6 +13,10 @@ TYPE_QUERY_TERMS = {
     "goal": ("goal", "目标", "计划"),
     "constraint": ("constraint", "约束", "限制", "不要", "不能"),
 }
+TAG_QUERY_TERMS = {
+    "learning": ("learning", "学习", "学", "怎么学"),
+    "runtime": ("runtime", "运行时"),
+}
 STOP_TERMS = {
     "今天",
     "怎么",
@@ -78,7 +82,7 @@ def _score_item(
         reasons.append(f"type:{item.type}")
 
     for tag in item.tags:
-        if tag and tag in query_text:
+        if tag and _tag_matches_query(tag, query_text):
             score += 4
             reasons.append(f"tag:{tag}")
 
@@ -89,6 +93,13 @@ def _score_item(
         reasons.append("keyword:" + ",".join(keyword_hits[:3]))
 
     return score, ";".join(reasons)
+
+
+def _tag_matches_query(tag: str, query_text: str) -> bool:
+    normalized = tag.lower()
+    if normalized in query_text:
+        return True
+    return any(term in query_text for term in TAG_QUERY_TERMS.get(normalized, ()))
 
 
 def _query_terms(text: str) -> set[str]:

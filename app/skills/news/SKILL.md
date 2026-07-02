@@ -53,6 +53,15 @@ news, or multimodal news briefing:
 3. Parse fetched HTML with helpers:
    - Use `parse_hf_daily_papers` for `hf_daily_papers` HTML.
    - Use `parse_hf_blog` for `hf_blog` HTML.
+   - If `fetch_news_source` returns a compacted `reference` result, pass the
+     returned `ctx_...` id to the parser helper as `source_ref_id`. Do not copy
+     huge HTML into JSON arguments.
+   - You may call `read_context_ref(ref_id)` when you need to inspect exact
+     source metadata or content for the answer, but parser helpers can resolve
+     `source_ref_id` themselves.
+   - Do not pass a source summary, metadata object, ref object, or compacted
+     observation as the helper `html` argument. The helper `html` argument must
+     be a string containing the fetched HTML.
    - Use `dedupe_news_items` and `rank_news_items` when combining lists.
 4. Answer in concise Chinese with paper/blog separation, titles, links,
    sources, topic labels, and short reasons. If only list pages were fetched,
@@ -67,6 +76,9 @@ news, or multimodal news briefing:
 - Fetch only declared sources. Do not ask for arbitrary URLs.
 - Use helpers for mechanical parsing, ranking, and dedupe instead of guessing
   structure from raw HTML.
+- If a parser helper returns an empty list, say that the source was fetched but
+  no list items were parsed. Do not invent specific paper or blog entries from
+  an empty helper result.
 - News briefing results belong to the current conversation. They are not
   long-term Memory and should not be saved unless the user explicitly asks to
   save a preference through Memory tools.
