@@ -207,6 +207,30 @@ class EventLogger:
     def log_context_compaction(self, run_state: Any, report: Any) -> None:
         self._write_log_event("context.compaction", run_state, report=report)
 
+    def log_interaction_pending(
+        self,
+        run_state: Any,
+        event: str,
+        pending: Any,
+        *,
+        current_turn_index: int,
+        reason: str,
+    ) -> None:
+        self._write_log_event(
+            f"interaction.pending.{event}",
+            run_state,
+            pending_id=pending.id,
+            operation=pending.operation,
+            tool_name=pending.tool_name,
+            risk_level=pending.risk_level.value,
+            scope_summary=pending.scope_summary,
+            status=pending.status.value,
+            created_turn_index=pending.created_turn_index,
+            current_turn_index=current_turn_index,
+            expires_after_turns=pending.expires_after_turns,
+            reason=reason,
+        )
+
     def log_final_answer(self, run_state: Any, content: str) -> None:
         self._write_log_event("run.final_answer", run_state, role="assistant", content=content)
 

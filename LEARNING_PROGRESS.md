@@ -16,7 +16,7 @@ Agent Loop -> Business Tools -> Skill -> Capability -> Write Safety
 
 当前下一阶段调整为：
 
-> Interaction / Safety State。
+> Task State。
 
 暂不进入 Multi-Agent、复杂 Planner、向量数据库、自动 Memory 提取或真实外部账号/OAuth。
 
@@ -134,6 +134,15 @@ Agent Loop -> Business Tools -> Skill -> Capability -> Write Safety
 - MCP tool result 默认只是本轮 Tool Observation，不自动进入 Memory、业务数据或长期历史。
 - MCP v1 已完成 Mock Server、Agent Adapter、全局 READ Tool Bridge 和自然语言 Agent 闭环。
 
+### 14. Interaction / Safety State
+
+- 学会把 pending confirmation 建模为跨轮临时 Runtime State，而不是 RunState、Memory 或 Context Summary。
+- 高风险写入不能只靠当前输入的一句“确认”直接暴露工具；必须先有 Runtime 持有的 active pending。
+- 用户确认 active pending 后，只在本轮临时授权对应 WRITE tool，不能顺手扩大到其它写工具。
+- 取消、修改范围、过期和 supersede 都是 pending 生命周期的一部分，必须可观察、可测试。
+- Capability Builder 仍只负责根据 Skill 和授权结果暴露工具，不关心 pending 生命周期。
+- pending confirmation 生命周期已写入 compact event 日志，但不记录原始用户输入正文。
+
 ## 当前输入层心智模型
 
 ```text
@@ -156,20 +165,20 @@ System Instructions
 | Conversation Context | ContextEngine | 对话历史工作窗口 |
 | Tool Schemas | Capability Builder | 本轮可见工具能力 |
 
-## 下一阶段：Interaction / Safety State
+## 下一阶段：Task State
 
 目标：
 
-> 在已有 Tool、Capability、Context、Memory 和 MCP 外部能力边界之上，学习跨轮确认、取消、范围修改、授权过期和危险操作保护。
+> 在已有 Tool、Capability、Context、Memory、MCP 和 Interaction/Safety State 边界之上，学习跨 Chat 的长期目标、步骤、暂停、恢复和 blocked 状态。
 
-为什么现在做：MCP v1 已经让“外部工具协议”和“Agent侧执行边界”具体化。下一步应学习 Agent 在多轮对话中如何持有 pending confirmation、如何处理用户修改范围、如何过期危险操作授权，以及如何避免把一次临时授权错误延续到后续回合。
+为什么现在做：Interaction/Safety State 已经让“跨轮临时安全状态”和“当前输入授权”分开。下一步应学习更长生命周期的 Task State：如何表示一个用户目标的阶段、进度、暂停、恢复、blocked 原因，以及它和 RunState、Context、Memory 的边界。
 
-后续需要单独制定 Interaction / Safety State 实施计划；不要继续把新阶段细节写入 MCP 计划。
+后续需要单独制定 Task State 实施计划；不要继续把新阶段细节写入 Interaction / Safety State 计划。
 
 ## 后续路线
 
-1. Interaction / Safety State：跨轮确认、取消、范围修改、授权过期和危险操作保护。
-2. Task State：跨 Chat 的长期目标、步骤、暂停、恢复和 blocked 状态。
+1. Task State：跨 Chat 的长期目标、步骤、暂停、恢复和 blocked 状态。
+2. Persistence / Recovery：崩溃恢复、运行中状态持久化和可恢复执行边界。
 3. 高级 Memory Retrieval：关键词归一化、更新/合并、冲突检测、重要性、过期时间，之后再考虑 embedding。
 4. Planner / Multi-Agent：等状态、上下文、Memory、工具和安全边界稳定后再推进。
 
@@ -180,8 +189,8 @@ System Instructions
 ```text
 Skill References（已完成）
 -> MCP（已完成）
--> Interaction / Safety State（当前阶段）
--> Task State
+-> Interaction / Safety State（已完成 v1）
+-> Task State（当前阶段）
 -> Persistence / Recovery
 -> Policy / Permission Layer
 -> Plan and Execute

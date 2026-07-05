@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from app.observability import app_log, close_logging_session, events, llm_io
 from app.observability.session import start_logging_session
+from app.runtime.interaction_state import PendingConfirmation, RiskLevel
 
 
 class FakeSDKResponse:
@@ -95,6 +96,46 @@ class ObservabilityTests(unittest.TestCase):
         self.assertNotIn("tool.result", json.dumps(llm_records))
         self.assertIn("INFO", application_text)
         self.assertIn("run-test", application_text)
+
+    def test_interaction_pending_event_uses_compact_diagnostic_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            with patch("app.observability.session.LOG_ROOT", root):
+                files = start_logging_session()
+                run_state = SimpleNamespace(run_id="run-test")
+                pending = PendingConfirmation(
+                    id="pending-test",
+                    operation="delete_all_memories",
+                    tool_name="delete_memory",
+                    risk_level=RiskLevel.HIGH,
+                    scope_summary="delete all active memories",
+                    arguments={"scope": "all_active"},
+                    source_user_input="删除所有记忆。",
+                )
+
+                events.log_interaction_pending(
+                    run_state,
+                    "created",
+                    pending,
+                    current_turn_index=1,
+                    reason="bulk_memory_delete",
+                )
+
+                event_records = self._read_jsonl(files["events"])
+                close_logging_session()
+
+        record = event_records[0]
+        self.assertEqual(record["event"], "interaction.pending.created")
+        self.assertEqual(record["pending_id"], "pending-test")
+        self.assertEqual(record["operation"], "delete_all_memories")
+        self.assertEqual(record["tool_name"], "delete_memory")
+        self.assertEqual(record["risk_level"], "high")
+        self.assertEqual(record["scope_summary"], "delete all active memories")
+        self.assertEqual(record["status"], "pending")
+        self.assertEqual(record["current_turn_index"], 1)
+        self.assertEqual(record["reason"], "bulk_memory_delete")
+        self.assertNotIn("source_user_input", record)
+        self.assertNotIn("arguments", record)
 
     @staticmethod
     def _read_jsonl(path: Path) -> list[dict]:

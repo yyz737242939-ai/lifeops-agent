@@ -53,8 +53,10 @@ uv run python -m unittest discover -s tests -v
 | 路径 | 当前职责 |
 |---|---|
 | `main.py` | CLI 入口和多轮用户输入循环 |
-| `app/agents/agent.py` | 单次 Chat 的准备、Agent Loop、LLM/Tool 编排和最终回答校验 |
+| `app/agents/agent.py` | 单次 Chat 的准备、Interaction Safety接入、Agent Loop、LLM/Tool 编排和最终回答校验 |
 | `app/runtime/run_state.py` | 单次 `Agent.chat()` 的 RunState、ActionRecord、预算与终态 |
+| `app/runtime/interaction_state.py` | 跨轮临时 pending confirmation 状态，支持创建、确认、取消、过期、supersede 和一次性消费 |
+| `app/runtime/interaction_policy.py` | 确定性识别 pending 回复意图和第一版高风险操作 |
 | `app/runtime/errors.py` | LLM/Tool 错误分类与结构化错误 |
 | `app/runtime/write_policy.py` | 当前用户输入的写授权、批量删除确认和成功声明检测 |
 | `app/context/context_engine.py` | LLM 输入组装入口；当前支持 pass-through、滑动窗口、按需恢复，以及主动/被动/手动压缩触发 |
@@ -97,6 +99,8 @@ uv run python -m unittest discover -s tests -v
 | Logging Session | 一次进程级日志会话 | `session_id` 和三类日志文件 |
 | `Agent` | 一个CLI对话实例 | `messages`、Skill元数据、活跃Skill、限制、最近一次RunState |
 | `Agent.messages` | 跨多次 `chat()` | 用户消息、LLM输出、Function Call、Tool Observation |
+| `InteractionState` | 一个 `Agent` 实例内的跨轮临时状态 | 当前 pending confirmation 和 turn index，不进入Memory或Conversation Summary |
+| `PendingConfirmation` | 一个待确认危险操作 | operation、tool、风险等级、范围摘要、候选参数、生命周期状态和过期窗口 |
 | `TurnContext` | 一次用户输入 | 固定Prompt、Tool Schema、授权工具、加载Skill、安全标记 |
 | `RunState` | 恰好一次 `Agent.chat()` | 本次Chat的LLM轮次、API请求、工具执行尝试、Action和终态 |
 | `ActionRecord` | 一次模型请求的工具Action | 参数、结果、错误、工具执行尝试、签名和幂等键 |
@@ -180,7 +184,9 @@ RunState的主要计数字段已经显式包含作用域和统计对象：
 - 描述个人状态或请求建议不等于授权保存数据。
 - 描述长期偏好或事实不等于授权保存Memory；只有当前输入明确要求“记住/保存/以后默认”等，才暴露 `save_memory`。
 - 删除Memory需要当前输入明确表达“忘掉/删除记忆”等授权；删除后该Memory默认不再查询或注入。
-- 批量删除需要确认后才能暴露删除能力。
+- Interaction/Safety State 第一版已接入 Agent Runtime：批量Todo删除、删除全部/多条/含糊Memory会先创建 pending confirmation，不直接暴露危险写工具。
+- 用户确认 active pending 后，Runtime 会在本轮临时授权对应写工具，并把确认范围加入本轮 instructions；取消、修改范围或过期确认不会执行旧 pending。
+- pending confirmation 生命周期会写入 compact event 日志，覆盖 created、confirmed、cancelled、expired、superseded 和 consumed；日志记录范围摘要和状态，不记录原始用户输入正文。
 - 最终回答声称“已保存/已修改”时，必须有成功WRITE Action作为依据。
 - 部分写入失败时，Runtime会替换模型的虚假全成功声明。
 
@@ -323,7 +329,7 @@ LLM Response不重复记录Request中的instructions、tools和参数，只保�
 - 幂等存储不是事务型exactly-once。
 - 同步SDK或Python函数不能被强制中断。
 - 尚无全局wall-clock、token或cost预算。
-- 尚无Interaction State、Task State和Multi-Agent。
+- Interaction State 目前是单 pending、确定性规则和内存态；尚未增加多个 pending 队列、复杂自然语言策略、Task State 和 Multi-Agent。
 - MCP v1 目前已完成 Mock Package Tracking Server、Agent Adapter、Tool Bridge、Capability、Executor和自然语言Agent闭环；尚未增加专门MCP观测字段。
 
 ## 本地数据

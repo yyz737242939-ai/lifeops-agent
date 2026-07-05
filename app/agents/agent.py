@@ -37,6 +37,17 @@ from app.runtime.run_state import (
     RunStatus,
     StopReason,
 )
+from app.runtime.interaction_policy import (
+    HighRiskOperation,
+    PendingReplyIntent,
+    classify_reply_to_pending,
+    detect_high_risk_operation,
+)
+from app.runtime.interaction_state import (
+    InteractionState,
+    PendingConfirmation,
+    PendingConfirmationStatus,
+)
 from app.runtime.write_policy import (
     authorized_write_tools,
     has_write_success_claim,
@@ -45,7 +56,7 @@ from app.runtime.write_policy import (
 from app.skills.skill_loader import discover_skills
 from app.skills.skill_router import route_skills
 from app.skills.skill_state import resolve_skill_state
-from app.tools.capability_builder import build_capabilities
+from app.tools.capability_builder import SKILL_TOOL_NAMES, build_capabilities
 from app.tools.tool import TOOLS, ToolEffect, call_tool
 from app.utils.json_file import parse_json_object
 from app.utils.llm import client
@@ -65,6 +76,7 @@ class TurnContext:
     loaded_skills: tuple[str, ...]
     bulk_delete_confirmation_required: bool
     user_input: str
+    confirmed_pending: PendingConfirmation | None = None
 
 
 @dataclass(frozen=True)
@@ -222,6 +234,51 @@ def _history_safe_tool_result(tool_name: str, result_json: str) -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
+def _unique_tuple(items: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(items))
+
+
+def _skill_owner_for_tool(tool_name: str) -> str | None:
+    for skill_name, tool_names in SKILL_TOOL_NAMES.items():
+        if tool_name in tool_names:
+            return skill_name
+    return None
+
+
+def _confirmed_pending_instructions(pending: PendingConfirmation) -> str:
+    payload = {
+        "pending_id": pending.id,
+        "operation": pending.operation,
+        "tool_name": pending.tool_name,
+        "scope_summary": pending.scope_summary,
+        "arguments": pending.arguments,
+    }
+    return (
+        "\n\nInteraction safety state for this turn:\n"
+        "- The user confirmed this pending high-risk operation in the current turn.\n"
+        "- Only proceed within the confirmed scope below; do not expand it.\n"
+        "- If exact item identifiers are missing, inspect with available read tools or ask a clarifying question.\n"
+        "- Do not claim deletion succeeded unless a WRITE tool action succeeds.\n"
+        f"- Confirmed pending operation: {json.dumps(payload, ensure_ascii=False)}"
+    )
+
+
+def _authorized_writes_for_turn(
+    user_input: str,
+    confirmed_pending: PendingConfirmation | None,
+) -> frozenset[str]:
+    if confirmed_pending is not None:
+        if confirmed_pending.tool_name is None:
+            return frozenset()
+        return frozenset({confirmed_pending.tool_name})
+
+    authorized = set(authorized_write_tools(user_input))
+    risky_operation = detect_high_risk_operation(user_input)
+    if risky_operation is not None:
+        authorized.discard(risky_operation.tool_name)
+    return frozenset(authorized)
+
+
 def _after_turn_safe_tool_result(result_json: str) -> str:
     parsed = parse_json_object(result_json)
     if not isinstance(parsed, dict) or parsed.get("ok") is not True:
@@ -264,6 +321,7 @@ class Agent:
         self.context_engine = ContextEngine()
         self.profile_loader = ProfileLoader()
         self.memory_retriever = MemoryRetriever()
+        self.interaction_state = InteractionState()
 
     def cancel_current_run(self) -> bool:
         """Request cooperative cancellation at the next runtime checkpoint."""
@@ -334,10 +392,120 @@ class Agent:
         events.log_user_input(run_state, user_input)
         app_log.log_info("Run %s started", run_state.run_id)
 
-        turn = self._prepare_turn(user_input, run_state)
-        return self._run_agent_loop(run_state, turn)
+        pending_before_turn = self.interaction_state.active_pending_confirmation
+        self.interaction_state.advance_turn()
+        if (
+            pending_before_turn is not None
+            and pending_before_turn.status == PendingConfirmationStatus.EXPIRED
+        ):
+            events.log_interaction_pending(
+                run_state,
+                "expired",
+                pending_before_turn,
+                current_turn_index=self.interaction_state.turn_index,
+                reason="turn_window_expired",
+            )
+        pending_reply = classify_reply_to_pending(
+            user_input,
+            self.interaction_state.active_pending_confirmation,
+        )
+        if pending_reply.intent == PendingReplyIntent.CANCEL:
+            cancelled = self.interaction_state.cancel_pending()
+            if cancelled is not None:
+                events.log_interaction_pending(
+                    run_state,
+                    "cancelled",
+                    cancelled,
+                    current_turn_index=self.interaction_state.turn_index,
+                    reason=pending_reply.reason,
+                )
+            return self._complete_interaction_only_run(
+                run_state,
+                "已取消这次待确认操作，不会执行删除或修改。",
+            )
+        if pending_reply.intent == PendingReplyIntent.MODIFY:
+            pending = self.interaction_state.active_pending_confirmation
+            if pending is not None:
+                pending.supersede()
+                events.log_interaction_pending(
+                    run_state,
+                    "superseded",
+                    pending,
+                    current_turn_index=self.interaction_state.turn_index,
+                    reason=pending_reply.reason,
+                )
+            risky_operation = detect_high_risk_operation(user_input)
+            if risky_operation is not None:
+                return self._create_pending_confirmation_answer(
+                    run_state,
+                    user_input,
+                    risky_operation,
+                )
+            return self._complete_interaction_only_run(
+                run_state,
+                "已作废上一次待确认操作。请重新说明要执行的操作和范围。",
+            )
+        if pending_reply.intent == PendingReplyIntent.ISOLATED_CONFIRM:
+            expired_pending = (
+                self.interaction_state.pending_confirmation
+                if self.interaction_state.pending_confirmation is not None
+                and self.interaction_state.pending_confirmation.status
+                == PendingConfirmationStatus.EXPIRED
+                else None
+            )
+            answer = (
+                "之前等待确认的操作已经过期，请重新说明要执行的操作和范围。"
+                if expired_pending is not None
+                else "当前没有等待确认的操作，请重新说明要执行什么。"
+            )
+            return self._complete_interaction_only_run(run_state, answer)
 
-    def _prepare_turn(self, user_input: str, run_state: RunState) -> TurnContext:
+        confirmed_pending = None
+        if pending_reply.intent == PendingReplyIntent.CONFIRM:
+            confirmed_pending = self.interaction_state.confirm_pending()
+            if confirmed_pending is not None:
+                events.log_interaction_pending(
+                    run_state,
+                    "confirmed",
+                    confirmed_pending,
+                    current_turn_index=self.interaction_state.turn_index,
+                    reason=pending_reply.reason,
+                )
+
+        if confirmed_pending is None:
+            risky_operation = detect_high_risk_operation(user_input)
+            if risky_operation is not None:
+                return self._create_pending_confirmation_answer(
+                    run_state,
+                    user_input,
+                    risky_operation,
+                )
+
+        turn = self._prepare_turn(
+            user_input,
+            run_state,
+            confirmed_pending=confirmed_pending,
+        )
+        answer = self._run_agent_loop(run_state, turn)
+        if confirmed_pending is not None:
+            consumed = self.interaction_state.consume_confirmed_pending()
+            if consumed is not None:
+                events.log_interaction_pending(
+                    run_state,
+                    "consumed",
+                    consumed,
+                    current_turn_index=self.interaction_state.turn_index,
+                    reason="agent_loop_finished",
+                )
+        return answer
+
+    def _prepare_turn(
+        self,
+        user_input: str,
+        run_state: RunState,
+        *,
+        confirmed_pending: PendingConfirmation | None = None,
+    ) -> TurnContext:
         """Resolve skills and freeze the prompt/tool boundary for this turn."""
         routing = route_skills(user_input, self.skills)
         skill_state = resolve_skill_state(
@@ -345,14 +513,25 @@ class Agent:
             routing.selected,
             self.active_skills,
         )
-        self.active_skills = skill_state.next_active_skills
+        loaded_skills = skill_state.loaded_skills
+        next_active_skills = skill_state.next_active_skills
+        if confirmed_pending is not None and confirmed_pending.tool_name is not None:
+            owner_skill = _skill_owner_for_tool(confirmed_pending.tool_name)
+            if owner_skill is not None:
+                loaded_skills = _unique_tuple((*loaded_skills, owner_skill))
+                next_active_skills = _unique_tuple((*next_active_skills, owner_skill))
+        self.active_skills = next_active_skills
         prompt_result = build_system_prompt(
             self.skills,
-            skill_state.loaded_skills,
+            loaded_skills,
         )
-        authorized_writes = authorized_write_tools(user_input)
-        bulk_delete_confirmation_required = requires_bulk_delete_confirmation(
-            user_input
+        authorized_writes = _authorized_writes_for_turn(user_input, confirmed_pending)
+        bulk_delete_confirmation_required = (
+            confirmed_pending is None
+            and (
+                requires_bulk_delete_confirmation(user_input)
+                or detect_high_risk_operation(user_input) is not None
+            )
         )
         capability_result = build_capabilities(
             prompt_result.loaded_skills,
@@ -366,6 +545,8 @@ class Agent:
                 "- Do not delete anything. Ask the user to confirm the exact bulk deletion.\n"
                 "- Do not claim that any item was deleted."
             )
+        if confirmed_pending is not None:
+            instructions += _confirmed_pending_instructions(confirmed_pending)
         events.log_routing_resolved(
             run_state,
             available_skills=self.skills,
@@ -382,7 +563,54 @@ class Agent:
             loaded_skills=prompt_result.loaded_skills,
             bulk_delete_confirmation_required=bulk_delete_confirmation_required,
             user_input=user_input,
+            confirmed_pending=confirmed_pending,
         )
+
+    def _create_pending_confirmation_answer(
+        self,
+        run_state: RunState,
+        user_input: str,
+        operation: HighRiskOperation,
+    ) -> str:
+        self._preserve_skill_state_for_interaction(user_input)
+        pending = self.interaction_state.create_pending_confirmation(
+            operation=operation.operation,
+            tool_name=operation.tool_name,
+            risk_level=operation.risk_level,
+            scope_summary=operation.scope_summary,
+            arguments=operation.arguments,
+            source_user_input=user_input,
+        )
+        events.log_interaction_pending(
+            run_state,
+            "created",
+            pending,
+            current_turn_index=self.interaction_state.turn_index,
+            reason=operation.reason,
+        )
+        return self._complete_interaction_only_run(
+            run_state,
+            (
+                f"这是一项高风险操作：{pending.scope_summary}。"
+                "请回复“确认”继续，或回复“取消”放弃。"
+            ),
+        )
+
+    def _complete_interaction_only_run(self, run_state: RunState, answer: str) -> str:
+        run_state.complete()
+        events.log_final_answer(run_state, answer)
+        events.log_run_completed(run_state)
+        app_log.log_info("Run %s completed", run_state.run_id)
+        return answer
+
+    def _preserve_skill_state_for_interaction(self, user_input: str) -> None:
+        routing = route_skills(user_input, self.skills)
+        skill_state = resolve_skill_state(
+            user_input,
+            routing.selected,
+            self.active_skills,
+        )
+        self.active_skills = skill_state.next_active_skills
 
     def _run_agent_loop(self, run_state: RunState, turn: TurnContext) -> str:
         """Run sequential LLM/tool rounds until completion or a controlled stop."""
