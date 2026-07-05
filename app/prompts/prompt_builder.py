@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from app.prompts.system_prompt import CORE_PROMPT, CONTEXT_REF_PROMPT
+from app.prompts.system_prompt import CORE_PROMPT, CONTEXT_REF_PROMPT, TASK_STATE_PROMPT
 from app.skills.skill_loader import SkillMetadata, load_skill
 
 
@@ -32,7 +32,12 @@ def build_system_prompt(
     if unknown_skills:
         raise ValueError(f"Unknown skills in prompt request: {sorted(unknown_skills)}")
 
-    prompt_parts = [CORE_PROMPT, CONTEXT_REF_PROMPT, _skill_catalog(available_skills)]
+    prompt_parts = [
+        CORE_PROMPT,
+        CONTEXT_REF_PROMPT,
+        TASK_STATE_PROMPT,
+        _skill_catalog(available_skills),
+    ]
     loaded_skill_names: list[str] = []
 
     for skill_name in selected_skills:

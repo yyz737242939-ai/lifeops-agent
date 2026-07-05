@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "task_20260705_161236_319730",
+      "title": "学习 Task State v1",
+      "goal": "理解 TaskItem、TaskStore、Task Context 的边界",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260705_161236_319783",
+          "title": "理清 TaskItem 的数据结构、字段和职责",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:12:36",
+          "updated_at": "2026-07-05T16:12:36",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260705_161236_319820",
+          "title": "理解 TaskStore 的存储模型与读写逻辑",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:12:36",
+          "updated_at": "2026-07-05T16:12:36",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260705_161236_319833",
+          "title": "明确 Task Context 的作用范围和边界",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:12:36",
+          "updated_at": "2026-07-05T16:12:36",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260705_161236_319842",
+          "title": "总结三者的关系与协作方式",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:12:36",
+          "updated_at": "2026-07-05T16:12:36",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260705_161236_319783",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-05T16:12:36",
+      "updated_at": "2026-07-05T16:12:36",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": [
+        "learning",
+        "ai"
+      ]
+    }
+  ]
+}

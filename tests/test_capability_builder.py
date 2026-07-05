@@ -126,6 +126,27 @@ class CapabilityBuilderTests(unittest.TestCase):
         self.assertIn("delete_memory", result.allowed_tool_names)
         self.assertIn("list_memories", result.allowed_tool_names)
 
+    def test_task_read_tools_are_common_but_task_writes_require_authorization(self) -> None:
+        result = build_capabilities(())
+
+        self.assertIn("list_tasks", result.allowed_tool_names)
+        self.assertIn("get_task", result.allowed_tool_names)
+        self.assertNotIn("create_task", result.allowed_tool_names)
+        self.assertNotIn("update_task_status", result.allowed_tool_names)
+
+    def test_authorized_common_task_writes_are_exposed(self) -> None:
+        result = build_capabilities(
+            (),
+            authorized_write_tool_names=frozenset(
+                {"create_task", "add_task_step", "add_task_blocker"}
+            ),
+        )
+
+        self.assertIn("create_task", result.allowed_tool_names)
+        self.assertIn("add_task_step", result.allowed_tool_names)
+        self.assertIn("add_task_blocker", result.allowed_tool_names)
+        self.assertIn("list_tasks", result.allowed_tool_names)
+
 
 if __name__ == "__main__":
     unittest.main()

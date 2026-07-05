@@ -22,6 +22,7 @@ from app.memory.memory_context import (
 )
 from app.memory.memory_retriever import MemoryRetriever
 from app.memory.profile_loader import ProfileLoader
+from app.tasks.task_context import TaskContextBuilder
 from app.runtime.errors import (
     ErrorType,
     ExecutionError,
@@ -321,6 +322,7 @@ class Agent:
         self.context_engine = ContextEngine()
         self.profile_loader = ProfileLoader()
         self.memory_retriever = MemoryRetriever()
+        self.task_context_builder = TaskContextBuilder()
         self.interaction_state = InteractionState()
 
     def cancel_current_run(self) -> bool:
@@ -723,12 +725,20 @@ class Agent:
         profile_message = profile_context_message(profile)
         semantic_memories = self.memory_retriever.retrieve(user_input)
         semantic_message = semantic_memory_context_message(semantic_memories)
+        task_context = self.task_context_builder.build(user_input)
+        task_message = task_context.message()
         input_messages = list(assembly.input_messages)
         if profile_message is not None:
             input_messages.insert(0, profile_message)
         if semantic_message is not None:
             insert_index = 1 if profile_message is not None else 0
             input_messages.insert(insert_index, semantic_message)
+        if task_message is not None:
+            insert_index = (
+                (1 if profile_message is not None else 0)
+                + (1 if semantic_message is not None else 0)
+            )
+            input_messages.insert(insert_index, task_message)
 
         memory_report = profile_context_report(
             profile,
@@ -736,9 +746,11 @@ class Agent:
             semantic_memories,
             semantic_message,
         )
+        task_report = task_context.report(task_message)
         context = _llm_input_diagnostics(input_messages)
         context["context_engine"] = assembly.report
         context["memory"] = memory_report
+        context["task_context"] = task_report
         events.log_llm_requested(run_state, loop_number, context)
         for retry_index in range(self.loop_limits.max_llm_retries + 1):
             if run_state.chat_cancellation_requested:
@@ -765,6 +777,7 @@ class Agent:
                     "max_output_tokens": LLM_MAX_OUTPUT_TOKENS,
                     "context_engine": assembly.report,
                     "memory": memory_report,
+                    "task_context": task_report,
                 },
             )
             try:

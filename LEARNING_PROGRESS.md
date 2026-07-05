@@ -12,11 +12,12 @@
 ```text
 Agent Loop -> Business Tools -> Skill -> Capability -> Write Safety
 -> RunState / Tool Reliability -> Observability -> Context Engine -> Memory v1
+-> MCP -> Interaction / Safety State -> Task State v1
 ```
 
 当前下一阶段调整为：
 
-> Task State。
+> Persistence / Recovery。
 
 暂不进入 Multi-Agent、复杂 Planner、向量数据库、自动 Memory 提取或真实外部账号/OAuth。
 
@@ -143,6 +144,17 @@ Agent Loop -> Business Tools -> Skill -> Capability -> Write Safety
 - Capability Builder 仍只负责根据 Skill 和授权结果暴露工具，不关心 pending 生命周期。
 - pending confirmation 生命周期已写入 compact event 日志，但不记录原始用户输入正文。
 
+### 15. Task State v1
+
+- 学会把长期任务现场建模为独立状态源，而不是依赖模型记忆、对话历史、Memory 或 Rolling Summary。
+- `TaskItem` 负责跨 Chat 的目标、步骤、当前步骤、blocker、note 和任务状态生命周期；`RunState` 仍只负责一次 `Agent.chat()`。
+- `TaskStore` 使用本地 versioned JSON 持久化，是 Task State v1 和 Persistence v0 的事实源；文件不存在时应安全返回空任务列表。
+- Task WRITE tools 必须来自用户当前输入的明确授权；普通“我想做 X”只是本轮上下文，不自动创建任务。
+- 恢复或查看任务是 READ 行为，不等于授权更新 Task State，也不等于授权执行任务里的危险操作。
+- Task Context 在 `ContextEngine.assemble()` 之后作为 request-local system context 注入本轮 LLM 输入，但不进入 `Agent.messages`、Memory、Rolling Summary 或 ContextIndex。
+- Agent 可以通过自然语言创建任务、添加步骤、记录 blocker 和恢复查看任务，但最终回答必须基于真实 Task Tool Observation。
+- Task State 是 Planner 和 Recovery 的地基，但 v1 不自动生成计划、不自动推进步骤、不自动执行工具。
+
 ## 当前输入层心智模型
 
 ```text
@@ -150,6 +162,7 @@ System Instructions
 + Loaded Skill Prompt
 + Read-only Profile Memory
 + Relevant Semantic Memory
++ Current Task Context
 + Conversation Working Context
 + Tool Schemas
 ```
@@ -162,23 +175,24 @@ System Instructions
 | Skill Prompt | Skill Loader / Prompt Builder | 本轮领域规则 |
 | Profile Memory | ProfileLoader | 只读长期画像 |
 | Semantic Memory | MemoryStore / MemoryRetriever | 用户授权长期状态 |
+| Current Task Context | TaskContextBuilder | 本轮只读任务现场 |
 | Conversation Context | ContextEngine | 对话历史工作窗口 |
 | Tool Schemas | Capability Builder | 本轮可见工具能力 |
 
-## 下一阶段：Task State
+## 下一阶段：Persistence / Recovery
 
 目标：
 
-> 在已有 Tool、Capability、Context、Memory、MCP 和 Interaction/Safety State 边界之上，学习跨 Chat 的长期目标、步骤、暂停、恢复和 blocked 状态。
+> 在已有 Tool、Capability、Context、Memory、MCP、Interaction/Safety State 和 Task State 边界之上，学习崩溃恢复、运行中状态持久化和可恢复执行边界。
 
-为什么现在做：Interaction/Safety State 已经让“跨轮临时安全状态”和“当前输入授权”分开。下一步应学习更长生命周期的 Task State：如何表示一个用户目标的阶段、进度、暂停、恢复、blocked 原因，以及它和 RunState、Context、Memory 的边界。
+为什么现在做：Task State 已经能保存长期任务现场，下一步可以学习 Runtime 中断、失败、重启后如何判断“做到哪里、什么可以继续、什么必须重新确认”。这会把 Task State、ActionRecord、幂等记录、Write Safety 和 Context 恢复边界串起来。
 
-后续需要单独制定 Task State 实施计划；不要继续把新阶段细节写入 Interaction / Safety State 计划。
+后续需要单独制定 Persistence / Recovery 实施计划；不要把 Recovery 提前混进 Task State v1 的收尾补丁。
 
 ## 后续路线
 
-1. Task State：跨 Chat 的长期目标、步骤、暂停、恢复和 blocked 状态。
-2. Persistence / Recovery：崩溃恢复、运行中状态持久化和可恢复执行边界。
+1. Persistence / Recovery：崩溃恢复、运行中状态持久化和可恢复执行边界。
+2. Policy / Permission Layer：把授权、风险等级和可执行能力进一步拆清楚。
 3. 高级 Memory Retrieval：关键词归一化、更新/合并、冲突检测、重要性、过期时间，之后再考虑 embedding。
 4. Planner / Multi-Agent：等状态、上下文、Memory、工具和安全边界稳定后再推进。
 
@@ -190,8 +204,8 @@ System Instructions
 Skill References（已完成）
 -> MCP（已完成）
 -> Interaction / Safety State（已完成 v1）
--> Task State（当前阶段）
--> Persistence / Recovery
+-> Task State（已完成 v1）
+-> Persistence / Recovery（当前阶段）
 -> Policy / Permission Layer
 -> Plan and Execute
 -> LangGraph / LangChain 对照整合

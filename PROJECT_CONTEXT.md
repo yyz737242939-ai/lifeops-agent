@@ -73,6 +73,10 @@ uv run python -m unittest discover -s tests -v
 | `app/memory/memory_store.py` | `data/memory/semantic_memories.json` 的保存、查询和软删除 |
 | `app/memory/memory_retriever.py` | 按本轮用户输入对 active Semantic Memory 做关键词/type/tag 简单检索 |
 | `app/memory/memory_context.py` | 将 Profile 和检索到的 Semantic Memory 格式化成本轮只读上下文片段，并生成日志诊断 |
+| `app/tasks/task_types.py` | Task State v1 数据模型，表达跨 Chat 长期任务、步骤、blocker、note 和状态生命周期 |
+| `app/tasks/task_store.py` | `data/tasks/tasks.json` 的 versioned JSON TaskStore，支持任务、步骤、note 和 blocker 持久化 |
+| `app/tasks/task_context.py` | 从 TaskStore 选择相关任务并格式化成本轮只读 Task Context，不写入对话历史或 Memory |
+| `app/tools/tool.py` | 注册业务、Memory、MCP 和 Task 工具；Task READ 工具可查看任务，Task WRITE 工具通过 TaskStore 写入长期任务状态 |
 | `app/runtime/idempotency_store.py` | 写工具成功结果的幂等存储与重放 |
 | `app/mcp/*` | MCP v1 Agent侧Adapter，负责连接本地MCP Server、发现工具、调用工具和规范化协议错误 |
 | `app/skills/skill_router.py` | 当前输入的确定性 Skill 路由 |
@@ -101,6 +105,7 @@ uv run python -m unittest discover -s tests -v
 | `Agent.messages` | 跨多次 `chat()` | 用户消息、LLM输出、Function Call、Tool Observation |
 | `InteractionState` | 一个 `Agent` 实例内的跨轮临时状态 | 当前 pending confirmation 和 turn index，不进入Memory或Conversation Summary |
 | `PendingConfirmation` | 一个待确认危险操作 | operation、tool、风险等级、范围摘要、候选参数、生命周期状态和过期窗口 |
+| `TaskItem` | 跨 Chat 的长期任务状态模型 | 用户授权创建的目标、步骤、当前步骤、progress notes、blockers 和 active/paused/blocked/completed/cancelled 状态 |
 | `TurnContext` | 一次用户输入 | 固定Prompt、Tool Schema、授权工具、加载Skill、安全标记 |
 | `RunState` | 恰好一次 `Agent.chat()` | 本次Chat的LLM轮次、API请求、工具执行尝试、Action和终态 |
 | `ActionRecord` | 一次模型请求的工具Action | 参数、结果、错误、工具执行尝试、签名和幂等键 |
@@ -130,6 +135,7 @@ RunState的主要计数字段已经显式包含作用域和统计对象：
 -> 创建单次 Chat RunState
 -> ContextEngine assemble 生成本轮 LLM input 与预算报告
 -> Memory 层读取只读 Profile 并检索相关 active Semantic Memory，注入本轮 LLM input
+-> Task Context 层按当前输入读取相关 Task 摘要，作为本轮只读 input 注入
 -> LLM Request
 -> LLM回答，或返回Function Call
 -> Runtime校验权限、预算、取消、重复与无进展
@@ -177,6 +183,7 @@ RunState的主要计数字段已经显式包含作用域和统计对象：
 - Prompt每次Chat重新构建，不把Skill正文追加到历史消息。
 - LLM只看到本轮允许的Tool Schema，Executor在执行前再次校验权限。
 - 当前输入没有明确授权时，写工具不会暴露给模型。
+- Task READ 工具 `list_tasks` / `get_task` 是 common tools；Task WRITE 工具只有当前输入明确要求创建、保存、更新、标记、记录进展或记录 blocker 时才会暴露。
 - `news` Skill 已有骨架和确定性路由，可识别 Hugging Face、论文、Blog、AI简报等请求；当前阶段可通过 `read_skill_reference(ref_id)` 读取 Skill 自有目录下 manifest 声明过的 Markdown reference，通过 `fetch_news_source(source_id)` 读取声明过的 Hugging Face Papers / Blog 来源，并通过 `run_news_helper(helper_id, arguments)` 调用声明式只读 helper 解析、排序和去重新闻条目。Hugging Face 简报闭环已接入：Skill 指令要求按 reference -> source -> helper -> 中文简报的顺序工作，并通过 Agent 级回归测试验证 Papers / Blog 读取、helper 解析、失败结构化和 source HTML 轮次结束后剥离。
 
 ### 写入安全
@@ -184,6 +191,7 @@ RunState的主要计数字段已经显式包含作用域和统计对象：
 - 描述个人状态或请求建议不等于授权保存数据。
 - 描述长期偏好或事实不等于授权保存Memory；只有当前输入明确要求“记住/保存/以后默认”等，才暴露 `save_memory`。
 - 删除Memory需要当前输入明确表达“忘掉/删除记忆”等授权；删除后该Memory默认不再查询或注入。
+- 描述长期目标不等于授权创建 Task；只有“创建任务/保存为任务/标记任务/记录进展/blocker”等当前输入明确写入意图，才暴露 Task WRITE tools。
 - Interaction/Safety State 第一版已接入 Agent Runtime：批量Todo删除、删除全部/多条/含糊Memory会先创建 pending confirmation，不直接暴露危险写工具。
 - 用户确认 active pending 后，Runtime 会在本轮临时授权对应写工具，并把确认范围加入本轮 instructions；取消、修改范围或过期确认不会执行旧 pending。
 - pending confirmation 生命周期会写入 compact event 日志，覆盖 created、confirmed、cancelled、expired、superseded 和 consumed；日志记录范围摘要和状态，不记录原始用户输入正文。
@@ -275,6 +283,28 @@ MCP v1 当前用于学习 Agent 如何接入外部能力协议。第一版选择
 - 当前只有普通 Tool 事件日志；尚无专门的 MCP 事件字段，例如 `server_id`、`mcp_tool_name`、`duration_ms`。
 - 第一版每次 Adapter 调用都会启动本地 mock server 进程，优先服务学习清晰度，不追求连接复用。
 
+## 当前Task State实现
+
+当前 Task State 已完成 v1 自然语言 Agent 闭环，目标是把长期任务现场从模型记忆、对话历史和 Memory 中分离出来，作为后续恢复和 Planner 的事实源。
+
+- `TaskItem` 表达用户授权创建的长期任务，包含 `title`、`goal`、`status`、`steps`、`current_step_id`、`progress_notes`、`blockers`、时间戳、`source=user_authorized` 和 tags。
+- `TaskStep` 表达任务步骤，支持 `pending`、`in_progress`、`done`、`skipped`、`blocked` 生命周期；完成或跳过后视为终态。
+- `TaskBlocker` 表达阻塞原因，支持 `open` 和 `resolved` 生命周期。
+- `TaskNote` 只记录简短进展，不保存完整聊天历史。
+- `TaskItem` 可暂停、恢复、完成、取消，终态任务不能继续变更；添加 blocker 会把任务标记为 blocked，解决最后一个 open blocker 后恢复 active。
+- `TaskStore` 使用本地 versioned JSON 文件 `data/tasks/tasks.json`，文件不存在时返回空列表，写入后可重新实例化读取。
+- `TaskStore` 当前支持创建、读取、默认列出 active/paused/blocked 任务、按状态更新任务、添加/更新/完成/跳过步骤、设置当前步骤、添加 note、添加和解决 blocker。
+- Task tools 已注册：`create_task`、`list_tasks`、`get_task`、`update_task_status`、`add_task_step`、`update_task_step`、`set_current_task_step`、`add_task_note`、`add_task_blocker`、`resolve_task_blocker`。
+- `list_tasks` / `get_task` 是 READ tools，不需要写授权；其他 Task tools 是 WRITE tools，必须由当前输入授权后才会进入 Capability。
+- Task Context 已接入 `Agent._request_llm()`：发生在 `ContextEngine.assemble()` 之后，与 Profile/Memory 类似作为本轮 request-local system context 注入局部 `input_messages`。
+- Task Context 检索规则：task id 精确匹配优先；“继续/查看当前或上次任务”读取最近 updated 的 active/blocked/paused 任务；关键词按 title、goal、tag 简单匹配；多个候选时注入候选列表并要求用户选择。
+- Task Context 只包含摘要、当前步骤、open blockers 和最近 notes；不进入 `Agent.messages`、Memory、Rolling Summary 或 ContextIndex。
+- System Prompt 已包含 Task State 行为规则：普通目标陈述不自动创建任务，恢复/查看任务不等于授权写入或危险操作。
+- Agent 可通过自然语言创建任务、添加步骤、记录 blocker、恢复查看任务，并基于真实 Task Tool Observation 回复。
+- `继续上次任务` 是只读恢复，不暴露 Task WRITE tools；如果模型仍尝试危险写工具，Executor 会按当前 allowed tools 拒绝。
+- 最终回答校验会识别“已创建/已更新任务”等写入成功声明；没有成功 WRITE Action 时会修正为不能确认写入。
+- 当前尚未实现 UI 页面、Recovery 入口、Planner 自动推进或 Multi-Agent。
+
 ### Tool Observation压缩
 
 `compact_tool_output()`在工具成功后，根据字符数、主列表长度和请求数量选择：
@@ -329,7 +359,8 @@ LLM Response不重复记录Request中的instructions、tools和参数，只保�
 - 幂等存储不是事务型exactly-once。
 - 同步SDK或Python函数不能被强制中断。
 - 尚无全局wall-clock、token或cost预算。
-- Interaction State 目前是单 pending、确定性规则和内存态；尚未增加多个 pending 队列、复杂自然语言策略、Task State 和 Multi-Agent。
+- Interaction State 目前是单 pending、确定性规则和内存态；尚未增加多个 pending 队列或复杂自然语言策略。
+- Task State 目前已有数据模型、versioned JSON TaskStore、Task tools、授权测试、request-local Task Context 注入和自然语言 Agent 闭环；尚未增加 UI、Recovery 入口和 Multi-Agent。
 - MCP v1 目前已完成 Mock Package Tracking Server、Agent Adapter、Tool Bridge、Capability、Executor和自然语言Agent闭环；尚未增加专门MCP观测字段。
 
 ## 本地数据
@@ -340,6 +371,7 @@ LLM Response不重复记录Request中的instructions、tools和参数，只保�
 data/
 data/memory/profile.md
 data/memory/semantic_memories.json
+data/tasks/tasks.json
 data/mock_packages/shipments.json
 logs/
 ```

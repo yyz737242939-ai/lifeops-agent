@@ -81,6 +81,35 @@ class WritePolicyTests(unittest.TestCase):
         self.assertNotIn("save_memory", tools)
         self.assertNotIn("delete_todo", tools)
 
+    def test_descriptive_goal_does_not_authorize_task_write(self) -> None:
+        tools = authorized_write_tools("我想下周完成 Task State v1。")
+
+        self.assertNotIn("create_task", tools)
+        self.assertNotIn("update_task_status", tools)
+
+    def test_explicit_task_create_authorizes_create_task(self) -> None:
+        tools = authorized_write_tools("帮我创建任务：完成 Task State v1。")
+
+        self.assertIn("create_task", tools)
+
+    def test_explicit_task_progress_updates_authorize_task_writes(self) -> None:
+        tools = authorized_write_tools(
+            "把这个任务标记完成，并记录进展 note：Step 4 已完成。"
+        )
+
+        self.assertIn("update_task_status", tools)
+        self.assertIn("add_task_note", tools)
+
+    def test_continue_task_is_read_only_not_status_write(self) -> None:
+        tools = authorized_write_tools("继续上次任务。")
+
+        self.assertNotIn("update_task_status", tools)
+
+    def test_explicit_task_blocker_authorizes_blocker_write(self) -> None:
+        tools = authorized_write_tools("这个任务卡住了，原因是需要先确认授权边界。")
+
+        self.assertIn("add_task_blocker", tools)
+
     def test_bulk_delete_requires_confirmation(self) -> None:
         self.assertTrue(requires_bulk_delete_confirmation("删除所有待办。"))
         self.assertNotIn("delete_todo", authorized_write_tools("删除所有待办。"))
@@ -93,6 +122,7 @@ class WritePolicyTests(unittest.TestCase):
 
     def test_success_claim_detection_ignores_failure_message(self) -> None:
         self.assertTrue(has_write_success_claim("已记录今天早餐18元。"))
+        self.assertTrue(has_write_success_claim("已创建任务：Task State v1。"))
         self.assertFalse(has_write_success_claim("抱歉，无法记录这笔消费。"))
         self.assertFalse(
             has_write_success_claim("只有成功的 WRITE action 才能证明真的保存了。")

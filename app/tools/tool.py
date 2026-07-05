@@ -11,6 +11,8 @@ from app.domains.expense_store import BudgetPeriod
 from app.domains.todo_store import Todo, TodoPriority
 from app.memory.memory_store import SemanticMemoryStore
 from app.memory.memory_types import MemoryType
+from app.tasks.task_store import TaskStore
+from app.tasks.task_types import TaskStatus, TaskStepStatus
 from app.context.context_ref_store import read_context_ref as load_context_ref
 from app.mcp.client import package_tracking_client
 from app.mcp.errors import McpClientError
@@ -31,6 +33,7 @@ from app.tools.registry import (
 
 
 memory_store = SemanticMemoryStore()
+task_store = TaskStore()
 
 
 def _empty_parameters() -> ToolParameters:
@@ -166,6 +169,204 @@ def _delete_memory_parameters() -> ToolParameters:
             }
         },
         "required": ["memory_id"],
+    }
+
+
+def _task_create_parameters() -> ToolParameters:
+    return {
+        "type": "object",
+        "properties": {
+            "title": {
+                "type": "string",
+                "description": "Short task title for listing and later recovery.",
+            },
+            "goal": {
+                "type": "string",
+                "description": "User-authorized long-lived task goal.",
+            },
+            "steps": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional initial task steps.",
+            },
+            "tags": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional simple tags for filtering.",
+            },
+        },
+        "required": ["title", "goal"],
+    }
+
+
+def _list_tasks_parameters() -> ToolParameters:
+    return {
+        "type": "object",
+        "properties": {
+            "status": {
+                "type": "string",
+                "enum": ["active", "paused", "blocked", "completed", "cancelled"],
+                "description": (
+                    "Optional single status filter. If omitted, lists active, "
+                    "paused, and blocked tasks."
+                ),
+            },
+            "tag": {
+                "type": "string",
+                "description": "Optional tag filter.",
+            },
+        },
+        "required": [],
+    }
+
+
+def _task_id_parameters() -> ToolParameters:
+    return {
+        "type": "object",
+        "properties": {
+            "task_id": {
+                "type": "string",
+                "description": "Task id returned by create_task or list_tasks.",
+            }
+        },
+        "required": ["task_id"],
+    }
+
+
+def _update_task_status_parameters() -> ToolParameters:
+    parameters = _task_id_parameters()
+    parameters["properties"] = {
+        **parameters["properties"],
+        "status": {
+            "type": "string",
+            "enum": ["active", "paused", "blocked", "completed", "cancelled"],
+            "description": "New task status.",
+        },
+    }
+    parameters["required"] = ["task_id", "status"]
+    return parameters
+
+
+def _add_task_step_parameters() -> ToolParameters:
+    parameters = _task_id_parameters()
+    parameters["properties"] = {
+        **parameters["properties"],
+        "title": {
+            "type": "string",
+            "description": "Step title.",
+        },
+        "summary": {
+            "type": "string",
+            "description": "Optional short step summary.",
+        },
+    }
+    parameters["required"] = ["task_id", "title"]
+    return parameters
+
+
+def _update_task_step_parameters() -> ToolParameters:
+    return {
+        "type": "object",
+        "properties": {
+            "task_id": {
+                "type": "string",
+                "description": "Task id returned by create_task or list_tasks.",
+            },
+            "step_id": {
+                "type": "string",
+                "description": "Step id from the task's steps list.",
+            },
+            "title": {
+                "type": "string",
+                "description": "Optional replacement step title.",
+            },
+            "summary": {
+                "type": "string",
+                "description": "Optional replacement step summary.",
+            },
+            "status": {
+                "type": "string",
+                "enum": ["pending", "in_progress", "done", "skipped", "blocked"],
+                "description": "Optional new step status.",
+            },
+        },
+        "required": ["task_id", "step_id"],
+    }
+
+
+def _set_current_task_step_parameters() -> ToolParameters:
+    return {
+        "type": "object",
+        "properties": {
+            "task_id": {
+                "type": "string",
+                "description": "Task id returned by create_task or list_tasks.",
+            },
+            "step_id": {
+                "type": "string",
+                "description": "Step id to make current.",
+            },
+        },
+        "required": ["task_id", "step_id"],
+    }
+
+
+def _add_task_note_parameters() -> ToolParameters:
+    return {
+        "type": "object",
+        "properties": {
+            "task_id": {
+                "type": "string",
+                "description": "Task id returned by create_task or list_tasks.",
+            },
+            "content": {
+                "type": "string",
+                "description": "Concise progress note. Do not save full chat history.",
+            },
+            "related_step_id": {
+                "type": "string",
+                "description": "Optional related step id.",
+            },
+        },
+        "required": ["task_id", "content"],
+    }
+
+
+def _add_task_blocker_parameters() -> ToolParameters:
+    return {
+        "type": "object",
+        "properties": {
+            "task_id": {
+                "type": "string",
+                "description": "Task id returned by create_task or list_tasks.",
+            },
+            "reason": {
+                "type": "string",
+                "description": "Reason the task or step is blocked.",
+            },
+            "related_step_id": {
+                "type": "string",
+                "description": "Optional related step id.",
+            },
+        },
+        "required": ["task_id", "reason"],
+    }
+
+
+def _resolve_task_blocker_parameters() -> ToolParameters:
+    return {
+        "type": "object",
+        "properties": {
+            "task_id": {
+                "type": "string",
+                "description": "Task id returned by create_task or list_tasks.",
+            },
+            "blocker_id": {
+                "type": "string",
+                "description": "Blocker id from the task's blockers list.",
+            },
+        },
+        "required": ["task_id", "blocker_id"],
     }
 
 
@@ -342,6 +543,301 @@ def delete_memory(memory_id: str) -> ToolResult:
         "ok": True,
         "action": "delete_memory",
         "memory": _model_to_dict(memory),
+    }
+
+
+@register_tool(
+    name="create_task",
+    description=(
+        "Create a long-lived Task State item only when the current user message "
+        "explicitly asks to create, save, or track a task."
+    ),
+    parameters=_task_create_parameters(),
+    effect=ToolEffect.WRITE,
+    idempotent=False,
+    retryable=False,
+)
+def create_task(
+    title: str,
+    goal: str,
+    steps: list[str] | None = None,
+    tags: list[str] | None = None,
+) -> ToolResult:
+    task = task_store.create_task(
+        title=title,
+        goal=goal,
+        steps=steps,
+        tags=tags,
+    )
+    return {
+        "ok": True,
+        "action": "create_task",
+        "task": _model_to_dict(task),
+    }
+
+
+@register_tool(
+    name="list_tasks",
+    description=(
+        "List long-lived tasks. By default returns active, paused, and blocked "
+        "tasks for recovery or inspection."
+    ),
+    parameters=_list_tasks_parameters(),
+)
+def list_tasks(
+    status: TaskStatus | None = None,
+    tag: str | None = None,
+) -> ToolResult:
+    statuses = {status} if status is not None else None
+    tasks = task_store.list_tasks(statuses=statuses, tag=tag)
+    return {
+        "ok": True,
+        "action": "list_tasks",
+        "count": len(tasks),
+        "tasks": [_model_to_dict(task) for task in tasks],
+    }
+
+
+@register_tool(
+    name="get_task",
+    description="Get one long-lived task by id.",
+    parameters=_task_id_parameters(),
+)
+def get_task(task_id: str) -> ToolResult:
+    task = task_store.get_task(task_id)
+    if task is None:
+        return {
+            "ok": False,
+            "action": "get_task",
+            "error": "task_not_found",
+            "task_id": task_id,
+        }
+    return {
+        "ok": True,
+        "action": "get_task",
+        "task": _model_to_dict(task),
+    }
+
+
+@register_tool(
+    name="update_task_status",
+    description=(
+        "Update a long-lived task status when the current user message "
+        "explicitly authorizes changing, pausing, resuming, completing, or "
+        "cancelling that task."
+    ),
+    parameters=_update_task_status_parameters(),
+    effect=ToolEffect.WRITE,
+    idempotent=True,
+    retryable=False,
+)
+def update_task_status(task_id: str, status: TaskStatus) -> ToolResult:
+    task = task_store.update_task_status(task_id, status)
+    if task is None:
+        return {
+            "ok": False,
+            "action": "update_task_status",
+            "error": "task_not_found",
+            "task_id": task_id,
+        }
+    return {
+        "ok": True,
+        "action": "update_task_status",
+        "task": _model_to_dict(task),
+    }
+
+
+@register_tool(
+    name="add_task_step",
+    description=(
+        "Add a step to a long-lived task when the current user message "
+        "explicitly authorizes updating that task."
+    ),
+    parameters=_add_task_step_parameters(),
+    effect=ToolEffect.WRITE,
+    idempotent=False,
+    retryable=False,
+)
+def add_task_step(
+    task_id: str,
+    title: str,
+    summary: str = "",
+) -> ToolResult:
+    task = task_store.add_step(task_id, title, summary=summary)
+    if task is None:
+        return {
+            "ok": False,
+            "action": "add_task_step",
+            "error": "task_not_found",
+            "task_id": task_id,
+        }
+    return {
+        "ok": True,
+        "action": "add_task_step",
+        "task": _model_to_dict(task),
+    }
+
+
+@register_tool(
+    name="update_task_step",
+    description=(
+        "Update a task step title, summary, or status when the current user "
+        "message explicitly authorizes changing that task."
+    ),
+    parameters=_update_task_step_parameters(),
+    effect=ToolEffect.WRITE,
+    idempotent=True,
+    retryable=False,
+)
+def update_task_step(
+    task_id: str,
+    step_id: str,
+    title: str | None = None,
+    summary: str | None = None,
+    status: TaskStepStatus | None = None,
+) -> ToolResult:
+    task = task_store.update_step(
+        task_id,
+        step_id,
+        title=title,
+        summary=summary,
+        status=status,
+    )
+    if task is None:
+        return {
+            "ok": False,
+            "action": "update_task_step",
+            "error": "task_not_found",
+            "task_id": task_id,
+        }
+    return {
+        "ok": True,
+        "action": "update_task_step",
+        "task": _model_to_dict(task),
+    }
+
+
+@register_tool(
+    name="set_current_task_step",
+    description=(
+        "Set the current step for a long-lived task when the current user "
+        "message explicitly authorizes updating task progress."
+    ),
+    parameters=_set_current_task_step_parameters(),
+    effect=ToolEffect.WRITE,
+    idempotent=True,
+    retryable=False,
+)
+def set_current_task_step(task_id: str, step_id: str) -> ToolResult:
+    task = task_store.set_current_step(task_id, step_id)
+    if task is None:
+        return {
+            "ok": False,
+            "action": "set_current_task_step",
+            "error": "task_not_found",
+            "task_id": task_id,
+        }
+    return {
+        "ok": True,
+        "action": "set_current_task_step",
+        "task": _model_to_dict(task),
+    }
+
+
+@register_tool(
+    name="add_task_note",
+    description=(
+        "Add a concise progress note to a long-lived task when the current "
+        "user message explicitly authorizes recording task progress."
+    ),
+    parameters=_add_task_note_parameters(),
+    effect=ToolEffect.WRITE,
+    idempotent=False,
+    retryable=False,
+)
+def add_task_note(
+    task_id: str,
+    content: str,
+    related_step_id: str | None = None,
+) -> ToolResult:
+    task = task_store.add_note(
+        task_id,
+        content,
+        related_step_id=related_step_id,
+    )
+    if task is None:
+        return {
+            "ok": False,
+            "action": "add_task_note",
+            "error": "task_not_found",
+            "task_id": task_id,
+        }
+    return {
+        "ok": True,
+        "action": "add_task_note",
+        "task": _model_to_dict(task),
+    }
+
+
+@register_tool(
+    name="add_task_blocker",
+    description=(
+        "Add a blocker to a long-lived task when the current user message "
+        "explicitly authorizes recording that the task is blocked."
+    ),
+    parameters=_add_task_blocker_parameters(),
+    effect=ToolEffect.WRITE,
+    idempotent=False,
+    retryable=False,
+)
+def add_task_blocker(
+    task_id: str,
+    reason: str,
+    related_step_id: str | None = None,
+) -> ToolResult:
+    task = task_store.add_blocker(
+        task_id,
+        reason,
+        related_step_id=related_step_id,
+    )
+    if task is None:
+        return {
+            "ok": False,
+            "action": "add_task_blocker",
+            "error": "task_not_found",
+            "task_id": task_id,
+        }
+    return {
+        "ok": True,
+        "action": "add_task_blocker",
+        "task": _model_to_dict(task),
+    }
+
+
+@register_tool(
+    name="resolve_task_blocker",
+    description=(
+        "Resolve a task blocker when the current user message explicitly "
+        "authorizes updating that task blocker."
+    ),
+    parameters=_resolve_task_blocker_parameters(),
+    effect=ToolEffect.WRITE,
+    idempotent=True,
+    retryable=False,
+)
+def resolve_task_blocker(task_id: str, blocker_id: str) -> ToolResult:
+    task = task_store.resolve_blocker(task_id, blocker_id)
+    if task is None:
+        return {
+            "ok": False,
+            "action": "resolve_task_blocker",
+            "error": "task_not_found",
+            "task_id": task_id,
+        }
+    return {
+        "ok": True,
+        "action": "resolve_task_blocker",
+        "task": _model_to_dict(task),
     }
 
 
