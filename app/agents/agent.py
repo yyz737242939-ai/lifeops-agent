@@ -38,6 +38,8 @@ from app.runtime.run_state import (
     RunStatus,
     StopReason,
 )
+from app.runtime.recovery_store import RunRecordStore
+from app.runtime.recovery_context import RecoveryContextBuilder
 from app.runtime.interaction_policy import (
     HighRiskOperation,
     PendingReplyIntent,
@@ -52,6 +54,7 @@ from app.runtime.interaction_state import (
 from app.runtime.write_policy import (
     authorized_write_tools,
     has_write_success_claim,
+    has_recovery_execution_claim,
     requires_bulk_delete_confirmation,
 )
 from app.skills.skill_loader import discover_skills
@@ -313,7 +316,12 @@ def _after_turn_safe_tool_result(result_json: str) -> str:
 class Agent:
     """Coordinate skill routing, LLM rounds, tools, and per-request RunState."""
 
-    def __init__(self, *, loop_limits: LoopLimits | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        loop_limits: LoopLimits | None = None,
+        recovery_store: RunRecordStore | None = None,
+    ) -> None:
         self.messages: list[Any] = []
         self.skills = discover_skills()
         self.active_skills: tuple[str, ...] = ()
@@ -324,6 +332,8 @@ class Agent:
         self.memory_retriever = MemoryRetriever()
         self.task_context_builder = TaskContextBuilder()
         self.interaction_state = InteractionState()
+        self.recovery_store = recovery_store or RunRecordStore()
+        self.recovery_context_builder = RecoveryContextBuilder(self.recovery_store)
 
     def cancel_current_run(self) -> bool:
         """Request cooperative cancellation at the next runtime checkpoint."""
@@ -388,8 +398,13 @@ class Agent:
 
     def chat(self, user_input: str) -> str:
         """Execute one user turn and return either an answer or stop summary."""
+        self.recovery_store.mark_stale_running_as_interrupted()
         run_state = RunState()
         self.last_run_state = run_state
+        self.recovery_store.start_run(
+            run_state,
+            user_input_summary=user_input,
+        )
         events.log_run_started(run_state, self.loop_limits.to_dict())
         events.log_user_input(run_state, user_input)
         app_log.log_info("Run %s started", run_state.run_id)
@@ -600,6 +615,7 @@ class Agent:
 
     def _complete_interaction_only_run(self, run_state: RunState, answer: str) -> str:
         run_state.complete()
+        self.recovery_store.finish_run(run_state)
         events.log_final_answer(run_state, answer)
         events.log_run_completed(run_state)
         app_log.log_info("Run %s completed", run_state.run_id)
@@ -653,6 +669,7 @@ class Agent:
                 self._sanitize_ephemeral_tool_outputs()
                 run_state.complete()
                 self._record_after_turn_compaction(run_state)
+                self.recovery_store.finish_run(run_state)
                 events.log_final_answer(run_state, answer)
                 events.log_run_completed(run_state)
                 app_log.log_info("Run %s completed", run_state.run_id)
@@ -680,6 +697,14 @@ class Agent:
     @staticmethod
     def _validate_final_answer(answer: str, run_state: RunState) -> str:
         """Prevent a model-only answer from claiming an unconfirmed write."""
+        if (
+            has_recovery_execution_claim(answer)
+            and not run_state.completed_action_records
+        ):
+            return (
+                "我只能根据 Recovery Context 说明上次停在哪里；"
+                "本轮没有成功的 Tool Observation，因此不能确认已经恢复执行。"
+            )
         successful_writes = [
             action
             for action in run_state.completed_action_records
@@ -727,6 +752,11 @@ class Agent:
         semantic_message = semantic_memory_context_message(semantic_memories)
         task_context = self.task_context_builder.build(user_input)
         task_message = task_context.message()
+        recovery_context = self.recovery_context_builder.build(
+            user_input,
+            task_context=task_context,
+        )
+        recovery_message = recovery_context.message()
         input_messages = list(assembly.input_messages)
         if profile_message is not None:
             input_messages.insert(0, profile_message)
@@ -739,6 +769,13 @@ class Agent:
                 + (1 if semantic_message is not None else 0)
             )
             input_messages.insert(insert_index, task_message)
+        if recovery_message is not None:
+            insert_index = (
+                (1 if profile_message is not None else 0)
+                + (1 if semantic_message is not None else 0)
+                + (1 if task_message is not None else 0)
+            )
+            input_messages.insert(insert_index, recovery_message)
 
         memory_report = profile_context_report(
             profile,
@@ -747,10 +784,12 @@ class Agent:
             semantic_message,
         )
         task_report = task_context.report(task_message)
+        recovery_report = recovery_context.report(recovery_message)
         context = _llm_input_diagnostics(input_messages)
         context["context_engine"] = assembly.report
         context["memory"] = memory_report
         context["task_context"] = task_report
+        context["recovery_context"] = recovery_report
         events.log_llm_requested(run_state, loop_number, context)
         for retry_index in range(self.loop_limits.max_llm_retries + 1):
             if run_state.chat_cancellation_requested:
@@ -778,6 +817,7 @@ class Agent:
                     "context_engine": assembly.report,
                     "memory": memory_report,
                     "task_context": task_report,
+                    "recovery_context": recovery_report,
                 },
             )
             try:
@@ -1022,6 +1062,7 @@ class Agent:
             idempotency_key=idempotency_key,
         )
         run_state.add_action(action)
+        self._record_recovery_action(run_state, action)
         events.log_tool_finished(
             run_state, loop_number, action, context_compaction=compaction
         )
@@ -1125,6 +1166,7 @@ class Agent:
             error=parsed_result.get("error") if parsed_result else None,
         )
         run_state.add_action(failed_action)
+        self._record_recovery_action(run_state, failed_action)
         self._append_tool_output(function_call.call_id, tool_result)
         events.log_tool_failed(
             run_state,
@@ -1280,6 +1322,7 @@ class Agent:
                 error=parsed.get("error") if parsed else None,
             )
             run_state.add_action(skipped_action)
+            self._record_recovery_action(run_state, skipped_action)
             self._append_tool_output(call.call_id, output)
             events.log_tool_skipped(run_state, loop_number, skipped_action)
 
@@ -1302,11 +1345,25 @@ class Agent:
         answer = _runtime_stop_answer(run_state)
         self._sanitize_ephemeral_tool_outputs()
         self._record_after_turn_compaction(run_state)
+        self.recovery_store.finish_run(run_state)
         events.log_run_stopped(run_state, answer)
         app_log.log_warning(
             "Run %s stopped: %s", run_state.run_id, run_state.stop_reason
         )
         return answer
+
+    def _record_recovery_action(
+        self,
+        run_state: RunState,
+        action: ActionRecord,
+    ) -> None:
+        tool = TOOLS.get(action.tool_name)
+        tool_effect = tool.effect.value if tool is not None else ToolEffect.READ.value
+        self.recovery_store.record_action(
+            run_state.run_id,
+            action,
+            tool_effect=tool_effect,
+        )
 
     def _sanitize_ephemeral_tool_outputs(self) -> None:
         for message in self.messages:

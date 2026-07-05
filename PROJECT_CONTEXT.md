@@ -78,6 +78,9 @@ uv run python -m unittest discover -s tests -v
 | `app/tasks/task_context.py` | 从 TaskStore 选择相关任务并格式化成本轮只读 Task Context，不写入对话历史或 Memory |
 | `app/tools/tool.py` | 注册业务、Memory、MCP 和 Task 工具；Task READ 工具可查看任务，Task WRITE 工具通过 TaskStore 写入长期任务状态 |
 | `app/runtime/idempotency_store.py` | 写工具成功结果的幂等存储与重放 |
+| `app/runtime/recovery_types.py` | Recovery / Persistence v0 数据模型，定义跨进程 `RunRecord`、`PersistentActionRecord` 和恢复状态 |
+| `app/runtime/recovery_store.py` | `data/recovery/runs.json` 的 versioned JSON RunRecordStore，记录 run/action 摘要并可把 stale running run 标记为 interrupted |
+| `app/runtime/recovery_context.py` | 从 RunRecordStore 选择最近可恢复 run 并格式化成本轮只读 Recovery Context |
 | `app/mcp/*` | MCP v1 Agent侧Adapter，负责连接本地MCP Server、发现工具、调用工具和规范化协议错误 |
 | `app/skills/skill_router.py` | 当前输入的确定性 Skill 路由 |
 | `app/skills/skill_state.py` | Skill 继承、替换、清理和 Ref-only 状态 |
@@ -109,6 +112,9 @@ uv run python -m unittest discover -s tests -v
 | `TurnContext` | 一次用户输入 | 固定Prompt、Tool Schema、授权工具、加载Skill、安全标记 |
 | `RunState` | 恰好一次 `Agent.chat()` | 本次Chat的LLM轮次、API请求、工具执行尝试、Action和终态 |
 | `ActionRecord` | 一次模型请求的工具Action | 参数、结果、错误、工具执行尝试、签名和幂等键 |
+| `RunRecord` | 跨进程的运行摘要 | run状态、停止原因、关联task、最后成功/失败Action和必要Action摘要 |
+| `PersistentActionRecord` | 持久化的工具Action摘要 | 工具名、参数hash/preview、READ/WRITE effect、状态、幂等键和结果/错误摘要 |
+| `Recovery Context` | 一次模型请求 | 最近可恢复 run 的只读摘要和恢复安全规则，不进入 `Agent.messages`、Memory 或 Rolling Summary |
 
 `Agent.last_run_state` 指向最近一次 `chat()` 创建的RunState；执行过程中它代表当前Run，
 执行完成后它代表上一笔已完成Run。它不是整个Session的累计状态。
@@ -305,6 +311,23 @@ MCP v1 当前用于学习 Agent 如何接入外部能力协议。第一版选择
 - 最终回答校验会识别“已创建/已更新任务”等写入成功声明；没有成功 WRITE Action 时会修正为不能确认写入。
 - 当前尚未实现 UI 页面、Recovery 入口、Planner 自动推进或 Multi-Agent。
 
+## 当前Recovery / Persistence实现
+
+Recovery / Persistence v0 已完成数据模型和本地 store 地基，目标是记录一次 `Agent.chat()` 的关键运行摘要和工具 Action 摘要，用于后续解释“上次停在哪里”，而不是自动重放工具。
+
+- `RunRecord` 表达跨进程可读取的 run 摘要，包含 `running`、`completed`、`partial`、`failed`、`stopped`、`interrupted` 状态、停止原因、关联 `task_id`、用户输入短摘要、最后成功/失败 Action 和 action 数量。
+- `PersistentActionRecord` 表达一个工具 Action 的持久化摘要，包含工具名、`call_id`、参数 hash、参数 preview、`read/write` effect、状态、幂等键和结果/错误短摘要。
+- `RunRecordStore` 使用本地 versioned JSON 文件 `data/recovery/runs.json`，文件不存在时返回空 run 列表，写入后可重新实例化读取。
+- `Agent.chat()` 当前会在新一轮输入前把旧 `running` 记录标记为 `interrupted`，创建新 `RunRecord`，在每个 `ActionRecord` 产生后同步持久化 Action 摘要，并在 run 终态时更新 `completed`、`partial`、`failed` 或 `stopped`。
+- `RunRecordStore` 当前支持 start run、record action、finish run、list recent、latest recoverable，以及把旧 `running` 记录标记为 `interrupted`。
+- `RecoveryContextBuilder` 会在用户有恢复意图（如“继续刚才”“恢复上次”“上次失败在哪”）时读取最近 `interrupted` / `partial` / `failed` run，并注入只读 request-local system context。
+- 如果当前 Task Context 选中了明确任务，且存在同一 `task_id` 的 recoverable run，Recovery Context 也可以注入该任务相关 run；多个候选时注入候选列表并要求用户选择，不自动猜测。
+- System Prompt 已包含 Recovery 行为规则：根据 Recovery Context 回答上次停在哪里、多个候选时要求用户按 `run_id` 选择、不要自动 replay 旧工具、WRITE 仍需当前输入明确授权。
+- 最终回答校验会拦截“已恢复执行”等空口声明；如果本轮没有成功 Tool Observation，会改为说明只能根据 Recovery Context 描述上次状态，不能确认已经恢复执行。
+- Recovery store 只保存必要摘要，不保存完整大 Observation；成功 WRITE 的真实事实来源仍是业务 store 或工具返回的 `ok=true`，幂等存储仍只负责防重复写。
+- Recovery Context 不进入 `Agent.messages`、Memory、Rolling Summary 或 ContextIndex，也不暴露额外 WRITE tools。
+- 当前尚未实现自动 replay；因此即使存在 partial / interrupted run，也只会先提示事实和安全规则，不会自动恢复或重放任何工具。
+
 ### Tool Observation压缩
 
 `compact_tool_output()`在工具成功后，根据字符数、主列表长度和请求数量选择：
@@ -355,7 +378,7 @@ LLM Response不重复记录Request中的instructions、tools和参数，只保�
 - Memory Retrieval目前是关键词、type和tag的确定性规则检索，不使用embedding，不保证理解所有自然语言指代。
 - Semantic Memory目前支持新增、查看和软删除；尚无更新/合并、冲突检测、过期时间、重要性权重和高级检索。
 - 工具按顺序执行，没有依赖图、安全并行和并发写控制。
-- RunState只在内存中，不支持崩溃恢复。
+- Recovery store 已接入 `Agent.chat()` 生命周期并能持久化 run/action 摘要；Recovery Context 已能注入最近可恢复 run 并约束自然语言恢复回答，但尚未实现自动恢复入口或 replay。
 - 幂等存储不是事务型exactly-once。
 - 同步SDK或Python函数不能被强制中断。
 - 尚无全局wall-clock、token或cost预算。

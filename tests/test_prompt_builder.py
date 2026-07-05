@@ -26,6 +26,8 @@ class PromptBuilderTests(unittest.TestCase):
         self.assertEqual(result.loaded_skills, ())
         self.assertTrue(routing.fallback_used)
         self.assertIn("Call read_context_ref", result.instructions)
+        self.assertIn("Recovery behavior", result.instructions)
+        self.assertIn("Do not replay old tool calls automatically", result.instructions)
 
     def test_finance_skill_adds_domain_ref_guidance(self) -> None:
         routing = route_skills("列出所有消费明细", self.skills)

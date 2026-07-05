@@ -1,6 +1,11 @@
 from dataclasses import dataclass
 
-from app.prompts.system_prompt import CORE_PROMPT, CONTEXT_REF_PROMPT, TASK_STATE_PROMPT
+from app.prompts.system_prompt import (
+    CONTEXT_REF_PROMPT,
+    CORE_PROMPT,
+    RECOVERY_PROMPT,
+    TASK_STATE_PROMPT,
+)
 from app.skills.skill_loader import SkillMetadata, load_skill
 
 
@@ -36,6 +41,7 @@ def build_system_prompt(
         CORE_PROMPT,
         CONTEXT_REF_PROMPT,
         TASK_STATE_PROMPT,
+        RECOVERY_PROMPT,
         _skill_catalog(available_skills),
     ]
     loaded_skill_names: list[str] = []

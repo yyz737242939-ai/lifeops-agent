@@ -7,6 +7,7 @@ from app.runtime.run_state import RunState
 from app.runtime.run_state import ActionRecord, ActionStatus
 from app.runtime.write_policy import (
     authorized_write_tools,
+    has_recovery_execution_claim,
     has_write_success_claim,
     requires_bulk_delete_confirmation,
 )
@@ -126,6 +127,18 @@ class WritePolicyTests(unittest.TestCase):
         self.assertFalse(has_write_success_claim("抱歉，无法记录这笔消费。"))
         self.assertFalse(
             has_write_success_claim("只有成功的 WRITE action 才能证明真的保存了。")
+        )
+
+    def test_recovery_execution_claim_detection_ignores_safety_explanation(self) -> None:
+        self.assertTrue(has_recovery_execution_claim("我已恢复执行上次任务。"))
+        self.assertTrue(has_recovery_execution_claim("Recovery 已完成。"))
+        self.assertFalse(
+            has_recovery_execution_claim(
+                "本轮没有成功的 Tool Observation，因此不能确认已经恢复执行。"
+            )
+        )
+        self.assertFalse(
+            has_recovery_execution_claim("我可以说明上次停在哪里，但不会自动 replay。")
         )
 
     @patch("app.agents.agent.llm_io")

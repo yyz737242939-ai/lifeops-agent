@@ -17,12 +17,42 @@
 - Skill References、受控News Source和只读News Helper，用于Hugging Face AI简报。
 - MCP v1：Mock Package Tracking Server、Agent侧Adapter、全局READ Tool Bridge和自然语言Agent闭环。
 - 本地产品 UI：Dashboard、Todo、Wellbeing、Finance、Activity、Memory 和 Ask LifeOps 操作入口。
+- Interaction / Safety State：高风险操作 pending confirmation、确认/取消/修改/过期生命周期。
+- Task State v1：长期任务、步骤、blocker、note、Task Context 和自然语言Agent闭环。
+- Recovery / Persistence v0：RunRecord、Action持久化、Recovery Context 和恢复回答保护。
 - Tool Observation的inline、summary和Context Ref压缩。
 - 当前输入写授权、批量删除确认和最终写入声明校验。
 - Event、LLM I/O、Application三通道日志及本地Viewer。
-- 194项自动化回归测试。
+- 294项自动化回归测试。
 
-## [Milestone 1.3.1] - 2026-07-02
+## [Milestone 1.2.2] - 2026-07-05
+
+### Added
+
+- 新增 Interaction / Safety State v1：危险批量Todo删除、删除全部/多条/含糊Memory删除会先创建 pending confirmation，不直接暴露危险写工具。
+- 新增 `InteractionState`、`PendingConfirmation`、风险等级、确认/取消/修改/过期生命周期，以及 Agent 级自然语言确认闭环。
+- 新增 Task State v1：`TaskItem`、`TaskStep`、`TaskBlocker`、`TaskNote` 数据模型和 `data/tasks/tasks.json` versioned JSON `TaskStore`。
+- 新增 Task tools：`create_task`、`list_tasks`、`get_task`、`update_task_status`、`add_task_step`、`update_task_step`、`set_current_task_step`、`add_task_note`、`add_task_blocker`、`resolve_task_blocker`。
+- 新增 Task Context：在 `ContextEngine.assemble()` 之后按任务id、当前/上次任务cue和关键词选择相关任务，作为只读 request-local system context 注入。
+- 新增 Recovery / Persistence v0：`RunRecord`、`PersistentActionRecord`、`RunRecordStore` 和 `data/recovery/runs.json` versioned JSON持久化。
+- `Agent.chat()` 接入 Recovery persistence：新一轮输入前标记旧 `running` run 为 `interrupted`，run开始写入 `RunRecord`，每个 `ActionRecord` 后写入持久化Action摘要，终态写入 `completed` / `partial` / `failed` / `stopped`。
+- 新增 `RecoveryContextBuilder`：用户询问“继续刚才/恢复上次/上次失败在哪”时，注入最近 `interrupted` / `partial` / `failed` run 的只读恢复上下文。
+- 新增 Recovery 行为规则和最终回答保护：没有本轮成功 Tool Observation 时，模型不能声称“已恢复执行”。
+- 新增 `.gitignore` 对 `data/**/*.json` 的忽略，避免 `data/recovery/runs.json` 等本地运行数据进入版本控制。
+
+### Changed
+
+- System Prompt 增加 Task State 和 Recovery 行为规则：查看/恢复任务是 READ，不等于授权写入；恢复上下文只解释上次状态，不自动 replay 工具。
+- Capability 继续默认隐藏 WRITE tools；Task WRITE 和恢复后的 WRITE 都必须来自当前用户输入明确授权。
+- `PROJECT_CONTEXT.md` 和 `LEARNING_PROGRESS.md` 更新为 Safety State、Task State 和 Recovery / Persistence v0 已完成核心闭环。
+
+### Fixed
+
+- 防止“继续上次任务”被误解为授权修改 Task State 或执行危险动作。
+- 防止模型只凭 Recovery Context 声称已经恢复执行；真实恢复执行仍需本轮成功 Tool Observation。
+- 防止 partial / interrupted run 被自动 replay；恢复后高风险或不确定 Action 仍需重新走当前输入授权和 Safety State。
+
+## [Milestone 1.2.1] - 2026-07-02
 
 ### Added
 
@@ -36,23 +66,6 @@
 - 新增 Memory UI，支持查看 active Semantic Memory、按 type/tag 过滤和软删除；不提供绕过授权语义的自由保存 Memory 表单。
 - 新增 Ask LifeOps 面板，通过现有 `Agent.chat()` 提供自然语言交互，并展示本次 RunState、工具 Action 和 WRITE Action 摘要。
 - 新增产品 UI 回归测试 `tests/test_product_ui.py`，覆盖产品 API、domain 写入/查询、预算、Memory 软删除、Agent 面板协议和前端支撑边界。
-
-### Changed
-
-- `PROJECT_CONTEXT.md` 增加产品 UI 入口、模块职责、功能范围和边界说明。
-- Ask LifeOps 复用服务进程内 Agent 实例，在当前 UI 服务生命周期内保持对话连续性；重启后清空对话内存状态，业务数据仍由 domain JSON 持久化。
-- 产品 UI 明确区分结构化表单写入和 Agent 对话：表单直接调用 domain 函数，Ask LifeOps 仍经过现有 Runtime、Capability 和写入授权规则。
-- 当前产品 UI 暂不提前实现 Interaction/Safety State 或 Task State 页面，等待后端 Runtime 状态成为事实源后再接入。
-
-### Fixed
-
-- 避免把产品 UI 混入日志查看器：`app/log_viewer/*` 继续只作为开发观察工具，产品 UI 独立演进。
-- 避免前端凭 assistant 文本判断写入事实：Ask LifeOps 面板展示 Runtime Action 摘要，真实写入仍以成功 WRITE Action 或结构化表单提交为准。
-
-## [Milestone 1.3] - 2026-07-02
-
-### Added
-
 - 新增 News Skill Reference 机制：Skill 可以声明只读 Markdown reference，Runtime 只允许读取当前 Skill 声明过的文件，并拒绝路径穿越、未声明 reference 和非 Markdown 文件。
 - 新增 Hugging Face News Source Manifest：通过 `source_id` 读取白名单来源，避免模型传入任意 URL。
 - 新增 `fetch_news_source` 和 `run_news_helper` 只读工具，支持 Hugging Face Papers / Blog 简报的受控来源读取、HTML解析、排序和去重。
@@ -64,6 +77,10 @@
 
 ### Changed
 
+- `PROJECT_CONTEXT.md` 增加产品 UI 入口、模块职责、功能范围和边界说明。
+- Ask LifeOps 复用服务进程内 Agent 实例，在当前 UI 服务生命周期内保持对话连续性；重启后清空对话内存状态，业务数据仍由 domain JSON 持久化。
+- 产品 UI 明确区分结构化表单写入和 Agent 对话：表单直接调用 domain 函数，Ask LifeOps 仍经过现有 Runtime、Capability 和写入授权规则。
+- 当前产品 UI 暂不提前实现 Interaction/Safety State 或 Task State 页面，等待后端 Runtime 状态成为事实源后再接入。
 - 当前学习阶段从 Skill References / Memory 之后推进到 MCP v1，并在 MCP v1 完成后准备进入 Interaction / Safety State。
 - Package Tracking MCP 第一版明确不属于 Todo、Finance、Daily Log 或 Activity domain，也不新增 Skill；它作为外部只读能力接入层存在。
 - 全局 common capability 增加三个 MCP READ tools；它们默认可见，但仍经过 Runtime capability 和 executor 二次边界。
@@ -71,6 +88,8 @@
 
 ### Fixed
 
+- 避免把产品 UI 混入日志查看器：`app/log_viewer/*` 继续只作为开发观察工具，产品 UI 独立演进。
+- 避免前端凭 assistant 文本判断写入事实：Ask LifeOps 面板展示 Runtime Action 摘要，真实写入仍以成功 WRITE Action 或结构化表单提交为准。
 - 明确并测试 MCP package not found 不会被模型当作成功查询；Runtime 保留结构化 `package_not_found` 失败结果。
 - 明确 MCP 查询结果不会写入 Memory 或内部业务数据，保持外部 Tool Observation 与长期状态的边界。
 

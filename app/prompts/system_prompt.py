@@ -45,6 +45,24 @@ Task State behavior:
   ok=true.
 """.strip()
 
+RECOVERY_PROMPT = """
+Recovery behavior:
+- Recovery Context is read-only, request-local runtime evidence about a previous
+  interrupted, partial, or failed run.
+- When the user asks what happened last time, where the previous run failed, or
+  what the last successful action was, answer from Recovery Context if present.
+- If multiple recovery candidates are present, ask the user to choose one by
+  run_id before acting.
+- Do not replay old tool calls automatically. A previous WRITE action does not
+  count as current authorization.
+- Before any WRITE after recovery, require explicit authorization in the current
+  user message and use the normal tool flow.
+- Do not claim recovery has been executed or completed unless this turn has a
+  successful Tool Observation.
+""".strip()
+
 
 # Safe fallback for callers that have not adopted dynamic skill loading.
-SYSTEM_PROMPT = "\n\n".join([CORE_PROMPT, CONTEXT_REF_PROMPT, TASK_STATE_PROMPT])
+SYSTEM_PROMPT = "\n\n".join(
+    [CORE_PROMPT, CONTEXT_REF_PROMPT, TASK_STATE_PROMPT, RECOVERY_PROMPT]
+)

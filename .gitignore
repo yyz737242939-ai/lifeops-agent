@@ -209,6 +209,7 @@ tempCodeRunnerFile.py
 
 # Local app state
 data/*.json
+data/**/*.json
 
 # PyPI configuration file
 .pypirc

@@ -215,3 +215,23 @@ def has_write_success_claim(answer: str) -> bool:
         r"(?:successfully\s+)?(?:added|recorded|saved|updated|deleted|set)\b",
     )
     return any(re.search(pattern, lowered, re.IGNORECASE) for pattern in patterns)
+
+
+def has_recovery_execution_claim(answer: str) -> bool:
+    """Detect claims that a previous run was resumed or recovery executed."""
+    lowered = answer.lower()
+    negative_or_explanatory = (
+        r"(?:不能|无法|没有|未).{0,20}(?:恢复|继续).{0,12}(?:执行|运行|操作)",
+        r"(?:恢复|继续).{0,12}(?:执行|运行|操作).{0,20}(?:不能|无法|不等于)",
+        r"cannot .{0,20}(?:resume|recover|continue|execute)",
+        r"(?:did not|not).{0,20}(?:resume|recover|continue|execute)",
+    )
+    if any(re.search(pattern, lowered, re.IGNORECASE) for pattern in negative_or_explanatory):
+        return False
+    patterns = (
+        r"已(?:经)?(?:为你)?(?:恢复|继续).{0,12}(?:执行|运行|操作)",
+        r"(?:恢复|继续).{0,12}(?:执行|运行|操作).{0,12}(?:完成|成功)",
+        r"(?:recovery|恢复).{0,12}(?:完成|成功)",
+        r"(?:resumed|recovered|continued).{0,20}(?:run|execution|operation|task)",
+    )
+    return any(re.search(pattern, lowered, re.IGNORECASE) for pattern in patterns)

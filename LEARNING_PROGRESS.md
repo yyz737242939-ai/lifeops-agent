@@ -189,6 +189,14 @@ System Instructions
 
 后续需要单独制定 Persistence / Recovery 实施计划；不要把 Recovery 提前混进 Task State v1 的收尾补丁。
 
+当前已完成 Recovery / Persistence v0 的核心地基：
+
+- `RunRecord` / `PersistentActionRecord` 记录跨进程 run 摘要和工具 Action 摘要。
+- `RunRecordStore` 是 Recovery 的本地持久化访问层，负责 versioned JSON 读写、run/action 更新和 stale running -> interrupted 推断。
+- `Agent.chat()` 已接入 run 生命周期持久化：开始写 run、Action 后写摘要、终态写 completed / partial / failed / stopped。
+- `Recovery Context` 是 request-local 只读输入层，用来提示最近 `interrupted` / `partial` / `failed` run 停在哪里；它不进入 `Agent.messages`、Memory 或 Rolling Summary，也不授权 WRITE，不自动 replay 工具。
+- Recovery 行为闭环的重点是“解释和保护”：系统 prompt 要求根据 Recovery Context 回答上次状态、多个候选要求用户选择、旧 WRITE 不等于当前授权；最终回答校验会阻止没有本轮成功 Tool Observation 的“已恢复执行”声明。
+
 ## 后续路线
 
 1. Persistence / Recovery：崩溃恢复、运行中状态持久化和可恢复执行边界。
