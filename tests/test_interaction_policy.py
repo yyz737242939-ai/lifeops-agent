@@ -45,6 +45,12 @@ class PendingReplyPolicyTests(unittest.TestCase):
         self.assertEqual(result.intent, PendingReplyIntent.ISOLATED_CONFIRM)
         self.assertIsNone(result.pending_id)
 
+    def test_continue_without_pending_is_not_treated_as_confirmation(self) -> None:
+        result = classify_reply_to_pending("继续", None)
+
+        self.assertEqual(result.intent, PendingReplyIntent.UNRELATED)
+        self.assertIsNone(result.pending_id)
+
     def test_unrelated_input_is_not_treated_as_confirmation(self) -> None:
         result = classify_reply_to_pending("今天天气怎么样？", _pending())
 

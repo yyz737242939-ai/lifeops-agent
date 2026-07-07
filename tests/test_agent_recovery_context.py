@@ -97,6 +97,49 @@ class AgentRecoveryContextTests(unittest.TestCase):
     @patch("app.agents.agent.llm_io")
     @patch("app.agents.agent.events")
     @patch("app.agents.agent.client.responses.create")
+    def test_recovery_plan_ids_do_not_restore_transient_active_plan(
+        self,
+        create_response,
+        _events,
+        _llm_io,
+    ) -> None:
+        create_response.return_value = SimpleNamespace(
+            output=[],
+            output_text="上次停在 plan_step_1，需要重新确认下一步。",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            recovery_store = RunRecordStore(Path(directory) / "runs.json")
+            state = RunState(run_id="run-plan-failed")
+            state.plan_id = "plan-1"
+            state.plan_step_id = "plan_step_1"
+            recovery_store.start_run(state, user_input_summary="Failed plan step")
+            state.fail(StopReason.LLM_REQUEST_FAILED)
+            recovery_store.finish_run(state)
+            agent = Agent(recovery_store=recovery_store)
+            agent.profile_loader = ProfileLoader(Path(directory) / "missing_profile.md")
+            agent.memory_retriever = MemoryRetriever(
+                SemanticMemoryStore(Path(directory) / "semantic_memories.json")
+            )
+
+            answer = agent.chat("继续刚才")
+
+        self.assertIn("plan_step_1", answer)
+        self.assertIsNone(agent.planning_state.active_plan)
+        self.assertIsNone(agent.planning_state.pending_plan)
+        self.assertEqual(create_response.call_count, 1)
+        sent_input = create_response.call_args.kwargs["input"]
+        recovery_messages = [
+            message
+            for message in sent_input
+            if message["role"] == "system"
+            and "Recent recovery context" in message["content"]
+        ]
+        self.assertEqual(len(recovery_messages), 1)
+        self.assertIn("plan_id: plan-1", recovery_messages[0]["content"])
+
+    @patch("app.agents.agent.llm_io")
+    @patch("app.agents.agent.events")
+    @patch("app.agents.agent.client.responses.create")
     def test_model_only_recovery_execution_claim_is_corrected(
         self,
         create_response,

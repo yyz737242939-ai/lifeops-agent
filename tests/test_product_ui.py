@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from datetime import date
 from http import HTTPStatus
 from pathlib import Path
 from unittest.mock import patch
@@ -124,6 +125,7 @@ class ProductUiTests(unittest.TestCase):
         self.assertEqual(payload["wellbeing"]["logs"][0]["log_date"], "2026-07-02")
 
     def test_filters_finance_and_checks_budget(self) -> None:
+        today = date.today().isoformat()
         with self._patched_data_files():
             handle_api_request(
                 "POST",
@@ -132,7 +134,7 @@ class ProductUiTests(unittest.TestCase):
                     "amount": 12.5,
                     "category": "food",
                     "description": "Lunch",
-                    "spent_date": "2026-07-02",
+                    "spent_date": today,
                 },
             )
             handle_api_request(
@@ -148,7 +150,7 @@ class ProductUiTests(unittest.TestCase):
             filtered, filter_status = handle_api_request(
                 "POST",
                 "/api/finance/query",
-                {"category": "food", "start_date": "2026-07-01", "end_date": "2026-07-03"},
+                {"category": "food", "start_date": today, "end_date": today},
             )
             budget, budget_status = handle_api_request(
                 "POST",

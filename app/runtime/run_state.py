@@ -126,6 +126,8 @@ class RunState:
     tool_observation_signature_counts: dict[str, int] = field(default_factory=dict)
     recent_tool_call_signatures: list[str] = field(default_factory=list)
     chat_cancellation_requested: bool = False
+    plan_id: str | None = None
+    plan_step_id: str | None = None
 
     @property
     def completed_action_records(self) -> list[ActionRecord]:
@@ -265,6 +267,8 @@ class RunState:
                 self.chat_retry_counts_by_operation
             ),
             "chat_cancellation_requested": self.chat_cancellation_requested,
+            "plan_id": self.plan_id,
+            "plan_step_id": self.plan_step_id,
         }
         if include_actions:
             result["action_records"] = [

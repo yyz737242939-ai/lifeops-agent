@@ -15,11 +15,11 @@ Agent Loop -> Business Tools -> Skill -> Capability -> Write Safety
 -> MCP -> Interaction / Safety State -> Task State v1
 ```
 
-当前下一阶段调整为：
+当前阶段调整为：
 
-> Persistence / Recovery。
+> Plan and Execute v0。
 
-暂不进入 Multi-Agent、复杂 Planner、向量数据库、自动 Memory 提取或真实外部账号/OAuth。
+暂不进入 Multi-Agent、向量数据库、自动 Memory 提取或真实外部账号/OAuth。
 
 ## 已学习模块
 
@@ -179,15 +179,13 @@ System Instructions
 | Conversation Context | ContextEngine | 对话历史工作窗口 |
 | Tool Schemas | Capability Builder | 本轮可见工具能力 |
 
-## 下一阶段：Persistence / Recovery
+## 已完成阶段：Persistence / Recovery
 
 目标：
 
 > 在已有 Tool、Capability、Context、Memory、MCP、Interaction/Safety State 和 Task State 边界之上，学习崩溃恢复、运行中状态持久化和可恢复执行边界。
 
 为什么现在做：Task State 已经能保存长期任务现场，下一步可以学习 Runtime 中断、失败、重启后如何判断“做到哪里、什么可以继续、什么必须重新确认”。这会把 Task State、ActionRecord、幂等记录、Write Safety 和 Context 恢复边界串起来。
-
-后续需要单独制定 Persistence / Recovery 实施计划；不要把 Recovery 提前混进 Task State v1 的收尾补丁。
 
 当前已完成 Recovery / Persistence v0 的核心地基：
 
@@ -197,12 +195,34 @@ System Instructions
 - `Recovery Context` 是 request-local 只读输入层，用来提示最近 `interrupted` / `partial` / `failed` run 停在哪里；它不进入 `Agent.messages`、Memory 或 Rolling Summary，也不授权 WRITE，不自动 replay 工具。
 - Recovery 行为闭环的重点是“解释和保护”：系统 prompt 要求根据 Recovery Context 回答上次状态、多个候选要求用户选择、旧 WRITE 不等于当前授权；最终回答校验会阻止没有本轮成功 Tool Observation 的“已恢复执行”声明。
 
+## 当前阶段：Plan and Execute v0
+
+目标：
+
+> 在已有 Tool、Capability、Write Safety、Interaction / Safety State、Task State、RunState、ActionRecord、RunRecord 和 Recovery Context 边界之上，新增第一版真实的 Plan and Execute 闭环。
+
+当前已完成 Step 1-6：
+
+- `PlanRun` / `PlanStep` 表达当前 `Agent` 实例生命周期内的 transient plan，不进入 Memory、Conversation Summary、ContextIndex 或 Task State。
+- `PlanningState` 管理 pending / active plan，支持创建、确认、取消、过期、supersede 和当前 step 状态推进。
+- PlanRun 自动推进当前 step；所有 step 终态后 plan 变为 `completed`，blocked / cancelled / superseded / expired 等终态不再继续变更。
+- `PlannerAgent` 已有独立 prompt、JSON 输出契约和 parser，可把 LLM 输出转换为 `plan` / `need_user` / `unsafe_or_needs_confirmation` / `cannot_plan`，并拒绝空 steps、非 JSON、tool call arguments 和 WRITE 授权字段。
+- `RequestLocalContextBuilder` 已从 `Agent._request_llm()` 抽出 request-local context 注入和诊断组装，保持 ContextEngine、Profile、Semantic Memory、Task Context、Recovery Context 的顺序不变。
+- `ActionRecorder` 已收口成功工具结果、非法参数和 skipped calls 的 ActionRecord / RecoveryRecord / Tool Observation 记录路径。
+- `ExecutorAgent` 已有薄包装，当前代理现有 `Agent._run_agent_loop()` 执行一个 confirmed plan step，尚未迁移执行循环。
+- `PlanningOrchestrator` 已接入 deterministic route：simple request 继续 direct execute；complex request 只生成 pending plan preview；pending plan 可 confirm / modify / cancel；active plan 可继续执行当前 step；ambiguous request 会先澄清；risky request 仍优先走 Interaction / Safety State。
+- `Agent.chat()` 已接入 plan preview / confirm / modify / cancel / continue；确认 pending plan 或继续 active plan 时，每轮最多执行一个 step，成功后推进到下一步，失败后不继续执行后续 step。
+- step 执行时 `RunState` / `RunRecord` 会记录 `plan_id` 和 `plan_step_id`，用于后续 Recovery 解释停点；Planner 生成的 step 文本不会被当成本轮 WRITE 授权，Executor 仍必须经过 Capability 和 Write Safety。
+- failed / blocked step 会触发 revised plan preview，重新进入 pending confirmation；replan 不自动执行，也不把旧失败 step 当作成功。
+- System Prompt 已加入 Plan and Execute 行为规则；Recovery Context 会注入 `plan_id` / `plan_step_id` 作为只读停点证据，但不会恢复未持久化的 transient active plan，也不会自动 replay。
+- 最小验收测试矩阵已补齐 direct execute、plan preview、confirm / cancel / modify、active cancel、single-step execution、failed step replan、Planner fallback、Safety pending、Write boundary 和 Recovery association。
+
 ## 后续路线
 
-1. Persistence / Recovery：崩溃恢复、运行中状态持久化和可恢复执行边界。
+1. Plan and Execute v0：阶段总结和是否进入里程碑关闭由用户决定；暂不写 `CHANGELOG.md`。
 2. Policy / Permission Layer：把授权、风险等级和可执行能力进一步拆清楚。
 3. 高级 Memory Retrieval：关键词归一化、更新/合并、冲突检测、重要性、过期时间，之后再考虑 embedding。
-4. Planner / Multi-Agent：等状态、上下文、Memory、工具和安全边界稳定后再推进。
+4. Multi-Agent：等状态、上下文、Memory、工具和安全边界稳定后再推进。
 
 继续暂缓：向量数据库、自动记忆提取、任意 Shell、复杂 Planner、Multi-Agent、大规模 LLM-as-judge。
 
@@ -213,9 +233,9 @@ Skill References（已完成）
 -> MCP（已完成）
 -> Interaction / Safety State（已完成 v1）
 -> Task State（已完成 v1）
--> Persistence / Recovery（当前阶段）
+-> Persistence / Recovery（已完成 v0）
 -> Policy / Permission Layer
--> Plan and Execute
+-> Plan and Execute（当前阶段）
 -> LangGraph / LangChain 对照整合
 -> Advanced Memory
 -> Multi-Agent
@@ -228,7 +248,7 @@ Skill References（已完成）
 
 ## 学习以及面试准备
 初级 Agent Engineer：
-Agent Loop
+-> Agent Loop
 -> Tool
 -> Capability
 -> Write Safety
@@ -238,7 +258,7 @@ Agent Loop
 -> Memory v1
 
 中级 Agent Engineer：
-MCP
+-> MCP
 -> Safety State
 -> Task State
 -> Recovery
@@ -246,14 +266,14 @@ MCP
 -> LangGraph / LangChain 对照
 
 强中级 / 准高级：
-Human-in-the-loop
+-> Human-in-the-loop
 -> Scheduling / Background Agent
 -> Eval Harness
 -> Inspector / Debugger
 -> MCP Security
 
 高级 Agent / Agent Platform Engineer：
-Cost / Token / Latency Budget
+-> Cost / Token / Latency Budget
 -> Async / Concurrency Runtime
 -> Advanced Memory
 -> RAG / Knowledge System

@@ -54,7 +54,9 @@ uv run python -m unittest discover -s tests -v
 |---|---|
 | `main.py` | CLI 入口和多轮用户输入循环 |
 | `app/agents/agent.py` | 单次 Chat 的准备、Interaction Safety接入、Agent Loop、LLM/Tool 编排和最终回答校验 |
-| `app/runtime/run_state.py` | 单次 `Agent.chat()` 的 RunState、ActionRecord、预算与终态 |
+| `app/agents/request_context.py` | Request-local context builder，统一 ContextEngine、Profile、Semantic Memory、Task Context、Recovery Context 的注入顺序和诊断报告 |
+| `app/agents/action_recorder.py` | Action recording helper，统一 Tool ActionRecord 创建、RecoveryRecord 同步和 Tool Observation 追加 |
+| `app/runtime/run_state.py` | 单次 `Agent.chat()` 的 RunState、ActionRecord、预算、终态和可选 plan / step 关联 |
 | `app/runtime/interaction_state.py` | 跨轮临时 pending confirmation 状态，支持创建、确认、取消、过期、supersede 和一次性消费 |
 | `app/runtime/interaction_policy.py` | 确定性识别 pending 回复意图和第一版高风险操作 |
 | `app/runtime/errors.py` | LLM/Tool 错误分类与结构化错误 |
@@ -76,11 +78,17 @@ uv run python -m unittest discover -s tests -v
 | `app/tasks/task_types.py` | Task State v1 数据模型，表达跨 Chat 长期任务、步骤、blocker、note 和状态生命周期 |
 | `app/tasks/task_store.py` | `data/tasks/tasks.json` 的 versioned JSON TaskStore，支持任务、步骤、note 和 blocker 持久化 |
 | `app/tasks/task_context.py` | 从 TaskStore 选择相关任务并格式化成本轮只读 Task Context，不写入对话历史或 Memory |
+| `app/planning/plan_types.py` | Plan and Execute v0 的 transient `PlanRun` / `PlanStep` 数据模型和状态生命周期 |
+| `app/planning/planning_state.py` | 当前 `Agent` 实例内的 pending / active plan 状态机，支持创建、确认、取消、过期、supersede 和当前 step 推进 |
+| `app/planning/planner_prompt.py` | Planner Agent 的只规划不执行指令和 JSON 输出契约 |
+| `app/planning/planner_agent.py` | Planner Agent 独立模块，解析结构化 plan / need_user / unsafe / cannot_plan 输出，并拒绝 tool arguments 与 WRITE 授权 |
+| `app/planning/orchestrator.py` | Plan and Execute v0 的 Main Orchestrator deterministic route，支持 direct execute、plan preview、pending plan confirm / modify / cancel、active plan continue、clarify 和 safety pending |
+| `app/planning/executor_agent.py` | ExecutorAgent 薄包装，当前代理现有 `Agent._run_agent_loop()` 执行一个 confirmed plan step |
 | `app/tools/tool.py` | 注册业务、Memory、MCP 和 Task 工具；Task READ 工具可查看任务，Task WRITE 工具通过 TaskStore 写入长期任务状态 |
 | `app/runtime/idempotency_store.py` | 写工具成功结果的幂等存储与重放 |
 | `app/runtime/recovery_types.py` | Recovery / Persistence v0 数据模型，定义跨进程 `RunRecord`、`PersistentActionRecord` 和恢复状态 |
 | `app/runtime/recovery_store.py` | `data/recovery/runs.json` 的 versioned JSON RunRecordStore，记录 run/action 摘要并可把 stale running run 标记为 interrupted |
-| `app/runtime/recovery_context.py` | 从 RunRecordStore 选择最近可恢复 run 并格式化成本轮只读 Recovery Context |
+| `app/runtime/recovery_context.py` | 从 RunRecordStore 选择最近可恢复 run 并格式化成本轮只读 Recovery Context，包含可选 plan / step 停点说明 |
 | `app/mcp/*` | MCP v1 Agent侧Adapter，负责连接本地MCP Server、发现工具、调用工具和规范化协议错误 |
 | `app/skills/skill_router.py` | 当前输入的确定性 Skill 路由 |
 | `app/skills/skill_state.py` | Skill 继承、替换、清理和 Ref-only 状态 |
@@ -379,6 +387,9 @@ LLM Response不重复记录Request中的instructions、tools和参数，只保�
 - Semantic Memory目前支持新增、查看和软删除；尚无更新/合并、冲突检测、过期时间、重要性权重和高级检索。
 - 工具按顺序执行，没有依赖图、安全并行和并发写控制。
 - Recovery store 已接入 `Agent.chat()` 生命周期并能持久化 run/action 摘要；Recovery Context 已能注入最近可恢复 run 并约束自然语言恢复回答，但尚未实现自动恢复入口或 replay。
+- Plan and Execute v0 目前已有 transient planning 类型、`PlanningState` 状态机、独立 Planner Agent 解析边界、request-local context builder、ActionRecorder、ExecutorAgent 薄包装、Main Orchestrator deterministic route、单步执行接入和失败后 replan preview；`Agent.chat()` 已接入 plan preview / confirm / modify / cancel / continue，确认或继续 active plan 时每轮最多执行一个 step，并把 `plan_id` / `plan_step_id` 写入 RunState / RunRecord。Planner 生成的 step 文本不作为 WRITE 授权来源；失败或 blocked step 可以生成新的 pending plan，但仍需用户确认后才执行。
+- Recovery Context 可以展示上次 run 关联的 `plan_id` / `plan_step_id` 用于解释停点；由于 v0 没有持久化 PlanStore，这些字段不会恢复 transient active plan，也不会授权 replay。
+- Plan and Execute v0 的最小验收测试已覆盖 direct execute、plan preview、confirm / cancel / modify、active cancel、single-step execution、failed step replan、Planner fallback、Safety pending、Write boundary 和 Recovery association。
 - 幂等存储不是事务型exactly-once。
 - 同步SDK或Python函数不能被强制中断。
 - 尚无全局wall-clock、token或cost预算。

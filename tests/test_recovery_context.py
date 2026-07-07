@@ -14,6 +14,8 @@ class RecoveryContextBuilderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             store = RunRecordStore(Path(directory) / "runs.json")
             state = RunState(run_id="run-partial")
+            state.plan_id = "plan-1"
+            state.plan_step_id = "step-1"
             store.start_run(state, user_input_summary="Continue Recovery")
             store.record_action(
                 state.run_id,
@@ -39,7 +41,13 @@ class RecoveryContextBuilderTests(unittest.TestCase):
         assert message is not None
         self.assertIn("Recent recovery context", message["content"])
         self.assertIn("run-partial", message["content"])
+        self.assertIn("plan_id: plan-1", message["content"])
+        self.assertIn("plan_step_id: step-1", message["content"])
+        self.assertIn("do not restore a transient active plan", message["content"])
         self.assertIn("Do not replay tools automatically", message["content"])
+        report = result.report(message)
+        self.assertEqual(report["recovery_context_plan_ids"], ["plan-1"])
+        self.assertEqual(report["recovery_context_plan_step_ids"], ["step-1"])
 
     def test_multiple_recoverable_runs_are_ambiguous(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

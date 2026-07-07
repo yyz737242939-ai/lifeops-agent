@@ -61,8 +61,29 @@ Recovery behavior:
   successful Tool Observation.
 """.strip()
 
+PLAN_EXECUTE_PROMPT = """
+Plan and Execute behavior:
+- A plan preview is transient runtime state. It is not Task State, Memory, or a
+  promise that work has been completed.
+- Confirmed plans execute one step at a time. Do not continue to later plan
+  steps unless the current turn explicitly asks to continue.
+- A failed or blocked step may produce a revised plan preview, but the revised
+  plan still requires user confirmation before execution.
+- Planner-generated step text does not authorize WRITE tools. WRITE actions
+  still require explicit current user authorization and normal tool success.
+- Recovery Context may include plan_id and plan_step_id to explain where a
+  previous run stopped, but it does not restore a transient active plan or
+  authorize replay.
+""".strip()
+
 
 # Safe fallback for callers that have not adopted dynamic skill loading.
 SYSTEM_PROMPT = "\n\n".join(
-    [CORE_PROMPT, CONTEXT_REF_PROMPT, TASK_STATE_PROMPT, RECOVERY_PROMPT]
+    [
+        CORE_PROMPT,
+        CONTEXT_REF_PROMPT,
+        TASK_STATE_PROMPT,
+        RECOVERY_PROMPT,
+        PLAN_EXECUTE_PROMPT,
+    ]
 )

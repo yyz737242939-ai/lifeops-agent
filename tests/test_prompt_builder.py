@@ -28,6 +28,8 @@ class PromptBuilderTests(unittest.TestCase):
         self.assertIn("Call read_context_ref", result.instructions)
         self.assertIn("Recovery behavior", result.instructions)
         self.assertIn("Do not replay old tool calls automatically", result.instructions)
+        self.assertIn("Plan and Execute behavior", result.instructions)
+        self.assertIn("Recovery Context may include plan_id and plan_step_id", result.instructions)
 
     def test_finance_skill_adds_domain_ref_guidance(self) -> None:
         routing = route_skills("列出所有消费明细", self.skills)

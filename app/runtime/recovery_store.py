@@ -45,6 +45,8 @@ class RunRecordStore:
             status=run_state.status.value,
             started_at=now,
             task_id=task_id,
+            plan_id=run_state.plan_id,
+            plan_step_id=run_state.plan_step_id,
             user_input_summary=_summarize_text(user_input_summary),
             created_at=now,
             updated_at=now,
@@ -59,6 +61,8 @@ class RunRecordStore:
         action_record: ActionRecord,
         *,
         tool_effect: RecoveryActionEffect,
+        plan_id: str | None = None,
+        plan_step_id: str | None = None,
     ) -> RunRecord | None:
         runs = self._load()
         run = self._find_run(runs, run_id)
@@ -66,6 +70,10 @@ class RunRecordStore:
             return None
 
         now = now_iso()
+        if plan_id is not None:
+            run.plan_id = plan_id
+        if plan_step_id is not None:
+            run.plan_step_id = plan_step_id
         action = _persistent_action_from_record(
             run_id,
             action_record,
@@ -92,6 +100,8 @@ class RunRecordStore:
         run.status = run_state.status.value
         run.ended_at = now
         run.stop_reason = run_state.stop_reason.value if run_state.stop_reason else None
+        run.plan_id = run_state.plan_id
+        run.plan_step_id = run_state.plan_step_id
         run.action_count = len(run.actions)
         run.updated_at = now
         self._save(runs)

@@ -44,7 +44,7 @@ def classify_reply_to_pending(
     text = _normalize(user_input)
 
     if pending is None or not pending.is_pending:
-        if _has_confirm_cue(text):
+        if _has_isolated_confirm_cue(text):
             return PendingReplyClassification(
                 intent=PendingReplyIntent.ISOLATED_CONFIRM,
                 reason="confirmation_without_active_pending",
@@ -168,6 +168,17 @@ def _has_confirm_cue(text: str) -> bool:
         re.search(
             r"^\s*(确认|确定|是的|对|继续|执行|可以|没问题)\s*[。.!！]*$"
             r"|我确认|继续执行|继续删除|确认删除"
+            r"|\b(?:yes|confirm|confirmed|ok|okay|proceed)\b",
+            text,
+        )
+    )
+
+
+def _has_isolated_confirm_cue(text: str) -> bool:
+    return bool(
+        re.search(
+            r"^\s*(确认|确定|是的|对|可以|没问题)\s*[。.!！]*$"
+            r"|我确认|确认删除"
             r"|\b(?:yes|confirm|confirmed|ok|okay|proceed)\b",
             text,
         )

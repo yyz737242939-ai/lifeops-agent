@@ -87,6 +87,8 @@ class RunRecord(BaseModel):
     ended_at: str | None = None
     stop_reason: str | None = None
     task_id: str | None = None
+    plan_id: str | None = None
+    plan_step_id: str | None = None
     user_input_summary: str
     last_successful_action: PersistentActionRecord | None = None
     last_failed_action: PersistentActionRecord | None = None
@@ -103,7 +105,7 @@ class RunRecord(BaseModel):
             raise ValueError("Run record id and summary cannot be empty")
         return clean_value
 
-    @field_validator("ended_at", "stop_reason", "task_id")
+    @field_validator("ended_at", "stop_reason", "task_id", "plan_id", "plan_step_id")
     @classmethod
     def optional_text_must_be_stripped(cls, value: str | None) -> str | None:
         if value is None:

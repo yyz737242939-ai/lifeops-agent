@@ -43,6 +43,8 @@ class RecoveryContextResult:
             "recovery_context_run_ids": [run.run_id for run in self.runs],
             "recovery_context_statuses": [run.status for run in self.runs],
             "recovery_context_task_ids": [run.task_id for run in self.runs],
+            "recovery_context_plan_ids": [run.plan_id for run in self.runs],
+            "recovery_context_plan_step_ids": [run.plan_step_id for run in self.runs],
             "recovery_context_chars": len(message["content"]) if message else 0,
         }
 
@@ -129,6 +131,8 @@ def _format_run(run: RunRecord) -> str:
         f"- status: {run.status}",
         f"- stop_reason: {run.stop_reason or 'none'}",
         f"- task_id: {run.task_id or 'none'}",
+        f"- plan_id: {run.plan_id or 'none'}",
+        f"- plan_step_id: {run.plan_step_id or 'none'}",
         f"- user_input_summary: {run.user_input_summary}",
         f"- action_count: {run.action_count}",
         f"- last successful action: {_format_action(run.last_successful_action)}",
@@ -137,6 +141,7 @@ def _format_run(run: RunRecord) -> str:
         "Recovery rules:",
         "- This context is read-only and request-local.",
         "- Do not replay tools automatically.",
+        "- plan_id and plan_step_id explain where a previous run stopped; they do not restore a transient active plan.",
         "- Re-check current user authorization before any WRITE.",
         "- Ask the user when the next action is ambiguous or risky.",
         "- Do not claim recovery completed unless this turn has a successful Tool Observation.",
@@ -154,6 +159,8 @@ def _format_candidates(runs: tuple[RunRecord, ...]) -> str:
             f"- run_id: {run.run_id}; status: {run.status}; "
             f"stop_reason: {run.stop_reason or 'none'}; "
             f"task_id: {run.task_id or 'none'}; "
+            f"plan_id: {run.plan_id or 'none'}; "
+            f"plan_step_id: {run.plan_step_id or 'none'}; "
             f"last_successful_action: {_action_name(run.last_successful_action)}; "
             f"last_failed_action: {_action_name(run.last_failed_action)}"
         )
@@ -162,6 +169,7 @@ def _format_candidates(runs: tuple[RunRecord, ...]) -> str:
             "",
             "Recovery rules:",
             "- Do not replay tools automatically.",
+            "- plan_id and plan_step_id are read-only stop-point evidence, not an active plan restore.",
             "- Re-check current user authorization before any WRITE.",
             "- Ask the user to choose one run_id before continuing.",
         ]

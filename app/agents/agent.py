@@ -8,6 +8,8 @@ from app.config import (
     LLM_MODEL,
     LLM_TEMPERATURE,
 )
+from app.agents.action_recorder import ActionRecorder
+from app.agents.request_context import RequestLocalContextBuilder
 from app.observability import app_log, events, llm_io
 from app.prompts.prompt_builder import build_system_prompt
 from app.context.context_engine import ContextEngine
@@ -65,6 +67,11 @@ from app.tools.tool import TOOLS, ToolEffect, call_tool
 from app.utils.json_file import parse_json_object
 from app.utils.llm import client
 from app.utils.serialization import json_safe
+from app.planning.orchestrator import PlanningOrchestrator
+from app.planning.executor_agent import ExecutorAgent, StepExecutionContext
+from app.planning.planner_agent import PlannerAgent
+from app.planning.plan_types import PlanStep
+from app.planning.planning_state import PlanningState
 
 
 DEFAULT_LOOP_LIMITS = LoopLimits()
@@ -202,6 +209,30 @@ def _runtime_stop_answer(run_state: RunState) -> str:
     return reason + "".join(details)
 
 
+def _plan_step_user_input(goal: str, step: PlanStep) -> str:
+    return (
+        "Execute exactly one confirmed plan step.\n"
+        f"Plan goal: {goal}\n"
+        f"Step title: {step.title}\n"
+        f"Step intent: {step.intent}\n"
+        "Do not continue to later plan steps in this turn."
+    )
+
+
+def _plan_step_success_answer(answer: str, *, current_plan: Any) -> str:
+    if current_plan is None:
+        return answer
+    next_step = current_plan.current_step
+    if current_plan.status == "completed":
+        return f"{answer}\n\n计划已完成。"
+    if next_step is None:
+        return answer
+    return (
+        f"{answer}\n\n当前 step 已完成。下一步是：{next_step.title}。"
+        "请回复“继续”或明确确认后再执行下一步。"
+    )
+
+
 def _error_json(
     action: str,
     error_type: ErrorType,
@@ -321,6 +352,7 @@ class Agent:
         *,
         loop_limits: LoopLimits | None = None,
         recovery_store: RunRecordStore | None = None,
+        planner_agent: PlannerAgent | None = None,
     ) -> None:
         self.messages: list[Any] = []
         self.skills = discover_skills()
@@ -332,8 +364,19 @@ class Agent:
         self.memory_retriever = MemoryRetriever()
         self.task_context_builder = TaskContextBuilder()
         self.interaction_state = InteractionState()
+        self.planning_state = PlanningState()
+        self.planner_agent = planner_agent or PlannerAgent()
+        self.planning_orchestrator = PlanningOrchestrator(
+            planning_state=self.planning_state,
+            planner_agent=self.planner_agent,
+        )
+        self.executor_agent = ExecutorAgent(self)
         self.recovery_store = recovery_store or RunRecordStore()
         self.recovery_context_builder = RecoveryContextBuilder(self.recovery_store)
+        self.action_recorder = ActionRecorder(
+            recovery_store=self.recovery_store,
+            append_tool_output=self._append_tool_output,
+        )
 
     def cancel_current_run(self) -> bool:
         """Request cooperative cancellation at the next runtime checkpoint."""
@@ -411,6 +454,7 @@ class Agent:
 
         pending_before_turn = self.interaction_state.active_pending_confirmation
         self.interaction_state.advance_turn()
+        self.planning_state.advance_turn()
         if (
             pending_before_turn is not None
             and pending_before_turn.status == PendingConfirmationStatus.EXPIRED
@@ -462,7 +506,11 @@ class Agent:
                 run_state,
                 "已作废上一次待确认操作。请重新说明要执行的操作和范围。",
             )
-        if pending_reply.intent == PendingReplyIntent.ISOLATED_CONFIRM:
+        if (
+            pending_reply.intent == PendingReplyIntent.ISOLATED_CONFIRM
+            and self.planning_state.pending_plan is None
+            and self.planning_state.active_plan is None
+        ):
             expired_pending = (
                 self.interaction_state.pending_confirmation
                 if self.interaction_state.pending_confirmation is not None
@@ -498,6 +546,16 @@ class Agent:
                     risky_operation,
                 )
 
+        if confirmed_pending is None:
+            planning_result = self.planning_orchestrator.route(user_input)
+            if planning_result.execute_current_step:
+                return self._execute_active_plan_step(run_state)
+            if planning_result.handled:
+                return self._complete_interaction_only_run(
+                    run_state,
+                    planning_result.answer or "",
+                )
+
         turn = self._prepare_turn(
             user_input,
             run_state,
@@ -516,14 +574,69 @@ class Agent:
                 )
         return answer
 
+    def _execute_active_plan_step(self, run_state: RunState) -> str:
+        active_plan = self.planning_state.active_plan
+        if active_plan is None or active_plan.current_step is None:
+            return self._complete_interaction_only_run(
+                run_state,
+                "计划已确认，但当前没有可执行步骤。",
+            )
+
+        step = active_plan.current_step
+        run_state.plan_id = active_plan.plan_id
+        run_state.plan_step_id = step.step_id
+        step.start()
+        step_input = _plan_step_user_input(active_plan.goal, step)
+        turn = self._prepare_turn(
+            step_input,
+            run_state,
+            authorization_user_input="",
+        )
+        result = self.executor_agent.execute_step(
+            StepExecutionContext(
+                run_state=run_state,
+                turn=turn,
+                plan_id=active_plan.plan_id,
+                plan_step_id=step.step_id,
+            )
+        )
+        if run_state.status == RunStatus.COMPLETED:
+            self.planning_state.mark_current_step_done(
+                last_run_id=run_state.run_id,
+                result_summary=result.answer,
+            )
+            return _plan_step_success_answer(
+                result.answer,
+                current_plan=self.planning_state.active_plan,
+            )
+
+        failed_step = self.planning_state.mark_current_step_failed(result.answer)
+        replan_result = self.planning_orchestrator.replan_after_step_failure(
+            failed_plan=active_plan,
+            failed_step=failed_step,
+            failure_summary=result.answer,
+        )
+        if replan_result.handled and replan_result.answer:
+            return (
+                f"{result.answer}\n\n当前 step 执行失败，已生成修订计划等待确认：\n"
+                f"{replan_result.answer}"
+            )
+        if replan_result.answer:
+            return f"{result.answer}\n\n当前 step 执行失败，暂时无法生成修订计划：{replan_result.answer}"
+        return result.answer
+
     def _prepare_turn(
         self,
         user_input: str,
         run_state: RunState,
         *,
         confirmed_pending: PendingConfirmation | None = None,
+        authorization_user_input: str | None = None,
     ) -> TurnContext:
         """Resolve skills and freeze the prompt/tool boundary for this turn."""
+        write_authorization_input = (
+            user_input if authorization_user_input is None else authorization_user_input
+        )
         routing = route_skills(user_input, self.skills)
         skill_state = resolve_skill_state(
             user_input,
@@ -542,12 +655,15 @@ class Agent:
             self.skills,
             loaded_skills,
         )
-        authorized_writes = _authorized_writes_for_turn(user_input, confirmed_pending)
+        authorized_writes = _authorized_writes_for_turn(
+            write_authorization_input,
+            confirmed_pending,
+        )
         bulk_delete_confirmation_required = (
             confirmed_pending is None
             and (
-                requires_bulk_delete_confirmation(user_input)
-                or detect_high_risk_operation(user_input) is not None
+                requires_bulk_delete_confirmation(write_authorization_input)
+                or detect_high_risk_operation(write_authorization_input) is not None
             )
         )
         capability_result = build_capabilities(
@@ -741,56 +857,19 @@ class Agent:
         user_input: str,
     ) -> Any | None:
         """Call the model with explicit retry accounting and boundary logs."""
-        assembly = self.context_engine.assemble(
-            self.messages,
+        request_context = RequestLocalContextBuilder(
+            context_engine=self.context_engine,
+            profile_loader=self.profile_loader,
+            memory_retriever=self.memory_retriever,
+            task_context_builder=self.task_context_builder,
+            recovery_context_builder=self.recovery_context_builder,
+        ).build(
+            messages=self.messages,
             instructions=instructions,
-            tools=tool_schemas,
+            tool_schemas=tool_schemas,
+            user_input=user_input,
         )
-        profile = self.profile_loader.load()
-        profile_message = profile_context_message(profile)
-        semantic_memories = self.memory_retriever.retrieve(user_input)
-        semantic_message = semantic_memory_context_message(semantic_memories)
-        task_context = self.task_context_builder.build(user_input)
-        task_message = task_context.message()
-        recovery_context = self.recovery_context_builder.build(
-            user_input,
-            task_context=task_context,
-        )
-        recovery_message = recovery_context.message()
-        input_messages = list(assembly.input_messages)
-        if profile_message is not None:
-            input_messages.insert(0, profile_message)
-        if semantic_message is not None:
-            insert_index = 1 if profile_message is not None else 0
-            input_messages.insert(insert_index, semantic_message)
-        if task_message is not None:
-            insert_index = (
-                (1 if profile_message is not None else 0)
-                + (1 if semantic_message is not None else 0)
-            )
-            input_messages.insert(insert_index, task_message)
-        if recovery_message is not None:
-            insert_index = (
-                (1 if profile_message is not None else 0)
-                + (1 if semantic_message is not None else 0)
-                + (1 if task_message is not None else 0)
-            )
-            input_messages.insert(insert_index, recovery_message)
-
-        memory_report = profile_context_report(
-            profile,
-            profile_message,
-            semantic_memories,
-            semantic_message,
-        )
-        task_report = task_context.report(task_message)
-        recovery_report = recovery_context.report(recovery_message)
-        context = _llm_input_diagnostics(input_messages)
-        context["context_engine"] = assembly.report
-        context["memory"] = memory_report
-        context["task_context"] = task_report
-        context["recovery_context"] = recovery_report
-        events.log_llm_requested(run_state, loop_number, context)
+        events.log_llm_requested(run_state, loop_number, request_context.diagnostics)
         for retry_index in range(self.loop_limits.max_llm_retries + 1):
             if run_state.chat_cancellation_requested:
                 run_state.stop(
@@ -810,21 +889,18 @@ class Agent:
                 model=LLM_MODEL,
                 instructions=instructions,
                 tools=tool_schemas,
-                input_messages=input_messages,
+                input_messages=request_context.input_messages,
                 parameters={
                     "temperature": LLM_TEMPERATURE,
                     "max_output_tokens": LLM_MAX_OUTPUT_TOKENS,
-                    "context_engine": assembly.report,
-                    "memory": memory_report,
-                    "task_context": task_report,
-                    "recovery_context": recovery_report,
+                    **request_context.log_parameters(),
                 },
             )
             try:
                 return client.responses.create(
                     model=LLM_MODEL,
                     instructions=instructions,
-                    input=input_messages,
+                    input=request_context.input_messages,
                     tools=list(tool_schemas),
                     temperature=LLM_TEMPERATURE,
                     max_output_tokens=LLM_MAX_OUTPUT_TOKENS,
@@ -1025,49 +1101,15 @@ class Agent:
         execution: ToolExecutionResult,
     ) -> int:
         """Compact a tool result, record its Action, and append its observation."""
-        compacted_result, compaction = compact_tool_output(
-            function_call.name,
-            execution.content,
-            requested_count=_requested_count_from_arguments(arguments),
-        )
-        recorded_result = _history_safe_tool_result(
-            function_call.name,
-            compacted_result,
-        )
-        if recorded_result != compacted_result:
-            compaction = {
-                **compaction,
-                "strategy": "ephemeral_reference",
-                "compacted_chars": len(recorded_result),
-            }
-        action_succeeded = bool(
-            execution.parsed is not None and execution.parsed.get("ok") is True
-        )
-        observation_signature, observation_count = run_state.register_observation(
-            signature,
-            execution.parsed if execution.parsed is not None else execution.content,
-        )
-        action = ActionRecord(
-            call_id=function_call.call_id,
-            tool_name=function_call.name,
+        return self.action_recorder.record_tool_result(
+            run_state=run_state,
+            loop_number=loop_number,
+            function_call=function_call,
             arguments=arguments,
-            status=(
-                ActionStatus.COMPLETED if action_succeeded else ActionStatus.FAILED
-            ),
-            result=recorded_result,
-            error=(execution.error.to_dict() if execution.error else None),
-            tool_call_signature=signature,
-            tool_observation_signature=observation_signature,
-            tool_execution_attempt_count=execution.tool_execution_attempt_count,
+            signature=signature,
             idempotency_key=idempotency_key,
+            execution=execution,
         )
-        run_state.add_action(action)
-        self._record_recovery_action(run_state, action)
-        events.log_tool_finished(
-            run_state, loop_number, action, context_compaction=compaction
-        )
-        self._append_tool_output(function_call.call_id, compacted_result)
-        return observation_count
 
     def _stop_after_tool_call(
         self,
@@ -1146,39 +1188,17 @@ class Agent:
         calls_started_this_round: int,
     ) -> int:
         """Turn malformed model arguments into a failed action and observation."""
-        run_state.start_tool_call(
-            self.loop_limits,
+        return self.action_recorder.record_invalid_arguments(
+            run_state=run_state,
+            loop_number=loop_number,
+            function_call=function_call,
+            exception=exception,
             calls_started_this_round=calls_started_this_round,
+            start_tool_call=lambda: run_state.start_tool_call(
+                self.loop_limits,
+                calls_started_this_round=calls_started_this_round,
+            ),
         )
-        tool_result = _error_json(
-            function_call.name,
-            ErrorType.INVALID_ARGUMENTS,
-            "invalid_json_arguments",
-            str(exception),
-        )
-        parsed_result = _parse_result_object(tool_result)
-        failed_action = ActionRecord(
-            call_id=function_call.call_id,
-            tool_name=function_call.name,
-            arguments=function_call.arguments,
-            status=ActionStatus.FAILED,
-            result=tool_result,
-            error=parsed_result.get("error") if parsed_result else None,
-        )
-        run_state.add_action(failed_action)
-        self._record_recovery_action(run_state, failed_action)
-        self._append_tool_output(function_call.call_id, tool_result)
-        events.log_tool_failed(
-            run_state,
-            loop_number,
-            function_call,
-            tool_result,
-            failed_action.error,
-        )
-        app_log.log_warning(
-            "Invalid JSON arguments for tool %s", function_call.name
-        )
-        return calls_started_this_round + 1
 
     def _stop_repeated_calls(
         self,
@@ -1310,21 +1330,14 @@ class Agent:
         message: str,
     ) -> None:
         """Record skipped calls and still return one observation per call_id."""
-        for call in calls:
-            output = _error_json(call.name, error_type, code, message)
-            parsed = _parse_result_object(output)
-            skipped_action = ActionRecord(
-                call_id=call.call_id,
-                tool_name=call.name,
-                arguments=call.arguments,
-                status=ActionStatus.SKIPPED,
-                result=output,
-                error=parsed.get("error") if parsed else None,
-            )
-            run_state.add_action(skipped_action)
-            self._record_recovery_action(run_state, skipped_action)
-            self._append_tool_output(call.call_id, output)
-            events.log_tool_skipped(run_state, loop_number, skipped_action)
+        self.action_recorder.skip_calls(
+            run_state=run_state,
+            loop_number=loop_number,
+            calls=calls,
+            error_type=error_type,
+            code=code,
+            message=message,
+        )
 
     def _append_tool_output(self, call_id: str, output: str) -> None:
         """Append the Responses API observation paired to a function call."""
@@ -1363,6 +1376,8 @@ class Agent:
             run_state.run_id,
             action,
             tool_effect=tool_effect,
+            plan_id=run_state.plan_id,
+            plan_step_id=run_state.plan_step_id,
         )
 
     def _sanitize_ephemeral_tool_outputs(self) -> None:
