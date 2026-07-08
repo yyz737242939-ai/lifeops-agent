@@ -16,16 +16,24 @@
 
 ## 当前阶段
 
-项目正在进入 Runtime 重构的规划和文档基础阶段。
+项目正在进入 Runtime 重构的存储与基础设施阶段。
 
 当前状态：
 
-- 当前代码尚未实现。
+- 当前基础设施代码已经开始实现。
 - 旧 runtime 已归档到 `legacy_v0/app/`。
-- 当前代码将放在 `app/`。
+- 当前代码放在 `app/`。
 - 当前计划放在 `plans/`。
 - 当前文档放在 `docs/`。
 - 旧 V0 代码、数据、日志、测试、输出、MCP demo server、旧计划和旧文档都作为历史参考保存在 `legacy_v0/`，默认不读取。
+
+已实现的当前 runtime 基础设施：
+
+- `app/common/`：配置读取、ID、UTC 时间、项目错误类型和 JSON 序列化。
+- `app/storage/`：SQLite 连接、schema migration、基础 evidence / LLM log 表和 `SqliteUnitOfWork`。
+- `app/observability/`：结构化 trace log 和原始 LLM request-response log 的模型与 SQLite store。
+- `config/default.json`：声明默认数据库路径 `data/lifeops.sqlite3`。
+- `tests/`：基础设施聚焦测试和测试数据库 helper。
 
 ## 当前 Runtime
 
@@ -44,6 +52,15 @@ uv run python main.py
 ```
 
 `main.py` 尚不存在。
+
+当前存储入口尚未接入 `main.py`。测试中使用 `:memory:` SQLite 和 migration helper，不读写真实 `data/lifeops.sqlite3`。
+
+当前有效测试命令：
+
+```powershell
+$env:UV_CACHE_DIR='D:\lifeops-agent\.tmp\uv-cache'; uv run python -m unittest discover -s tests -v
+$env:UV_CACHE_DIR='D:\lifeops-agent\.tmp\uv-cache'; uv run python -m compileall app tests
+```
 
 ## 目标架构
 
