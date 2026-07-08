@@ -500,6 +500,7 @@ SQLite 存储：
 - 模块完成后必须更新 `docs/CURRENT_STATE.md`。
 - 改变架构边界时必须新增或更新 ADR。
 - 面试相关学习点必须进入 `docs/RUNTIME_CONCEPTS.md`。
+- 新增核心 Agent 概念时，必须先向用户确认准备沉淀的重点方向；确认后再同步更新 `docs/AGENT_LEARNING_LINKS.md`，沉淀权威官方文档、specification 或高质量官方博客链接。
 - 有 runtime 行为变化时必须有测试或 eval。
 
 ## 9. 文档体系设计
@@ -549,6 +550,7 @@ plans/
 | `docs/CURRENT_STATE.md` | 当前真实项目框架和实现状态，给人和 AI 快速了解项目 |
 | `docs/ARCHITECTURE.md` | 总架构、模块边界、依赖方向、状态生命周期 |
 | `docs/RUNTIME_CONCEPTS.md` | 详细学习手册：每个模块的知识点、实现解释、官方链接、面试讲法 |
+| `docs/AGENT_LEARNING_LINKS.md` | Agent 核心概念的权威文档、specification 和官方学习链接索引 |
 | `docs/INTERVIEW_DEMO_GUIDE.md` | 面试 demo 脚本、讲解路径、常见追问 |
 | `docs/MIGRATION_INDEX.md` | V0 文件/模块/文档到 当前 runtime 的迁移、重写、归档、延后记录 |
 | `docs/decisions/*.md` | 架构决策记录 |
@@ -602,6 +604,8 @@ plans/
 - Framework docs
 - 本项目相关文件
 ```
+
+`docs/AGENT_LEARNING_LINKS.md` 负责沉淀跨模块的权威学习链接。新增链接前，先列出候选重点方向并向用户确认，避免提前收录后续模块资料。`docs/RUNTIME_CONCEPTS.md` 负责把这些概念解释成本项目自己的 runtime 语言。两者要互相引用，但不要把大段外部资料复制进仓库。
 
 必须覆盖：
 

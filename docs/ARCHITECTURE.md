@@ -50,8 +50,9 @@ legacy_v0/app/
 ```text
 main
 -> runtime
+-> intent / policy
 -> orchestration
--> intent / policy / context / planning / execution / inspector
+-> context / planning / execution / inspector
 -> tools / domains / memory / recovery / integrations
 -> storage / observability / common
 ```
@@ -64,6 +65,60 @@ main
 - inspector 修改 runtime 或业务状态；
 - evals 使用真实用户数据；
 - storage 依赖 domain service。
+
+## Runtime Core
+
+Runtime Core 是当前单轮 request lifecycle 的入口层，当前实现位于：
+
+- `main.py`
+- `app/runtime/models.py`
+- `app/runtime/service.py`
+- `app/runtime/bootstrap.py`
+- `app/runtime/run_store.py`
+
+`RuntimeRequest` 是当前 turn/run 的结构化输入，包含 `session_id`、`turn_id`、`run_id` 和 `user_input`。它不是长期 conversation memory。
+
+`RuntimeResult` 是本轮可展示结果，包含 status、message、intent 摘要、policy 摘要和 trace summary。它不是业务事实来源。
+
+当前 `RuntimeService.handle(...)` 的链路是：
+
+```text
+RuntimeRequest
+-> IntentService
+-> PolicyService
+-> RuntimeResult
+```
+
+传入 SQLite connection 时，Runtime Core 会写入 `run_records` 和 `trace_events`。未传入 connection 时，它保持 request-local 纯内存运行，便于聚焦测试。
+
+当前 orchestration / tool execution 仍是 stub。`runtime.orchestration.stubbed` 表示本阶段没有执行真实工具或业务写入。
+
+## Intent / Policy
+
+Intent Layer 当前实现位于：
+
+- `app/intent/models.py`
+- `app/intent/classifiers.py`
+- `app/intent/service.py`
+
+Intent 判断用户可能想做什么，例如 `chat`、`read`、`write_request`、`plan_request`、`clarification_needed`。`IntentService` 会调用规则 classifier 和 LLM classifier 接口。当前 `LlmIntentClassifier` 是空实现，只返回 `not_available`，不调用真实模型。
+
+Policy / Permission Layer 当前实现位于：
+
+- `app/policy/models.py`
+- `app/policy/service.py`
+
+Policy 判断系统现在被允许做什么。它只基于当前 `RuntimeRequest` 和 `IntentDecision` 产出 `PolicyDecision`，不能从 Planner、assistant 文本、LLM classifier、Recovery Context 或 LangGraph checkpoint 获得写入授权。
+
+当前允许的写入 scope 只是候选授权模型：
+
+```text
+task.write_candidate
+memory.write_candidate
+wellbeing.write_candidate
+```
+
+这些 scope 不代表对应 domain 已经实现，也不代表真实工具已经执行。
 
 ## 基础设施层
 
@@ -111,6 +166,8 @@ Runtime 的事实来源是：
 ## Runtime 不变量
 
 - 用户数据安全优先。业务写入必须来自用户当前输入中的明确授权。
+- Intent 只提供语义信号，不授权写入。
+- Policy 是当前写入授权事实源；Executor 未来只能执行 Policy 允许的操作。
 - 不能只凭 assistant 文本判断成功。Runtime 状态和成功的 WRITE action 才是“已保存”或“已更新”的事实来源。
 - Skill、Tool、Capability、Context、Runtime State、业务数据和长期 Memory 必须保持分离。
 - Conversation Summary 不是 Long-term Memory。Context compaction 结果不能自动升级为长期记忆。

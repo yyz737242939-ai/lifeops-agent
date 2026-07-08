@@ -16,7 +16,7 @@
 
 ## 当前阶段
 
-项目正在进入 Runtime 重构的存储与基础设施阶段。
+项目正在进入 Runtime 重构的 Runtime Core / Intent / Policy 阶段。
 
 当前状态：
 
@@ -32,8 +32,12 @@
 - `app/common/`：配置读取、ID、UTC 时间、项目错误类型和 JSON 序列化。
 - `app/storage/`：SQLite 连接、schema migration、基础 evidence / LLM log 表和 `SqliteUnitOfWork`。
 - `app/observability/`：结构化 trace log 和原始 LLM request-response log 的模型与 SQLite store。
+- `app/runtime/`：`RuntimeRequest`、`RuntimeSession`、`RuntimeResult`、`RuntimeService`、run record 写入 helper 和启动 bootstrap。
+- `app/intent/`：intent models、规则 classifier、LLM classifier 空实现和 `IntentService`。
+- `app/policy/`：policy models、permission scope 和 `PolicyService`。
 - `config/default.json`：声明默认数据库路径 `data/lifeops.sqlite3`。
-- `tests/`：基础设施聚焦测试和测试数据库 helper。
+- `main.py`：当前 CLI 骨架入口，负责 config、SQLite、migration、runtime service bootstrap 和单轮输入输出。
+- `tests/`：基础设施、Intent、Policy 和 Runtime Core 聚焦测试，以及测试数据库 helper。
 
 ## 当前 Runtime
 
@@ -45,21 +49,31 @@
 
 如果需要按重构前的状态运行旧根入口，请使用 legacy checkpoint branch。
 
-未来入口是：
+当前 CLI 骨架入口是：
 
 ```powershell
 uv run python main.py
 ```
 
-`main.py` 尚不存在。
+`main.py` 已存在，但仍是阶段 3 runtime skeleton，不是完整产品 CLI。
 
-当前存储入口尚未接入 `main.py`。测试中使用 `:memory:` SQLite 和 migration helper，不读写真实 `data/lifeops.sqlite3`。
+当前 `main.py` 已接入 `config/default.json`、SQLite migration 和 `RuntimeService`。`RuntimeService` 当前只执行：
+
+```text
+RuntimeRequest
+-> IntentService
+-> PolicyService
+-> RuntimeResult
+```
+
+阶段 3 仍是 stub execution：policy `allow` 只表示当前请求通过授权判断，不代表已经执行真实 tool 或业务写入。测试中使用 `:memory:` SQLite 和 migration helper，不读写真实 `data/lifeops.sqlite3`。
 
 当前有效测试命令：
 
 ```powershell
 $env:UV_CACHE_DIR='D:\lifeops-agent\.tmp\uv-cache'; uv run python -m unittest discover -s tests -v
 $env:UV_CACHE_DIR='D:\lifeops-agent\.tmp\uv-cache'; uv run python -m compileall app tests
+$env:UV_CACHE_DIR='D:\lifeops-agent\.tmp\uv-cache'; uv run python -m unittest tests.test_intent_service tests.test_policy_service tests.test_runtime_service -v
 ```
 
 ## 目标架构

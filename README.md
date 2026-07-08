@@ -31,6 +31,7 @@ LifeOps Agent 有两个目标：
 - `docs/CURRENT_STATE.md`：当前项目状态、有效命令、已实现模块和已知限制。
 - `docs/ARCHITECTURE.md`：runtime 架构、模块边界、依赖方向和 runtime 不变量。
 - `docs/RUNTIME_CONCEPTS.md`：学习笔记、官方链接和面试解释。
+- `docs/AGENT_LEARNING_LINKS.md`：Agent 核心概念的权威文档和官方学习链接索引。
 - `docs/INTERVIEW_DEMO_GUIDE.md`：demo 脚本和讲解路径。
 - `docs/MIGRATION_INDEX.md`：V0 到当前实现的迁移、重写、归档和延后记录。
 - `docs/decisions/*.md`：架构决策。

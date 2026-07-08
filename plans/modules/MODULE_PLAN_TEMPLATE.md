@@ -36,6 +36,8 @@
 
 需要更新 `docs/CURRENT_STATE.md`、`docs/ARCHITECTURE.md`、`docs/RUNTIME_CONCEPTS.md` 和 `docs/INTERVIEW_DEMO_GUIDE.md` 的哪些内容。
 
+如果本模块包含新的核心 Agent 概念或重要学习点，需要先列出准备沉淀的重点方向并向用户确认；确认后再同步更新 `docs/AGENT_LEARNING_LINKS.md`，补充权威官方文档、specification 或高质量官方博客链接。若不需要新增链接，应在模块计划或收口说明中明确说明。
+
 ## 10. 实施步骤
 
 按执行顺序拆分的小实施步骤。
