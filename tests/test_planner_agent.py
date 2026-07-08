@@ -90,6 +90,45 @@ class PlannerAgentTests(unittest.TestCase):
         self.assertEqual(result.error, "invalid_json")
         self.assertIsNone(result.plan)
 
+    def test_markdown_fenced_json_is_accepted(self) -> None:
+        result = parse_planner_output(
+            """```json
+{
+  "type": "plan",
+  "message": "Review this plan.",
+  "plan": {
+    "goal": "Review todos.",
+    "source_user_input_summary": "Review todos.",
+    "steps": [
+      {"title": "List todos", "intent": "Inspect the current todo list."}
+    ]
+  }
+}
+```""",
+            fallback_goal="Review todos.",
+        )
+
+        self.assertEqual(result.output_type, "plan")
+        self.assertIsNotNone(result.plan)
+        assert result.plan is not None
+        self.assertEqual(result.plan.steps[0].title, "List todos")
+
+    def test_need_user_reason_is_used_as_message(self) -> None:
+        result = parse_planner_output(
+            json.dumps(
+                {
+                    "type": "need_user",
+                    "reason": "Missing scope.",
+                    "clarifying_questions": ["Which todo list?"],
+                }
+            ),
+            fallback_goal="Review todos.",
+        )
+
+        self.assertEqual(result.output_type, "need_user")
+        self.assertIn("Missing scope", result.message)
+        self.assertIn("Which todo list", result.message)
+
     def test_planner_rejects_tool_call_arguments(self) -> None:
         result = parse_planner_output(
             json.dumps(

@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 import json
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -117,7 +118,7 @@ def parse_planner_output(raw_text: str, *, fallback_goal: str) -> PlannerResult:
     """Parse Planner JSON into a safe PlannerResult."""
 
     try:
-        payload = json.loads(raw_text)
+        payload = _loads_planner_json(raw_text)
     except json.JSONDecodeError:
         return PlannerResult(
             output_type="cannot_plan",
@@ -133,7 +134,7 @@ def parse_planner_output(raw_text: str, *, fallback_goal: str) -> PlannerResult:
         )
 
     output_type = payload.get("type")
-    message = _clean_text(payload.get("message")) or "Planner could not produce a plan."
+    message = _planner_message(payload) or "Planner could not produce a plan."
     if output_type not in (
         "plan",
         "need_user",
@@ -214,6 +215,39 @@ def _find_forbidden_step_keys(steps_payload: list[Any]) -> set[str]:
             continue
         found.update(set(step_payload) & FORBIDDEN_PLANNER_STEP_KEYS)
     return found
+
+
+def _loads_planner_json(raw_text: str) -> Any:
+    clean_text = raw_text.strip()
+    try:
+        return json.loads(clean_text)
+    except json.JSONDecodeError as original_error:
+        fenced_match = re.fullmatch(
+            r"```(?:json)?\s*(?P<body>.*?)\s*```",
+            clean_text,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        if fenced_match is not None:
+            return json.loads(fenced_match.group("body").strip())
+        raise original_error
+
+
+def _planner_message(payload: dict[str, Any]) -> str:
+    message = _clean_text(payload.get("message"))
+    if message:
+        return message
+    reason = _clean_text(payload.get("reason"))
+    questions = payload.get("clarifying_questions")
+    if isinstance(questions, list):
+        clean_questions = [
+            _clean_text(question)
+            for question in questions
+            if _clean_text(question)
+        ]
+        if clean_questions:
+            suffix = " ".join(clean_questions)
+            return f"{reason} {suffix}".strip() if reason else suffix
+    return reason
 
 
 def _clean_text(value: Any) -> str:

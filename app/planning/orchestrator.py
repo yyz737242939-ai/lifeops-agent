@@ -96,6 +96,9 @@ class PlanningOrchestrator:
                 answer="这个目标还不够明确。请补充要处理的对象、范围和期望结果。",
             )
 
+        if _is_direct_single_turn_request(text):
+            return OrchestratorResult(route=PlanningRoute.DIRECT_EXECUTE)
+
         if _is_complex_planning_request(text):
             return self._preview_plan(user_input, route=PlanningRoute.PLAN_PREVIEW)
 
@@ -233,6 +236,21 @@ def _has_modify_plan_cue(text: str) -> bool:
 
 def _is_ambiguous_request(text: str) -> bool:
     return bool(re.fullmatch(r"(帮我)?(处理|弄|搞|安排|规划)(一下)?[。.!！]?", text))
+
+
+def _is_direct_single_turn_request(text: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:添加|新增|创建|记录|保存|查看|列出|显示|完成|更新|删除).{0,24}"
+            r"(?:待办|todo|任务|task|记忆|memory|消费|expense|预算|budget|心情|睡眠|能量)",
+            text,
+        )
+        or re.search(
+            r"(?:add|create|record|save|list|show|complete|update|delete).{0,24}"
+            r"(?:todo|task|memory|expense|budget)",
+            text,
+        )
+    )
 
 
 def _is_complex_planning_request(text: str) -> bool:

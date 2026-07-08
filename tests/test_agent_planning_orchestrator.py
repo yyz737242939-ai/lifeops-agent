@@ -75,6 +75,29 @@ class AgentPlanningOrchestratorTests(unittest.TestCase):
     @patch("app.agents.agent.llm_io")
     @patch("app.agents.agent.events")
     @patch("app.agents.agent.client.responses.create")
+    def test_direct_todo_write_with_plan_word_does_not_preview_plan(
+        self,
+        create_response,
+        _events,
+        _llm_io,
+    ) -> None:
+        create_response.return_value = SimpleNamespace(
+            output=[],
+            output_text="我还没有保存这个待办。",
+        )
+        planner = FakePlannerAgent()
+        agent = Agent(planner_agent=planner)
+
+        answer = agent.chat("帮我添加一个待办：写 Plan and Execute 手动测试记录")
+
+        self.assertEqual(answer, "我还没有保存这个待办。")
+        self.assertIsNone(agent.planning_state.pending_plan)
+        self.assertEqual(planner.goals, [])
+        self.assertEqual(create_response.call_count, 1)
+
+    @patch("app.agents.agent.llm_io")
+    @patch("app.agents.agent.events")
+    @patch("app.agents.agent.client.responses.create")
     def test_complex_request_previews_plan_without_agent_llm_or_tools(
         self,
         create_response,

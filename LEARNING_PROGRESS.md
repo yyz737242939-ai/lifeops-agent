@@ -207,6 +207,7 @@ System Instructions
 - `PlanningState` 管理 pending / active plan，支持创建、确认、取消、过期、supersede 和当前 step 状态推进。
 - PlanRun 自动推进当前 step；所有 step 终态后 plan 变为 `completed`，blocked / cancelled / superseded / expired 等终态不再继续变更。
 - `PlannerAgent` 已有独立 prompt、JSON 输出契约和 parser，可把 LLM 输出转换为 `plan` / `need_user` / `unsafe_or_needs_confirmation` / `cannot_plan`，并拒绝空 steps、非 JSON、tool call arguments 和 WRITE 授权字段。
+- Planner 真实 LLM 验证暴露过两个问题：模型可能用 Markdown fence 包住 JSON，也可能因 capability summary 为空而误判不能规划 read-only 待办查看。当前已通过 JSON contract、默认 read-only capability summary、fenced JSON parser 和 `reason` fallback 修复。
 - `RequestLocalContextBuilder` 已从 `Agent._request_llm()` 抽出 request-local context 注入和诊断组装，保持 ContextEngine、Profile、Semantic Memory、Task Context、Recovery Context 的顺序不变。
 - `ActionRecorder` 已收口成功工具结果、非法参数和 skipped calls 的 ActionRecord / RecoveryRecord / Tool Observation 记录路径。
 - `ExecutorAgent` 已有薄包装，当前代理现有 `Agent._run_agent_loop()` 执行一个 confirmed plan step，尚未迁移执行循环。
@@ -247,7 +248,7 @@ Skill References（已完成）
 
 
 ## 学习以及面试准备
-初级 Agent Engineer：
+阶段 1：初级 Agent Engineer，已基本覆盖
 -> Agent Loop
 -> Tool
 -> Capability
@@ -257,26 +258,36 @@ Skill References（已完成）
 -> Context Engine
 -> Memory v1
 
-中级 Agent Engineer：
+阶段 2：中级 Agent Engineer，当前正在完成
 -> MCP
 -> Safety State
 -> Task State
 -> Recovery
--> Planner
--> LangGraph / LangChain 对照
+-> Plan and Execute v0
+-> Planner / Executor / Orchestrator
+-> LangChain / LangGraph 概念对照
 
-强中级 / 准高级：
+阶段 3：面试强化层，建议你接下来优先补
+-> Policy / Permission Layer v0
+-> Executor structured feedback v0
+-> LangGraph / LangChain 小实验
+-> DAG 概念与最小串行 DAG Scheduler
+-> Eval Harness v0
+-> Inspector / Debugger v0
+
+阶段 4：强中级 / 准高级
 -> Human-in-the-loop
 -> Scheduling / Background Agent
--> Eval Harness
--> Inspector / Debugger
+-> Checkpoint / Resume
+-> Cost / Token / Latency Budget v0
 -> MCP Security
+-> RAG / Knowledge System v0
 
-高级 Agent / Agent Platform Engineer：
--> Cost / Token / Latency Budget
+阶段 5：高级 Agent / Agent Platform Engineer
 -> Async / Concurrency Runtime
 -> Advanced Memory
--> RAG / Knowledge System
 -> Multi-Agent
 -> Plugin System
 -> Product Layer
+-> Parallel DAG / distributed workflow
+-> Eval Platform

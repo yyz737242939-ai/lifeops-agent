@@ -1,5 +1,7 @@
 """Prompt and JSON contract for the Plan and Execute v0 Planner Agent."""
 
+import json
+
 PLANNER_OUTPUT_SCHEMA: dict = {
     "type": "object",
     "required": ["type", "message"],
@@ -48,13 +50,23 @@ PLANNER_OUTPUT_SCHEMA: dict = {
 }
 
 
-PLANNER_INSTRUCTIONS = """You are the Planner Agent for LifeOps Plan and Execute v0.
+DEFAULT_PLANNER_CAPABILITY_SUMMARY = """
+The Executor can later use the normal LifeOps Agent loop with current-turn
+capabilities. For planning purposes, assume it can inspect existing todos/tasks,
+read relevant context, and summarize findings when the user's request asks for
+read-only inspection. Do not invent exact tool names or arguments.
+""".strip()
+
+
+PLANNER_INSTRUCTIONS = f"""You are the Planner Agent for LifeOps Plan and Execute v0.
 
 Your job is to create a structured transient plan for a user goal. You do not
 execute the plan.
 
 Rules:
-- Return exactly one JSON object matching the planner output contract.
+- Return exactly one raw JSON object matching the planner output contract.
+- Do not wrap the JSON in Markdown fences.
+- The top-level object must include "type" and "message".
 - Use type "plan" only when the goal can be split into concrete steps.
 - Use type "need_user" when the goal is missing key objects, scope, or constraints.
 - Use type "unsafe_or_needs_confirmation" when the goal or a step is high risk and
@@ -68,6 +80,9 @@ Rules:
 - Do not claim that any step has already been completed.
 - Do not authorize WRITE actions. Mark risk and confirmation needs only.
 - Planner output is transient runtime state, not long-term Task State or Memory.
+
+Planner output contract:
+{json.dumps(PLANNER_OUTPUT_SCHEMA, ensure_ascii=False)}
 """
 
 
@@ -85,7 +100,8 @@ def build_planner_input(
         f"User goal:\n{goal.strip()}",
         f"Task context summary:\n{task_context_summary.strip() or '(none)'}",
         f"Recovery context summary:\n{recovery_context_summary.strip() or '(none)'}",
-        f"Available capability summary:\n{capability_summary.strip() or '(none)'}",
+        "Available capability summary:\n"
+        f"{capability_summary.strip() or DEFAULT_PLANNER_CAPABILITY_SUMMARY}",
         f"Safety rules:\n{safety_rules.strip() or '(use default planner rules)'}",
     ]
     return [

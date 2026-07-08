@@ -26,6 +26,20 @@
 
 本仓库 Markdown 文件使用 UTF-8 编码。
 
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues, and external PRs are also treated as a triage request surface. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default five-label triage vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Use a single-context domain-doc layout. See `docs/agents/domain.md`.
+
 ## 项目背景
 
 LifeOps Agent 的长期方向是成为真实可用的个人生活管理 Agent。

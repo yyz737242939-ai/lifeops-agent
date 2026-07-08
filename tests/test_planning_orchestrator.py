@@ -54,6 +54,23 @@ class PlanningOrchestratorTests(unittest.TestCase):
         self.assertIsNone(state.pending_plan)
         self.assertEqual(planner.goals, [])
 
+    def test_direct_todo_write_with_plan_word_does_not_route_to_planner(self) -> None:
+        state = PlanningState()
+        planner = FakePlannerAgent()
+        orchestrator = PlanningOrchestrator(
+            planning_state=state,
+            planner_agent=planner,
+        )
+
+        result = orchestrator.route(
+            "帮我添加一个待办：写 Plan and Execute 手动测试记录"
+        )
+
+        self.assertEqual(result.route, PlanningRoute.DIRECT_EXECUTE)
+        self.assertFalse(result.handled)
+        self.assertIsNone(state.pending_plan)
+        self.assertEqual(planner.goals, [])
+
     def test_complex_request_previews_plan_without_execution(self) -> None:
         state = PlanningState()
         planner = FakePlannerAgent()
