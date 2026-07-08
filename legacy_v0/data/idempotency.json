@@ -1,0 +1,2167 @@
+{
+  "test-delete-memory": {
+    "ok": true,
+    "action": "delete_memory",
+    "memory": {
+      "id": "mem_20260701_144615_251889",
+      "type": "goal",
+      "content": "长期目标是构建 LifeOps Agent。",
+      "source": "user_authorized",
+      "created_at": "2026-07-01T14:46:15",
+      "updated_at": "2026-07-01T14:46:15",
+      "status": "deleted",
+      "tags": [
+        "project"
+      ]
+    },
+    "idempotency": {
+      "key": "test-delete-memory",
+      "replayed": false
+    }
+  },
+  "test-save-memory": {
+    "ok": true,
+    "action": "save_memory",
+    "memory": {
+      "id": "mem_20260701_144615_299495",
+      "type": "preference",
+      "content": "用户希望解释代码时优先使用中文。",
+      "source": "user_authorized",
+      "created_at": "2026-07-01T14:46:15",
+      "updated_at": null,
+      "status": "active",
+      "tags": [
+        "learning"
+      ]
+    },
+    "idempotency": {
+      "key": "test-save-memory",
+      "replayed": false
+    }
+  },
+  "run_6ee1e86fddea48c1a0753dd92f4cbd14:call_00_e0suAFySQiW2lafrObpt0962": {
+    "ok": true,
+    "action": "save_memory",
+    "memory": {
+      "id": "mem_20260702_135940_149387",
+      "type": "preference",
+      "content": "学习 Agent Runtime 时喜欢先看生命周期，再看代码。",
+      "source": "user_authorized",
+      "created_at": "2026-07-02T13:59:40",
+      "updated_at": null,
+      "status": "active",
+      "tags": [
+        "learning",
+        "runtime"
+      ]
+    },
+    "idempotency": {
+      "key": "run_6ee1e86fddea48c1a0753dd92f4cbd14:call_00_e0suAFySQiW2lafrObpt0962",
+      "replayed": false
+    }
+  },
+  "run_d6212b0ab4754ccdb15a5b698870e25e:call_00_NW6UbApABwMDdcvmncdn3830": {
+    "ok": true,
+    "action": "delete_memory",
+    "memory": {
+      "id": "mem_20260702_135940_149387",
+      "type": "preference",
+      "content": "学习 Agent Runtime 时喜欢先看生命周期，再看代码。",
+      "source": "user_authorized",
+      "created_at": "2026-07-02T13:59:40",
+      "updated_at": "2026-07-02T14:00:14",
+      "status": "deleted",
+      "tags": [
+        "learning",
+        "runtime"
+      ]
+    },
+    "idempotency": {
+      "key": "run_d6212b0ab4754ccdb15a5b698870e25e:call_00_NW6UbApABwMDdcvmncdn3830",
+      "replayed": false
+    }
+  },
+  "run_571c93b4ac2047a98cf1c475d6766af3:call_42857cbb5edf497daf8e7fdc": {
+    "ok": true,
+    "action": "add_todo",
+    "todo": {
+      "id": 1,
+      "title": "复盘 MCP 测试计划（上午 10 点）",
+      "status": "todo",
+      "priority": "medium",
+      "due_date": "2026-07-03",
+      "created_at": "2026-07-02T14:19:59",
+      "completed_at": null
+    },
+    "idempotency": {
+      "key": "run_571c93b4ac2047a98cf1c475d6766af3:call_42857cbb5edf497daf8e7fdc",
+      "replayed": false
+    }
+  },
+  "run_a07e113bfb844c009911921856ccf5d0:call_00_UR7GiH2i6LC0mrvZiTry9181": {
+    "ok": true,
+    "action": "add_todo",
+    "todo": {
+      "id": 2,
+      "title": "整理 ContextEngine 学习笔记（晚上）",
+      "status": "todo",
+      "priority": "medium",
+      "due_date": null,
+      "created_at": "2026-07-02T14:20:12",
+      "completed_at": null
+    },
+    "idempotency": {
+      "key": "run_a07e113bfb844c009911921856ccf5d0:call_00_UR7GiH2i6LC0mrvZiTry9181",
+      "replayed": false
+    }
+  },
+  "run_d0d7e21cb16f4fad99f3a7637571f3c2:call_4a45ab91a5f049cca98ab4e7": {
+    "ok": true,
+    "action": "save_memory",
+    "memory": {
+      "id": "mem_20260702_142240_626382",
+      "type": "preference",
+      "content": "学习 Agent Runtime 时喜欢先看生命周期，再看代码。",
+      "source": "user_authorized",
+      "created_at": "2026-07-02T14:22:40",
+      "updated_at": null,
+      "status": "active",
+      "tags": [
+        "learning",
+        "runtime"
+      ]
+    },
+    "idempotency": {
+      "key": "run_d0d7e21cb16f4fad99f3a7637571f3c2:call_4a45ab91a5f049cca98ab4e7",
+      "replayed": false
+    }
+  },
+  "run_2b55f50922f74001a35d7c899088751c:call_00_oBpPeW5dmuB2XtdvA5n81791": {
+    "ok": true,
+    "action": "delete_memory",
+    "memory": {
+      "id": "mem_20260702_142240_626382",
+      "type": "preference",
+      "content": "学习 Agent Runtime 时喜欢先看生命周期，再看代码。",
+      "source": "user_authorized",
+      "created_at": "2026-07-02T14:22:40",
+      "updated_at": "2026-07-02T14:23:03",
+      "status": "deleted",
+      "tags": [
+        "learning",
+        "runtime"
+      ]
+    },
+    "idempotency": {
+      "key": "run_2b55f50922f74001a35d7c899088751c:call_00_oBpPeW5dmuB2XtdvA5n81791",
+      "replayed": false
+    }
+  },
+  "run_de863d86ae2b435fb79a77d1adaa0711:call_d159a138e24348f499f7d428": {
+    "ok": true,
+    "action": "save_memory",
+    "memory": {
+      "id": "mem_20260705_135249_516316",
+      "type": "goal",
+      "content": "russell 正在学习 AI",
+      "source": "user_authorized",
+      "created_at": "2026-07-05T13:52:49",
+      "updated_at": null,
+      "status": "active",
+      "tags": [
+        "learning",
+        "ai"
+      ]
+    },
+    "idempotency": {
+      "key": "run_de863d86ae2b435fb79a77d1adaa0711:call_d159a138e24348f499f7d428",
+      "replayed": false
+    }
+  },
+  "run_02b5c618c0a54c27963736b918212a59:call_task_create": {
+    "ok": true,
+    "action": "create_task",
+    "task": {
+      "id": "task_20260705_160729_908316",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260705_160729_908373",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:07:29",
+          "updated_at": "2026-07-05T16:07:29",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260705_160729_908396",
+          "title": "Verify agent loop",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:07:29",
+          "updated_at": "2026-07-05T16:07:29",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260705_160729_908373",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-05T16:07:29",
+      "updated_at": "2026-07-05T16:07:29",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": [
+        "runtime"
+      ]
+    },
+    "idempotency": {
+      "key": "run_02b5c618c0a54c27963736b918212a59:call_task_create",
+      "replayed": false
+    }
+  },
+  "run_864603b9920547dd97e38a19eb9a75c1:call_add_step": {
+    "ok": true,
+    "action": "add_task_step",
+    "task": {
+      "id": "task_20260705_160814_515215",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260705_160814_515297",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:08:14",
+          "updated_at": "2026-07-05T16:08:14",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260705_160814_566371",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:08:14",
+          "updated_at": "2026-07-05T16:08:14",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260705_160814_515297",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-05T16:08:14",
+      "updated_at": "2026-07-05T16:08:14",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_864603b9920547dd97e38a19eb9a75c1:call_add_step",
+      "replayed": false
+    }
+  },
+  "run_864603b9920547dd97e38a19eb9a75c1:call_add_blocker": {
+    "ok": true,
+    "action": "add_task_blocker",
+    "task": {
+      "id": "task_20260705_160814_515215",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "blocked",
+      "steps": [
+        {
+          "id": "step_20260705_160814_515297",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:08:14",
+          "updated_at": "2026-07-05T16:08:14",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260705_160814_566371",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:08:14",
+          "updated_at": "2026-07-05T16:08:14",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260705_160814_515297",
+      "progress_notes": [],
+      "blockers": [
+        {
+          "id": "blocker_20260705_160814_599122",
+          "reason": "Need authorization boundary decision",
+          "status": "open",
+          "created_at": "2026-07-05T16:08:14",
+          "resolved_at": null,
+          "related_step_id": null
+        }
+      ],
+      "created_at": "2026-07-05T16:08:14",
+      "updated_at": "2026-07-05T16:08:14",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_864603b9920547dd97e38a19eb9a75c1:call_add_blocker",
+      "replayed": false
+    }
+  },
+  "run_e441df35e1a44dfd9c6ca16267d46c5f:call_task_create": {
+    "ok": true,
+    "action": "create_task",
+    "task": {
+      "id": "task_20260705_160814_642985",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260705_160814_643032",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:08:14",
+          "updated_at": "2026-07-05T16:08:14",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260705_160814_643049",
+          "title": "Verify agent loop",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:08:14",
+          "updated_at": "2026-07-05T16:08:14",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260705_160814_643032",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-05T16:08:14",
+      "updated_at": "2026-07-05T16:08:14",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": [
+        "runtime"
+      ]
+    },
+    "idempotency": {
+      "key": "run_e441df35e1a44dfd9c6ca16267d46c5f:call_task_create",
+      "replayed": false
+    }
+  },
+  "run_9a5708c42857475db7cfcaa334c59101:call_add_step": {
+    "ok": true,
+    "action": "add_task_step",
+    "task": {
+      "id": "task_20260705_160831_659845",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260705_160831_659927",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:08:31",
+          "updated_at": "2026-07-05T16:08:31",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260705_160831_708453",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:08:31",
+          "updated_at": "2026-07-05T16:08:31",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260705_160831_659927",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-05T16:08:31",
+      "updated_at": "2026-07-05T16:08:31",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_9a5708c42857475db7cfcaa334c59101:call_add_step",
+      "replayed": false
+    }
+  },
+  "run_9a5708c42857475db7cfcaa334c59101:call_add_blocker": {
+    "ok": true,
+    "action": "add_task_blocker",
+    "task": {
+      "id": "task_20260705_160831_659845",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "blocked",
+      "steps": [
+        {
+          "id": "step_20260705_160831_659927",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:08:31",
+          "updated_at": "2026-07-05T16:08:31",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260705_160831_708453",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:08:31",
+          "updated_at": "2026-07-05T16:08:31",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260705_160831_659927",
+      "progress_notes": [],
+      "blockers": [
+        {
+          "id": "blocker_20260705_160831_739221",
+          "reason": "Need authorization boundary decision",
+          "status": "open",
+          "created_at": "2026-07-05T16:08:31",
+          "resolved_at": null,
+          "related_step_id": null
+        }
+      ],
+      "created_at": "2026-07-05T16:08:31",
+      "updated_at": "2026-07-05T16:08:31",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_9a5708c42857475db7cfcaa334c59101:call_add_blocker",
+      "replayed": false
+    }
+  },
+  "run_a6618533e4974154b1dde349f4b124bb:call_task_create": {
+    "ok": true,
+    "action": "create_task",
+    "task": {
+      "id": "task_20260705_160831_778246",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260705_160831_778305",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:08:31",
+          "updated_at": "2026-07-05T16:08:31",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260705_160831_778322",
+          "title": "Verify agent loop",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:08:31",
+          "updated_at": "2026-07-05T16:08:31",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260705_160831_778305",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-05T16:08:31",
+      "updated_at": "2026-07-05T16:08:31",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": [
+        "runtime"
+      ]
+    },
+    "idempotency": {
+      "key": "run_a6618533e4974154b1dde349f4b124bb:call_task_create",
+      "replayed": false
+    }
+  },
+  "run_57729914c29443a38e616d3a1bdbad6e:call_5ff62e17484f4a919ec5dd55": {
+    "ok": true,
+    "action": "create_task",
+    "task": {
+      "id": "task_20260705_161236_319730",
+      "title": "学习 Task State v1",
+      "goal": "理解 TaskItem、TaskStore、Task Context 的边界",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260705_161236_319783",
+          "title": "理清 TaskItem 的数据结构、字段和职责",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:12:36",
+          "updated_at": "2026-07-05T16:12:36",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260705_161236_319820",
+          "title": "理解 TaskStore 的存储模型与读写逻辑",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:12:36",
+          "updated_at": "2026-07-05T16:12:36",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260705_161236_319833",
+          "title": "明确 Task Context 的作用范围和边界",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:12:36",
+          "updated_at": "2026-07-05T16:12:36",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260705_161236_319842",
+          "title": "总结三者的关系与协作方式",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:12:36",
+          "updated_at": "2026-07-05T16:12:36",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260705_161236_319783",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-05T16:12:36",
+      "updated_at": "2026-07-05T16:12:36",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": [
+        "learning",
+        "ai"
+      ]
+    },
+    "idempotency": {
+      "key": "run_57729914c29443a38e616d3a1bdbad6e:call_5ff62e17484f4a919ec5dd55",
+      "replayed": false
+    }
+  },
+  "run_df298e404c564e1596445c8191ebae66:call_1c54fecc30e3434f89776af3": {
+    "ok": true,
+    "action": "create_task",
+    "task": {
+      "id": "task_20260705_161726_873884",
+      "title": "学习 Persistence / Recovery",
+      "goal": "搞懂 Agent 重启后如何恢复长期任务现场",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260705_161726_873923",
+          "title": "调研 Agent 持久化机制（状态保存、快照、Checkpoint）",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:17:26",
+          "updated_at": "2026-07-05T16:17:26",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260705_161726_873959",
+          "title": "了解常见的恢复策略（State Reconstruction、Event Sourcing、Redis/DB 持久化）",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:17:26",
+          "updated_at": "2026-07-05T16:17:26",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260705_161726_873970",
+          "title": "结合自己的 AI 学习项目，设计一个简单的恢复方案",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:17:26",
+          "updated_at": "2026-07-05T16:17:26",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260705_161726_873978",
+          "title": "实践验证：模拟重启并确认任务现场恢复",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T16:17:26",
+          "updated_at": "2026-07-05T16:17:26",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260705_161726_873923",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-05T16:17:26",
+      "updated_at": "2026-07-05T16:17:26",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": [
+        "learning",
+        "ai",
+        "agent"
+      ]
+    },
+    "idempotency": {
+      "key": "run_df298e404c564e1596445c8191ebae66:call_1c54fecc30e3434f89776af3",
+      "replayed": false
+    }
+  },
+  "run_29b2d454ad6f47a6a5c3849166f4a872:call_add_step": {
+    "ok": true,
+    "action": "add_task_step",
+    "task": {
+      "id": "task_20260705_170744_234446",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260705_170744_234490",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T17:07:44",
+          "updated_at": "2026-07-05T17:07:44",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260705_170744_286786",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T17:07:44",
+          "updated_at": "2026-07-05T17:07:44",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260705_170744_234490",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-05T17:07:44",
+      "updated_at": "2026-07-05T17:07:44",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_29b2d454ad6f47a6a5c3849166f4a872:call_add_step",
+      "replayed": false
+    }
+  },
+  "run_29b2d454ad6f47a6a5c3849166f4a872:call_add_blocker": {
+    "ok": true,
+    "action": "add_task_blocker",
+    "task": {
+      "id": "task_20260705_170744_234446",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "blocked",
+      "steps": [
+        {
+          "id": "step_20260705_170744_234490",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T17:07:44",
+          "updated_at": "2026-07-05T17:07:44",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260705_170744_286786",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T17:07:44",
+          "updated_at": "2026-07-05T17:07:44",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260705_170744_234490",
+      "progress_notes": [],
+      "blockers": [
+        {
+          "id": "blocker_20260705_170744_321939",
+          "reason": "Need authorization boundary decision",
+          "status": "open",
+          "created_at": "2026-07-05T17:07:44",
+          "resolved_at": null,
+          "related_step_id": null
+        }
+      ],
+      "created_at": "2026-07-05T17:07:44",
+      "updated_at": "2026-07-05T17:07:44",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_29b2d454ad6f47a6a5c3849166f4a872:call_add_blocker",
+      "replayed": false
+    }
+  },
+  "run_c2dad8fb16864c97a905de3a1017d12f:call_task_create": {
+    "ok": true,
+    "action": "create_task",
+    "task": {
+      "id": "task_20260705_170744_428522",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260705_170744_428577",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T17:07:44",
+          "updated_at": "2026-07-05T17:07:44",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260705_170744_428592",
+          "title": "Verify agent loop",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-05T17:07:44",
+          "updated_at": "2026-07-05T17:07:44",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260705_170744_428577",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-05T17:07:44",
+      "updated_at": "2026-07-05T17:07:44",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": [
+        "runtime"
+      ]
+    },
+    "idempotency": {
+      "key": "run_c2dad8fb16864c97a905de3a1017d12f:call_task_create",
+      "replayed": false
+    }
+  },
+  "run_8bb9439684d9473e9c5908831776d491:call_add_step": {
+    "ok": true,
+    "action": "add_task_step",
+    "task": {
+      "id": "task_20260707_122853_813739",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260707_122853_813779",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:28:53",
+          "updated_at": "2026-07-07T12:28:53",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_122853_891311",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:28:53",
+          "updated_at": "2026-07-07T12:28:53",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_122853_813779",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-07T12:28:53",
+      "updated_at": "2026-07-07T12:28:53",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_8bb9439684d9473e9c5908831776d491:call_add_step",
+      "replayed": false
+    }
+  },
+  "run_8bb9439684d9473e9c5908831776d491:call_add_blocker": {
+    "ok": true,
+    "action": "add_task_blocker",
+    "task": {
+      "id": "task_20260707_122853_813739",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "blocked",
+      "steps": [
+        {
+          "id": "step_20260707_122853_813779",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:28:53",
+          "updated_at": "2026-07-07T12:28:53",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_122853_891311",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:28:53",
+          "updated_at": "2026-07-07T12:28:53",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_122853_813779",
+      "progress_notes": [],
+      "blockers": [
+        {
+          "id": "blocker_20260707_122853_939004",
+          "reason": "Need authorization boundary decision",
+          "status": "open",
+          "created_at": "2026-07-07T12:28:53",
+          "resolved_at": null,
+          "related_step_id": null
+        }
+      ],
+      "created_at": "2026-07-07T12:28:53",
+      "updated_at": "2026-07-07T12:28:53",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_8bb9439684d9473e9c5908831776d491:call_add_blocker",
+      "replayed": false
+    }
+  },
+  "run_135e57aea2fb456aa95f260cf7d023c2:call_task_create": {
+    "ok": true,
+    "action": "create_task",
+    "task": {
+      "id": "task_20260707_122854_054984",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260707_122854_055041",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:28:54",
+          "updated_at": "2026-07-07T12:28:54",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_122854_055058",
+          "title": "Verify agent loop",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:28:54",
+          "updated_at": "2026-07-07T12:28:54",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_122854_055041",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-07T12:28:54",
+      "updated_at": "2026-07-07T12:28:54",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": [
+        "runtime"
+      ]
+    },
+    "idempotency": {
+      "key": "run_135e57aea2fb456aa95f260cf7d023c2:call_task_create",
+      "replayed": false
+    }
+  },
+  "run_b650ca97c20048bfa09a8c15b31ff5e9:call_add_step": {
+    "ok": true,
+    "action": "add_task_step",
+    "task": {
+      "id": "task_20260707_122902_786529",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260707_122902_786574",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:29:02",
+          "updated_at": "2026-07-07T12:29:02",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_122902_841960",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:29:02",
+          "updated_at": "2026-07-07T12:29:02",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_122902_786574",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-07T12:29:02",
+      "updated_at": "2026-07-07T12:29:02",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_b650ca97c20048bfa09a8c15b31ff5e9:call_add_step",
+      "replayed": false
+    }
+  },
+  "run_b650ca97c20048bfa09a8c15b31ff5e9:call_add_blocker": {
+    "ok": true,
+    "action": "add_task_blocker",
+    "task": {
+      "id": "task_20260707_122902_786529",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "blocked",
+      "steps": [
+        {
+          "id": "step_20260707_122902_786574",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:29:02",
+          "updated_at": "2026-07-07T12:29:02",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_122902_841960",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:29:02",
+          "updated_at": "2026-07-07T12:29:02",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_122902_786574",
+      "progress_notes": [],
+      "blockers": [
+        {
+          "id": "blocker_20260707_122902_887617",
+          "reason": "Need authorization boundary decision",
+          "status": "open",
+          "created_at": "2026-07-07T12:29:02",
+          "resolved_at": null,
+          "related_step_id": null
+        }
+      ],
+      "created_at": "2026-07-07T12:29:02",
+      "updated_at": "2026-07-07T12:29:02",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_b650ca97c20048bfa09a8c15b31ff5e9:call_add_blocker",
+      "replayed": false
+    }
+  },
+  "run_3ca201e953ba4a4ea8fe66a6f7bf72e9:call_task_create": {
+    "ok": true,
+    "action": "create_task",
+    "task": {
+      "id": "task_20260707_122903_031355",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260707_122903_031419",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:29:03",
+          "updated_at": "2026-07-07T12:29:03",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_122903_031439",
+          "title": "Verify agent loop",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:29:03",
+          "updated_at": "2026-07-07T12:29:03",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_122903_031419",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-07T12:29:03",
+      "updated_at": "2026-07-07T12:29:03",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": [
+        "runtime"
+      ]
+    },
+    "idempotency": {
+      "key": "run_3ca201e953ba4a4ea8fe66a6f7bf72e9:call_task_create",
+      "replayed": false
+    }
+  },
+  "run_fa3f1accc35049b3876df4cc927a7e83:call_add_step": {
+    "ok": true,
+    "action": "add_task_step",
+    "task": {
+      "id": "task_20260707_122917_494242",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260707_122917_494293",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:29:17",
+          "updated_at": "2026-07-07T12:29:17",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_122917_627819",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:29:17",
+          "updated_at": "2026-07-07T12:29:17",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_122917_494293",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-07T12:29:17",
+      "updated_at": "2026-07-07T12:29:17",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_fa3f1accc35049b3876df4cc927a7e83:call_add_step",
+      "replayed": false
+    }
+  },
+  "run_fa3f1accc35049b3876df4cc927a7e83:call_add_blocker": {
+    "ok": true,
+    "action": "add_task_blocker",
+    "task": {
+      "id": "task_20260707_122917_494242",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "blocked",
+      "steps": [
+        {
+          "id": "step_20260707_122917_494293",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:29:17",
+          "updated_at": "2026-07-07T12:29:17",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_122917_627819",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:29:17",
+          "updated_at": "2026-07-07T12:29:17",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_122917_494293",
+      "progress_notes": [],
+      "blockers": [
+        {
+          "id": "blocker_20260707_122917_671598",
+          "reason": "Need authorization boundary decision",
+          "status": "open",
+          "created_at": "2026-07-07T12:29:17",
+          "resolved_at": null,
+          "related_step_id": null
+        }
+      ],
+      "created_at": "2026-07-07T12:29:17",
+      "updated_at": "2026-07-07T12:29:17",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_fa3f1accc35049b3876df4cc927a7e83:call_add_blocker",
+      "replayed": false
+    }
+  },
+  "run_a6680671c32a4260841b91ba1be4d7ee:call_task_create": {
+    "ok": true,
+    "action": "create_task",
+    "task": {
+      "id": "task_20260707_122917_843307",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260707_122917_843365",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:29:17",
+          "updated_at": "2026-07-07T12:29:17",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_122917_843427",
+          "title": "Verify agent loop",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:29:17",
+          "updated_at": "2026-07-07T12:29:17",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_122917_843365",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-07T12:29:17",
+      "updated_at": "2026-07-07T12:29:17",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": [
+        "runtime"
+      ]
+    },
+    "idempotency": {
+      "key": "run_a6680671c32a4260841b91ba1be4d7ee:call_task_create",
+      "replayed": false
+    }
+  },
+  "run_2d2a31017bb94301b46b0e5d1a076cf2:call_add_step": {
+    "ok": true,
+    "action": "add_task_step",
+    "task": {
+      "id": "task_20260707_123207_515789",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260707_123207_515829",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:32:07",
+          "updated_at": "2026-07-07T12:32:07",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_123207_598497",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:32:07",
+          "updated_at": "2026-07-07T12:32:07",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_123207_515829",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-07T12:32:07",
+      "updated_at": "2026-07-07T12:32:07",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_2d2a31017bb94301b46b0e5d1a076cf2:call_add_step",
+      "replayed": false
+    }
+  },
+  "run_2d2a31017bb94301b46b0e5d1a076cf2:call_add_blocker": {
+    "ok": true,
+    "action": "add_task_blocker",
+    "task": {
+      "id": "task_20260707_123207_515789",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "blocked",
+      "steps": [
+        {
+          "id": "step_20260707_123207_515829",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:32:07",
+          "updated_at": "2026-07-07T12:32:07",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_123207_598497",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:32:07",
+          "updated_at": "2026-07-07T12:32:07",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_123207_515829",
+      "progress_notes": [],
+      "blockers": [
+        {
+          "id": "blocker_20260707_123207_645615",
+          "reason": "Need authorization boundary decision",
+          "status": "open",
+          "created_at": "2026-07-07T12:32:07",
+          "resolved_at": null,
+          "related_step_id": null
+        }
+      ],
+      "created_at": "2026-07-07T12:32:07",
+      "updated_at": "2026-07-07T12:32:07",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_2d2a31017bb94301b46b0e5d1a076cf2:call_add_blocker",
+      "replayed": false
+    }
+  },
+  "run_ba3a57e42d2a4186b2a48a762330f8c5:call_task_create": {
+    "ok": true,
+    "action": "create_task",
+    "task": {
+      "id": "task_20260707_123207_820055",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260707_123207_820117",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:32:07",
+          "updated_at": "2026-07-07T12:32:07",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_123207_820146",
+          "title": "Verify agent loop",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:32:07",
+          "updated_at": "2026-07-07T12:32:07",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_123207_820117",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-07T12:32:07",
+      "updated_at": "2026-07-07T12:32:07",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": [
+        "runtime"
+      ]
+    },
+    "idempotency": {
+      "key": "run_ba3a57e42d2a4186b2a48a762330f8c5:call_task_create",
+      "replayed": false
+    }
+  },
+  "run_98460f208c964a20b457ae2f2c879cec:call_add_step": {
+    "ok": true,
+    "action": "add_task_step",
+    "task": {
+      "id": "task_20260707_124846_806919",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260707_124846_806958",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:48:46",
+          "updated_at": "2026-07-07T12:48:46",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_124846_899336",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:48:46",
+          "updated_at": "2026-07-07T12:48:46",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_124846_806958",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-07T12:48:46",
+      "updated_at": "2026-07-07T12:48:46",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_98460f208c964a20b457ae2f2c879cec:call_add_step",
+      "replayed": false
+    }
+  },
+  "run_98460f208c964a20b457ae2f2c879cec:call_add_blocker": {
+    "ok": true,
+    "action": "add_task_blocker",
+    "task": {
+      "id": "task_20260707_124846_806919",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "blocked",
+      "steps": [
+        {
+          "id": "step_20260707_124846_806958",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:48:46",
+          "updated_at": "2026-07-07T12:48:46",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_124846_899336",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:48:46",
+          "updated_at": "2026-07-07T12:48:46",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_124846_806958",
+      "progress_notes": [],
+      "blockers": [
+        {
+          "id": "blocker_20260707_124846_953397",
+          "reason": "Need authorization boundary decision",
+          "status": "open",
+          "created_at": "2026-07-07T12:48:46",
+          "resolved_at": null,
+          "related_step_id": null
+        }
+      ],
+      "created_at": "2026-07-07T12:48:46",
+      "updated_at": "2026-07-07T12:48:46",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_98460f208c964a20b457ae2f2c879cec:call_add_blocker",
+      "replayed": false
+    }
+  },
+  "run_f78a606f4ec44f63a492f1a6c1573406:call_task_create": {
+    "ok": true,
+    "action": "create_task",
+    "task": {
+      "id": "task_20260707_124847_136392",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260707_124847_136507",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:48:47",
+          "updated_at": "2026-07-07T12:48:47",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_124847_136552",
+          "title": "Verify agent loop",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T12:48:47",
+          "updated_at": "2026-07-07T12:48:47",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_124847_136507",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-07T12:48:47",
+      "updated_at": "2026-07-07T12:48:47",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": [
+        "runtime"
+      ]
+    },
+    "idempotency": {
+      "key": "run_f78a606f4ec44f63a492f1a6c1573406:call_task_create",
+      "replayed": false
+    }
+  },
+  "run_f2b9c7010a6b478fb1ae585d47984f64:call_add_step": {
+    "ok": true,
+    "action": "add_task_step",
+    "task": {
+      "id": "task_20260707_131814_161550",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260707_131814_161594",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T13:18:14",
+          "updated_at": "2026-07-07T13:18:14",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_131814_289223",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T13:18:14",
+          "updated_at": "2026-07-07T13:18:14",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_131814_161594",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-07T13:18:14",
+      "updated_at": "2026-07-07T13:18:14",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_f2b9c7010a6b478fb1ae585d47984f64:call_add_step",
+      "replayed": false
+    }
+  },
+  "run_f2b9c7010a6b478fb1ae585d47984f64:call_add_blocker": {
+    "ok": true,
+    "action": "add_task_blocker",
+    "task": {
+      "id": "task_20260707_131814_161550",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "blocked",
+      "steps": [
+        {
+          "id": "step_20260707_131814_161594",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T13:18:14",
+          "updated_at": "2026-07-07T13:18:14",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_131814_289223",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T13:18:14",
+          "updated_at": "2026-07-07T13:18:14",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_131814_161594",
+      "progress_notes": [],
+      "blockers": [
+        {
+          "id": "blocker_20260707_131814_350930",
+          "reason": "Need authorization boundary decision",
+          "status": "open",
+          "created_at": "2026-07-07T13:18:14",
+          "resolved_at": null,
+          "related_step_id": null
+        }
+      ],
+      "created_at": "2026-07-07T13:18:14",
+      "updated_at": "2026-07-07T13:18:14",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_f2b9c7010a6b478fb1ae585d47984f64:call_add_blocker",
+      "replayed": false
+    }
+  },
+  "run_c96a80c59a8144a69d6f3c13129b8034:call_task_create": {
+    "ok": true,
+    "action": "create_task",
+    "task": {
+      "id": "task_20260707_131814_501539",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260707_131814_501587",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T13:18:14",
+          "updated_at": "2026-07-07T13:18:14",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_131814_501604",
+          "title": "Verify agent loop",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T13:18:14",
+          "updated_at": "2026-07-07T13:18:14",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_131814_501587",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-07T13:18:14",
+      "updated_at": "2026-07-07T13:18:14",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": [
+        "runtime"
+      ]
+    },
+    "idempotency": {
+      "key": "run_c96a80c59a8144a69d6f3c13129b8034:call_task_create",
+      "replayed": false
+    }
+  },
+  "run_1a5f3b1ab66848f8a5725699e4de5635:call_add_step": {
+    "ok": true,
+    "action": "add_task_step",
+    "task": {
+      "id": "task_20260707_155037_891170",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260707_155037_891222",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T15:50:37",
+          "updated_at": "2026-07-07T15:50:37",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_155037_982670",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T15:50:37",
+          "updated_at": "2026-07-07T15:50:37",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_155037_891222",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-07T15:50:37",
+      "updated_at": "2026-07-07T15:50:37",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_1a5f3b1ab66848f8a5725699e4de5635:call_add_step",
+      "replayed": false
+    }
+  },
+  "run_1a5f3b1ab66848f8a5725699e4de5635:call_add_blocker": {
+    "ok": true,
+    "action": "add_task_blocker",
+    "task": {
+      "id": "task_20260707_155037_891170",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "blocked",
+      "steps": [
+        {
+          "id": "step_20260707_155037_891222",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T15:50:37",
+          "updated_at": "2026-07-07T15:50:37",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_155037_982670",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T15:50:37",
+          "updated_at": "2026-07-07T15:50:37",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_155037_891222",
+      "progress_notes": [],
+      "blockers": [
+        {
+          "id": "blocker_20260707_155038_038979",
+          "reason": "Need authorization boundary decision",
+          "status": "open",
+          "created_at": "2026-07-07T15:50:38",
+          "resolved_at": null,
+          "related_step_id": null
+        }
+      ],
+      "created_at": "2026-07-07T15:50:37",
+      "updated_at": "2026-07-07T15:50:38",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_1a5f3b1ab66848f8a5725699e4de5635:call_add_blocker",
+      "replayed": false
+    }
+  },
+  "run_4e1d6a77bc8549ac8645bb1d7f89ed88:call_task_create": {
+    "ok": true,
+    "action": "create_task",
+    "task": {
+      "id": "task_20260707_155038_212841",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260707_155038_212890",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T15:50:38",
+          "updated_at": "2026-07-07T15:50:38",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_155038_212907",
+          "title": "Verify agent loop",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T15:50:38",
+          "updated_at": "2026-07-07T15:50:38",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_155038_212890",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-07T15:50:38",
+      "updated_at": "2026-07-07T15:50:38",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": [
+        "runtime"
+      ]
+    },
+    "idempotency": {
+      "key": "run_4e1d6a77bc8549ac8645bb1d7f89ed88:call_task_create",
+      "replayed": false
+    }
+  },
+  "run_fb586c23acbc4cd782a079b473c545ee:call_add_step": {
+    "ok": true,
+    "action": "add_task_step",
+    "task": {
+      "id": "task_20260707_155849_250047",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260707_155849_250088",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T15:58:49",
+          "updated_at": "2026-07-07T15:58:49",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_155849_351545",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T15:58:49",
+          "updated_at": "2026-07-07T15:58:49",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_155849_250088",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-07T15:58:49",
+      "updated_at": "2026-07-07T15:58:49",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_fb586c23acbc4cd782a079b473c545ee:call_add_step",
+      "replayed": false
+    }
+  },
+  "run_fb586c23acbc4cd782a079b473c545ee:call_add_blocker": {
+    "ok": true,
+    "action": "add_task_blocker",
+    "task": {
+      "id": "task_20260707_155849_250047",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "blocked",
+      "steps": [
+        {
+          "id": "step_20260707_155849_250088",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T15:58:49",
+          "updated_at": "2026-07-07T15:58:49",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_155849_351545",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T15:58:49",
+          "updated_at": "2026-07-07T15:58:49",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_155849_250088",
+      "progress_notes": [],
+      "blockers": [
+        {
+          "id": "blocker_20260707_155849_414549",
+          "reason": "Need authorization boundary decision",
+          "status": "open",
+          "created_at": "2026-07-07T15:58:49",
+          "resolved_at": null,
+          "related_step_id": null
+        }
+      ],
+      "created_at": "2026-07-07T15:58:49",
+      "updated_at": "2026-07-07T15:58:49",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_fb586c23acbc4cd782a079b473c545ee:call_add_blocker",
+      "replayed": false
+    }
+  },
+  "run_5aff2df602314ffe81f95062a5453c94:call_task_create": {
+    "ok": true,
+    "action": "create_task",
+    "task": {
+      "id": "task_20260707_155849_669067",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260707_155849_669118",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T15:58:49",
+          "updated_at": "2026-07-07T15:58:49",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_155849_669135",
+          "title": "Verify agent loop",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T15:58:49",
+          "updated_at": "2026-07-07T15:58:49",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_155849_669118",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-07T15:58:49",
+      "updated_at": "2026-07-07T15:58:49",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": [
+        "runtime"
+      ]
+    },
+    "idempotency": {
+      "key": "run_5aff2df602314ffe81f95062a5453c94:call_task_create",
+      "replayed": false
+    }
+  },
+  "run_9561571633bf4b3185041acba22beda9:call_add_step": {
+    "ok": true,
+    "action": "add_task_step",
+    "task": {
+      "id": "task_20260707_163107_699562",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260707_163107_699600",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T16:31:07",
+          "updated_at": "2026-07-07T16:31:07",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_163107_789599",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T16:31:07",
+          "updated_at": "2026-07-07T16:31:07",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_163107_699600",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-07T16:31:07",
+      "updated_at": "2026-07-07T16:31:07",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_9561571633bf4b3185041acba22beda9:call_add_step",
+      "replayed": false
+    }
+  },
+  "run_9561571633bf4b3185041acba22beda9:call_add_blocker": {
+    "ok": true,
+    "action": "add_task_blocker",
+    "task": {
+      "id": "task_20260707_163107_699562",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "blocked",
+      "steps": [
+        {
+          "id": "step_20260707_163107_699600",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T16:31:07",
+          "updated_at": "2026-07-07T16:31:07",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_163107_789599",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T16:31:07",
+          "updated_at": "2026-07-07T16:31:07",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_163107_699600",
+      "progress_notes": [],
+      "blockers": [
+        {
+          "id": "blocker_20260707_163107_844536",
+          "reason": "Need authorization boundary decision",
+          "status": "open",
+          "created_at": "2026-07-07T16:31:07",
+          "resolved_at": null,
+          "related_step_id": null
+        }
+      ],
+      "created_at": "2026-07-07T16:31:07",
+      "updated_at": "2026-07-07T16:31:07",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_9561571633bf4b3185041acba22beda9:call_add_blocker",
+      "replayed": false
+    }
+  },
+  "run_0ec79d3a8962454b96944be664d8c4e7:call_task_create": {
+    "ok": true,
+    "action": "create_task",
+    "task": {
+      "id": "task_20260707_163108_070003",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260707_163108_070058",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T16:31:08",
+          "updated_at": "2026-07-07T16:31:08",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_163108_070075",
+          "title": "Verify agent loop",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T16:31:08",
+          "updated_at": "2026-07-07T16:31:08",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_163108_070058",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-07T16:31:08",
+      "updated_at": "2026-07-07T16:31:08",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": [
+        "runtime"
+      ]
+    },
+    "idempotency": {
+      "key": "run_0ec79d3a8962454b96944be664d8c4e7:call_task_create",
+      "replayed": false
+    }
+  },
+  "run_4bd23900ad6648d294ea067e41db3b44:call_27236cbef36a48bbb1757edb": {
+    "ok": true,
+    "action": "add_todo",
+    "todo": {
+      "id": 1,
+      "title": "写 Plan and Execute 手动测试记录",
+      "status": "todo",
+      "priority": "medium",
+      "due_date": null,
+      "created_at": "2026-07-07T17:13:36",
+      "completed_at": null
+    },
+    "idempotency": {
+      "key": "run_4bd23900ad6648d294ea067e41db3b44:call_27236cbef36a48bbb1757edb",
+      "replayed": false
+    }
+  },
+  "run_16ba70e8db734ea5944a6672a5edf17e:call_add_step": {
+    "ok": true,
+    "action": "add_task_step",
+    "task": {
+      "id": "task_20260707_171400_381823",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260707_171400_381865",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T17:14:00",
+          "updated_at": "2026-07-07T17:14:00",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_171400_500068",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T17:14:00",
+          "updated_at": "2026-07-07T17:14:00",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_171400_381865",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-07T17:14:00",
+      "updated_at": "2026-07-07T17:14:00",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_16ba70e8db734ea5944a6672a5edf17e:call_add_step",
+      "replayed": false
+    }
+  },
+  "run_16ba70e8db734ea5944a6672a5edf17e:call_add_blocker": {
+    "ok": true,
+    "action": "add_task_blocker",
+    "task": {
+      "id": "task_20260707_171400_381823",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "blocked",
+      "steps": [
+        {
+          "id": "step_20260707_171400_381865",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T17:14:00",
+          "updated_at": "2026-07-07T17:14:00",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_171400_500068",
+          "title": "Write Agent loop tests",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T17:14:00",
+          "updated_at": "2026-07-07T17:14:00",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_171400_381865",
+      "progress_notes": [],
+      "blockers": [
+        {
+          "id": "blocker_20260707_171400_602672",
+          "reason": "Need authorization boundary decision",
+          "status": "open",
+          "created_at": "2026-07-07T17:14:00",
+          "resolved_at": null,
+          "related_step_id": null
+        }
+      ],
+      "created_at": "2026-07-07T17:14:00",
+      "updated_at": "2026-07-07T17:14:00",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": []
+    },
+    "idempotency": {
+      "key": "run_16ba70e8db734ea5944a6672a5edf17e:call_add_blocker",
+      "replayed": false
+    }
+  },
+  "run_5303fd74dd9b479d8d89c082a014ea66:call_task_create": {
+    "ok": true,
+    "action": "create_task",
+    "task": {
+      "id": "task_20260707_171400_815020",
+      "title": "Task State v1",
+      "goal": "Complete the Task State v1 runtime loop",
+      "status": "active",
+      "steps": [
+        {
+          "id": "step_20260707_171400_815070",
+          "title": "Register tools",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T17:14:00",
+          "updated_at": "2026-07-07T17:14:00",
+          "completed_at": null
+        },
+        {
+          "id": "step_20260707_171400_815086",
+          "title": "Verify agent loop",
+          "status": "pending",
+          "summary": "",
+          "created_at": "2026-07-07T17:14:00",
+          "updated_at": "2026-07-07T17:14:00",
+          "completed_at": null
+        }
+      ],
+      "current_step_id": "step_20260707_171400_815070",
+      "progress_notes": [],
+      "blockers": [],
+      "created_at": "2026-07-07T17:14:00",
+      "updated_at": "2026-07-07T17:14:00",
+      "completed_at": null,
+      "source": "user_authorized",
+      "tags": [
+        "runtime"
+      ]
+    },
+    "idempotency": {
+      "key": "run_5303fd74dd9b479d8d89c082a014ea66:call_task_create",
+      "replayed": false
+    }
+  },
+  "run_c44e8ddd78e74d1bbf309a7f5bc1321e:call_5b65303b75414933bde23830": {
+    "ok": true,
+    "action": "add_todo",
+    "todo": {
+      "id": 2,
+      "title": "写手动测试记录",
+      "status": "todo",
+      "priority": "medium",
+      "due_date": null,
+      "created_at": "2026-07-07T17:14:44",
+      "completed_at": null
+    },
+    "idempotency": {
+      "key": "run_c44e8ddd78e74d1bbf309a7f5bc1321e:call_5b65303b75414933bde23830",
+      "replayed": false
+    }
+  }
+}

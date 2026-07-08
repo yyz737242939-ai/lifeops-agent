@@ -1,0 +1,932 @@
+# Runtime 重构总计划
+
+本文档是 LifeOps Agent Runtime 的总蓝图和施工总纲。它不替每个模块写完整功能设计；后续真正施工到 Memory、Policy、Eval、DAG 等模块时，应为该模块创建单独的模块计划。本文档负责规定：
+
+- 当前 runtime 的总体目标、阶段边界和完成标准。
+- 新旧代码与新旧文档如何隔离。
+- 当前 runtime 的总项目代码框架。
+- 各模块的职责边界、依赖方向和扩展点。
+- 后续模块计划应该如何设计、写在哪里、至少回答哪些问题。
+- 学习与面试材料如何沉淀到新的 Markdown 文档体系中。
+
+## 1. 当前总目标
+
+当前 runtime 的主线是把当前从 V0 / demo 逐步长出来的 Agent Runtime，重构成一个小而完整、边界清晰、可测试、可解释、适合学习与面试展示的工程化 runtime。
+
+核心执行链路：
+
+```text
+User Input
+-> Intent
+-> Policy / Permission
+-> LangGraph Orchestrator
+-> Context / Memory / State Assembly
+-> Planner or Direct Executor
+-> Tool / Domain / External Integration
+-> Execution Feedback
+-> Trace / Inspector / Eval
+-> Final Answer
+```
+
+当前 runtime 的关键原则：
+
+- 先判断 intent，再决定是否 planning，避免关键词误触发。
+- Policy 是权限事实源，Planner、LLM 文本、Recovery Context、LangGraph checkpoint 都不是授权来源。
+- LangGraph 做编排层，自研 runtime 保留 policy、tool safety、context、memory、executor、recovery、facts source。
+- Task 是长期业务事实源；PlanRun 是临时执行计划；PlanRun 写入 TaskSteps 必须经过明确 WRITE 授权。
+- Inspector / Eval 是一等公民，不是最后补的日志查看工具。
+- 新旧代码、新旧文档必须明确分离。
+
+## 2. 学习路线覆盖
+
+当前 runtime 要覆盖三个学习阶段，但方式不同：
+
+### 阶段 A： 初级 Agent Engineer 能力整理成清晰架构
+
+覆盖：
+
+- Agent Loop。
+- Tool System。
+- Capability。
+- Write Safety。
+- Skill / Skill References。
+- Context Engine。
+- Memory。
+
+当前 runtime 要求：
+
+- 每个能力都有明确模块归属。
+- 每个能力都有最小测试。
+- 每个能力都能在 `docs/RUNTIME_CONCEPTS.md` 中讲清楚。
+- V0 实现不直接照搬，必须经过 V0 -> 当前升级评审。
+
+### 阶段 B： 中级 Agent Engineer 能力收敛和工程化
+
+覆盖：
+
+- MCP。
+- Safety State。
+- Task State。
+- Recovery。
+- Plan and Execute。
+- Planner / Executor / Orchestrator。
+- LangChain / LangGraph 。
+
+当前 runtime 要求：
+
+- LangGraph 接入真实主流程，但不吞掉自研 runtime。
+- MCP 至少支持 Calendar fixture 读取工具，真实 OAuth 只读可作为后续增强。
+- Recovery 先做解释型恢复，不做自动 replay。
+- Task / Plan / Recovery 三者边界必须有测试证明。
+
+### 阶段 C： 面试强化层
+
+覆盖：
+
+- Policy / Permission Layer v0。
+- Executor 结构化反馈 v0。
+- LangGraph / LangChain 使用与概念映射。
+- DAG 概念与最小串行 DAG Scheduler。
+- Eval Harness v0。
+- Inspector / Debugger v0。
+
+当前 runtime 要求：
+
+- 这些能力不只是文档概念，初版都要有可运行最小版本。
+- Eval Harness 和 Inspector 必须能解释 runtime 行为，而不是只判断 final answer。
+- DAG Scheduler 独立实现，不接管主 Agent 主流程，但有测试、trace、demo。
+
+## 3. 总范围
+
+### 3.1 初版必须完成
+
+- 新代码根目录 `app/`。
+- 新入口 `main.py`。
+- 新文档目录 `docs/`。
+- 新计划目录 `plans/`。
+- SQLite 本地持久层作为 当前 runtime 业务事实源和 runtime evidence store；JSON 只保留给 fixture、config 和 sample 数据。
+- Intent Layer。
+- Policy / Permission Layer v0。
+- LangGraph Orchestrator。
+- Runtime context assembly 初版。
+- Memory 初版。
+- Tasks + Wellbeing 内部 domain。
+- Calendar MCP fixture read integration。
+- Planner / Executor / ExecutionFeedback。
+- Trace / Inspector。
+- Eval Harness v0。
+- 独立串行 DAG Scheduler。
+- V0 -> 当前迁移索引。
+- RUNTIME_CONCEPTS 学习手册骨架与核心章节。
+
+### 3.2 初版不做
+
+- 产品 UI 迁移。
+- Calendar 写入。
+- 完整 OAuth 体验打磨。
+- 完整旧 Context Engine 全量迁移。
+- 高级 Memory Retrieval。
+- Multi-Agent。
+- 后台调度。
+- 并行 DAG。
+- 自动 replay / rollback / compensate。
+
+### 3.3 后续版本候选
+
+- 完整 Context compression / ref / index / compactor。
+- 更完整 Recovery + LangGraph checkpoint 对照。
+- Calendar OAuth 只读完整配置流。
+- 产品 UI 接入 当前 runtime。
+- 高级 Memory Retrieval。
+- LangSmith / OpenTelemetry 对照。
+- Multi-Agent spike。
+
+## 4. 新旧隔离策略
+
+### 4.1 代码隔离
+
+新代码不放在旧 runtime 下面，统一放在：
+
+```text
+app/
+```
+
+旧 V0 代码、数据、日志、测试、MCP demo server、输出和旧计划统一归档：
+
+```text
+legacy_v0/
+  app/
+  data/
+  logs/
+  mcp_servers/
+  outputs/
+  plans/
+  tests/
+  docs/
+  entrypoints/
+```
+
+新入口：
+
+```text
+main.py
+```
+
+旧根入口已归档：
+
+```text
+legacy_v0/entrypoints/main_legacy.py
+legacy_v0/entrypoints/product_ui_legacy.py
+legacy_v0/entrypoints/log_viewer_legacy.py
+```
+
+目标：
+
+- 新旧 runtime 一眼可分。
+- 当前 runtime 可以逐步复用旧代码，但不能隐式依赖旧 `Agent`。
+- 后续迁移可以通过 `docs/MIGRATION_INDEX.md` 追踪。
+
+### 4.2 文档隔离
+
+当前文档不混在旧文档体系里：
+
+```text
+docs/
+plans/
+```
+
+旧文档归档到：
+
+```text
+legacy_v0/docs/
+```
+
+旧 `legacy_v0/docs/PROJECT_CONTEXT_legacy.md`、`legacy_v0/docs/LEARNING_PROGRESS_legacy.md`、`legacy_v0/plans/*.md` 不再作为默认上下文。它们只在迁移旧模块、追溯历史设计、解释 V0 行为时读取。
+
+### 4.3 数据隔离
+
+当前运行数据建议放在：
+
+```text
+data/
+  lifeops.sqlite3
+  fixtures/
+  exports/
+```
+
+规则：
+
+- `data/*.sqlite3` 不入库。
+- fixture / schema / sample 可以入库。
+- OAuth token、calendar cache、eval run output 不入库。
+
+## 5. 当前总代码框架
+
+当前总目录建议如下。后续模块计划必须遵守这个分层，除非模块计划明确提出并解释变更原因。
+
+```text
+app/
+  __init__.py
+
+  runtime/
+    request.py
+    result.py
+    session.py
+    lifecycle.py
+
+  intent/
+    classifier.py
+    types.py
+    rules.py
+
+  policy/
+    engine.py
+    types.py
+    rules.py
+    confirmation.py
+
+  orchestration/
+    graph.py
+    state.py
+    routes.py
+    nodes/
+      classify_intent.py
+      decide_policy.py
+      assemble_context.py
+      plan.py
+      execute.py
+      inspect_debug.py
+      finalize.py
+
+  planning/
+    planner.py
+    types.py
+    prompts.py
+    parser.py
+
+  execution/
+    executor.py
+    feedback.py
+    loop.py
+    validation.py
+
+  tools/
+    definitions.py
+    registry.py
+    executor.py
+    results.py
+    capability.py
+
+  domains/
+    tasks/
+      models.py
+      repository.py
+      service.py
+      tools.py
+    wellbeing/
+      models.py
+      repository.py
+      service.py
+      tools.py
+
+  integrations/
+    calendar_mcp/
+      server_fixture.py
+      client.py
+      tools.py
+      models.py
+
+  context/
+    assembler.py
+    types.py
+    sources.py
+    report.py
+
+  memory/
+    models.py
+    repository.py
+    retriever.py
+    tools.py
+    profile.py
+
+  recovery/
+    models.py
+    repository.py
+    context.py
+    service.py
+
+  storage/
+    sqlite.py
+    schema.py
+    migrations.py
+    repositories.py
+    unit_of_work.py
+
+  observability/
+    events.py
+    trace.py
+    trace_store.py
+    logger.py
+
+  inspector/
+    reader.py
+    formatter.py
+    cli.py
+
+  evals/
+    case.py
+    runner.py
+    assertions.py
+    report.py
+
+  dag/
+    models.py
+    scheduler.py
+    executor.py
+    trace.py
+
+  common/
+    ids.py
+    time.py
+    errors.py
+    result.py
+    serialization.py
+
+main.py
+```
+
+### 5.1 分层规则
+
+- `domains/*` 不直接读写 SQLite connection，只通过 repository / service。
+- `policy` 不调用工具，不写业务数据。
+- `planning` 不调用工具，不授权 WRITE。
+- `execution` 可以调用 tools，但必须使用 PolicyDecision 和 allowed tools。
+- `orchestration` 只做 graph wiring 和 route，不放业务逻辑。
+- `inspector` 只读trace / run evidence，不修改状态。
+- `evals` 使用 fixture 和测试数据库，不复用真实用户数据。
+- `common` / `storage` / `observability` 是基础设施层，不依赖业务 domain。
+
+### 5.2 模块依赖方向
+
+允许的依赖方向：
+
+```text
+main
+-> runtime
+-> orchestration
+-> intent / policy / context / planning / execution / inspector
+-> tools / domains / memory / recovery / integrations
+-> storage / observability / common
+```
+
+禁止：
+
+- domain 反向依赖 orchestration。
+- storage 反向依赖 domain service。
+- policy 调 executor。
+- planner 直接调 tool executor。
+- inspector 改业务状态。
+- eval 修改真实 data。
+
+## 6. SQLite 持久层策略
+
+当前 runtime 建议使用 SQLite 作为本地事实源和 runtime evidence store。
+
+JSON 不再承担业务长期事实源职责，只在需要 fixture、config、sample 或外部 mock 数据时使用。
+
+原因：
+
+- Python 标准库支持，不增加重依赖。
+- 减少旧版大量 JSON load/save/version/atomic write 辅助代码。
+- 更适合 Inspector / Eval / Recovery 查询。
+- 更贴近真实工程，但仍保持本地轻量。
+
+SQLite 存储：
+
+- tasks。
+- task_steps。
+- wellbeing_entries。
+- semantic_memories。
+- run_records。
+- trace_events。
+- tool_calls。
+- eval_runs。
+- eval_results。
+
+继续使用 Markdown / JSON 的内容：
+
+- `profile.md` 和 `profile.example.md`。
+- skill / source manifest。
+- eval fixture。
+- calendar fixture data。
+- config examples。
+
+后续必须单独创建 `plans/modules/STORAGE_SQLITE_PLAN.md`，设计：
+
+- schema。
+- migration 方式。
+- repository 接口。
+- test database 策略。
+- reset / seed / fixture 策略。
+- 隐私和 gitignore 策略。
+
+## 7. V0 -> 当前升级矩阵
+
+本总计划只定义升级方向。每个模块正式施工前，必须在对应模块计划中补充细节。
+
+| 模块 | V0 状态 | 当前 runtime 轻量升级方向 | 模块计划 |
+|---|---|---|---|
+| Agent Loop | 旧 `Agent` 聚合过多职责 | 拆成 runtime / orchestration / execution | `plans/modules/RUNTIME_CORE_PLAN.md` |
+| Tool System | registry 和 business tool 偏大 | definition / registry / capability / executor / result 分离 | `plans/modules/TOOL_SYSTEM_PLAN.md` |
+| Policy / Safety | write policy、interaction policy 分散 | 统一 PolicyDecision 和 confirmation model | `plans/modules/POLICY_PERMISSION_PLAN.md` |
+| Context | 功能强但复杂 | 初版精简 request context，后续版本迁移压缩/ref/index | `plans/modules/CONTEXT_PLAN.md` |
+| Memory | JSON store + 简单检索 | SQLite semantic memory + profile markdown + request-local injection | `plans/modules/MEMORY_PLAN.md` |
+| Task State | JSON TaskStore | SQLite Task repository + user-approved steps | `plans/modules/TASKS_DOMAIN_PLAN.md` |
+| Wellbeing | domain JSON | SQLite Wellbeing repository + context source | `plans/modules/WELLBEING_DOMAIN_PLAN.md` |
+| Planner | V0 transient plan | 保留 transient PlanRun，明确不授权、不执行、不自动写 Task | `plans/modules/PLANNER_PLAN.md` |
+| Executor | 包装旧 agent loop | 单步执行 + 结构化反馈 + tool evidence | `plans/modules/EXECUTOR_PLAN.md` |
+| Recovery | run/action JSON 摘要 | SQLite run_records + trace evidence + no replay | `plans/modules/RECOVERY_PLAN.md` |
+| LangGraph | 尚未正式接入 | StateGraph 主编排，自研节点 | `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md` |
+| MCP Calendar | 旧 mock package MCP | Calendar fixture 读取 MCP + optional OAuth 只读| `plans/modules/CALENDAR_MCP_PLAN.md` |
+| DAG | 尚未实现 | 独立串行 DAG Scheduler | `plans/modules/DAG_SCHEDULER_PLAN.md` |
+| Eval | 零散 tests | eval case / runner / assertions / reports | `plans/modules/EVAL_HARNESS_PLAN.md` |
+| Inspector | log viewer / context inspector 分散 | trace reader + runtime report CLI | `plans/modules/INSPECTOR_PLAN.md` |
+
+## 8. 后续模块计划写作规约
+
+每个模块开始施工前，先创建对应的 `plans/modules/*_PLAN.md`。模块计划不需要重复本总计划，但必须回答以下问题。
+
+### 8.1 模块计划必备章节
+
+```markdown
+# <模块> 模块计划
+
+## 1. 目标
+这个模块在当前 runtime 中解决什么问题。
+
+## 2. 当前 V0 参考
+旧实现在哪里，有什么可以复用，V0 的主要问题是什么。
+
+## 3. 当前范围
+初版做什么，不做什么，后续版本留什么。
+
+## 4. Runtime 边界
+输入是什么，输出是什么，不负责什么，依赖哪些模块。
+
+## 5. 数据模型 / 存储
+是否需要 SQLite 表、repository、fixtures、migration。
+
+## 6. 对外接口
+对其他模块暴露哪些类型、函数、service、tools。
+
+## 7. 失败模式
+常见失败、权限问题、恢复语义、trace 记录。
+
+## 8. 测试和 Eval
+单元测试、集成测试、eval scenario、trace 验证点。
+
+## 9. 文档更新
+需要更新 docs/CURRENT_STATE、ARCHITECTURE、RUNTIME_CONCEPTS、INTERVIEW_DEMO_GUIDE 的哪些部分。
+
+## 10. 实施步骤
+小步施工顺序。
+```
+
+### 8.2 模块计划必须遵守的默认规则
+
+- 不把模块内部设计写进总计划。
+- 不引入跨层依赖，除非模块计划显式说明并获得确认。
+- 不为了复用 V0 代码而继承 V0 的职责混乱。
+- 模块完成后必须更新 `docs/CURRENT_STATE.md`。
+- 改变架构边界时必须新增或更新 ADR。
+- 面试相关学习点必须进入 `docs/RUNTIME_CONCEPTS.md`。
+- 有 runtime 行为变化时必须有测试或 eval。
+
+## 9. 文档体系设计
+
+当前文档目录：
+
+```text
+docs/
+  CURRENT_STATE.md
+  ARCHITECTURE.md
+  RUNTIME_CONCEPTS.md
+  INTERVIEW_DEMO_GUIDE.md
+  MIGRATION_INDEX.md
+  agents/
+  decisions/
+    ADR-0001-runtime-boundaries.md
+    ADR-0002-task-vs-plan.md
+    ADR-0003-langgraph-boundary.md
+    ADR-0004-sqlite-storage.md
+
+legacy_v0/
+  app/
+  data/
+  logs/
+  mcp_servers/
+  outputs/
+  tests/
+  entrypoints/
+    main_legacy.py
+    log_viewer_legacy.py
+    product_ui_legacy.py
+  docs/
+    PROJECT_CONTEXT_legacy.md
+    LEARNING_PROGRESS_legacy.md
+  plans/
+
+plans/
+  RUNTIME_REFACTOR_PLAN.md
+  *_PLAN.md
+```
+
+### 9.1 文档职责
+
+| 文档 | 作用 |
+|---|---|
+| `README.md` | 项目入口、如何运行、当前状态、文档导航 |
+| `docs/CURRENT_STATE.md` | 当前真实项目框架和实现状态，给人和 AI 快速了解项目 |
+| `docs/ARCHITECTURE.md` | 总架构、模块边界、依赖方向、状态生命周期 |
+| `docs/RUNTIME_CONCEPTS.md` | 详细学习手册：每个模块的知识点、实现解释、官方链接、面试讲法 |
+| `docs/INTERVIEW_DEMO_GUIDE.md` | 面试 demo 脚本、讲解路径、常见追问 |
+| `docs/MIGRATION_INDEX.md` | V0 文件/模块/文档到 当前 runtime 的迁移、重写、归档、延后记录 |
+| `docs/decisions/*.md` | 架构决策记录 |
+| `docs/agents/` | Codex 协作、triage 和 domain-doc 规则 |
+| `legacy_v0/` | V0 代码、文档、数据、日志、测试、旧计划和旧入口归档，不作为默认上下文 |
+| `plans/RUNTIME_REFACTOR_PLAN.md` | 本总计划 |
+| `plans/modules/*_PLAN.md` | 后续每个模块的具体施工计划 |
+
+### 9.2 默认阅读顺序
+
+后续 AI / 人开始当前 runtime 任务时，默认读取：
+
+```text
+1. README.md
+2. docs/CURRENT_STATE.md
+3. plans/RUNTIME_REFACTOR_PLAN.md
+4. 当前模块对应的 plans/modules/*_PLAN.md
+5. 与任务直接相关的代码、测试、文档片段
+```
+
+只在以下情况读取 `legacy_v0/`：
+
+- 迁移旧模块。
+- 解释旧行为。
+- 对比 V0 / 当前设计取舍。
+- 查找历史实现证据。
+
+### 9.3 RUNTIME_CONCEPTS.md 设计
+
+`docs/RUNTIME_CONCEPTS.md` 要写得详细，作为学习和面试手册。每个模块使用固定模板：
+
+```markdown
+## <概念 / 模块>
+
+### 解决什么问题
+
+### 核心知识点
+
+### 在 当前 runtime 中如何实现
+
+### 输入 / 输出 / 不负责什么
+
+### 常见失败模式
+
+### 如何测试和观察
+
+### 面试时怎么讲
+
+### 继续学习
+- Official docs
+- Framework docs
+- 本项目相关文件
+```
+
+必须覆盖：
+
+- Agent Loop。
+- Intent Layer。
+- Policy / Permission Layer。
+- Tool System。
+- Capability。
+- Write Safety。
+- LangGraph Orchestrator。
+- LangChain adapter。
+- Planner。
+- Executor。
+- Task State。
+- Task vs Plan。
+- Context Engine。
+- Memory。
+- Recovery。
+- MCP。
+- Calendar external tool。
+- DAG Scheduler。
+- Eval Harness。
+- Inspector / Debugger。
+- Observability。
+- SQLite local persistence。
+
+官方文档链接应在该文件中维护，不散落在各模块计划里。模块计划可以引用该文件的相关章节。
+
+## 10. Domain 选择标准
+
+初版内部 domain 选择：
+
+```text
+Tasks
+Wellbeing
+```
+
+外部 integration：
+
+```text
+Calendar MCP 只读
+```
+
+选择标准：
+
+- 是否有 READ / WRITE。
+- 是否能触发 permission / confirmation。
+- 是否能进入 planning。
+- 是否能不经过 planning 直接 ReAct 执行。
+- 是否能扩展成 DAG。
+- 是否能产生 recovery 场景。
+- 是否能进入 eval。
+- 是否有真实生活价值。
+
+Tasks 适合：
+
+- 长期状态。
+- PlanRun -> TaskSteps 边界。
+- Write safety。
+- Recovery。
+- DAG 节点。
+- Eval。
+
+Wellbeing 适合：
+
+- 用户状态上下文。
+- 写入授权。
+- Planning constraint。
+- Memory / Context 边界解释。
+
+Calendar MCP 适合：
+
+- 外部只读工具。
+- MCP 学习。
+- Planning context。
+- Fixture / OAuth fallback。
+- 隐私和 permission 讨论。
+
+## 11. Eval Harness 总设计
+
+Eval Harness 是 面试重点之一，不能只是普通测试目录。
+
+分三层：
+
+```text
+Unit eval
+-> intent / policy / DAG / parser / repository
+
+Scenario eval
+-> 单次用户请求跑完整 graph，断言 route、policy、tool、state、trace
+
+Regression eval
+-> 固定历史 bug，例如 plan 关键词误路由
+```
+
+初版默认使用 deterministic eval，不做大规模 LLM-as-judge。
+
+每个 eval case 至少包含：
+
+- input。
+- fixture data。
+- expected intent。
+- expected policy。
+- expected graph path。
+- expected tool calls。
+- expected state changes。
+- expected final answer constraints。
+- expected trace evidence。
+
+Eval 输出必须能帮助定位失败层级：
+
+```text
+intent
+policy
+graph
+context
+tool
+state
+executor_feedback
+final_answer
+```
+
+详细设计放入：
+
+```text
+plans/modules/EVAL_HARNESS_PLAN.md
+docs/RUNTIME_CONCEPTS.md#Eval-Harness
+docs/INTERVIEW_DEMO_GUIDE.md
+```
+
+## 12. 施工阶段
+
+### 阶段 0：分支与归档边界
+
+目标：
+
+- 保存 V0 永久对照。
+- 创建 当前 runtime 分支。
+- 确定新旧代码和文档隔离方式。
+
+交付：
+
+- checkpoint 分支 / tag。
+- `legacy_v0/` 归档结构规划。
+- `docs/MIGRATION_INDEX.md` 初版。
+
+### 阶段 1：文档基础
+
+目标：
+
+- 先建立 当前文档体系和模块计划规约。
+
+交付：
+
+- `docs/CURRENT_STATE.md`。
+- `docs/ARCHITECTURE.md`。
+- `docs/RUNTIME_CONCEPTS.md` 骨架。
+- `docs/INTERVIEW_DEMO_GUIDE.md` 骨架。
+- `docs/decisions/ADR-0001-runtime-boundaries.md`。
+- `plans/RUNTIME_REFACTOR_PLAN.md`。
+- 更新 `AGENTS.md` 的 默认读取顺序。
+
+### 阶段 2：存储与基础设施
+
+目标：
+
+- 先建立基础设施层，避免业务代码继续混杂 json/log/helper 逻辑。
+
+交付：
+
+- `plans/modules/STORAGE_SQLITE_PLAN.md`。
+- `app/storage/`。
+- `app/common/`。
+- `app/observability/`。
+- SQLite schema / migration skeleton。
+- test database strategy。
+
+### 阶段 3：Runtime Core / Intent / Policy
+
+目标：
+
+- 先解决入口、误触发、权限事实源。
+
+交付：
+
+- `plans/modules/RUNTIME_CORE_PLAN.md`。
+- `plans/modules/INTENT_POLICY_PLAN.md` 或拆成两个计划。
+- `app/runtime/`。
+- `app/intent/`。
+- `app/policy/`。
+- intent / policy tests。
+
+### 阶段 4：LangGraph Orchestration 骨架
+
+目标：
+
+- 建立主编排骨架，但节点先可 stub。
+
+交付：
+
+- `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md`。
+- `app/orchestration/`。
+- graph state。
+- route nodes。
+- graph path trace。
+- route tests。
+
+### 阶段 5：Tool System 与 Domains
+
+目标：
+
+- 建立工具系统和两个内部 domain。
+
+交付：
+
+- `plans/modules/TOOL_SYSTEM_PLAN.md`。
+- `plans/modules/TASKS_DOMAIN_PLAN.md`。
+- `plans/modules/WELLBEING_DOMAIN_PLAN.md`。
+- tool registry / capability / executor。
+- Tasks repository / service / tools。
+- Wellbeing repository / service / tools。
+
+### 阶段 6：Context / Memory / Recovery
+
+目标：
+
+- 实现 request-local context、memory injection、解释型 recovery。
+
+交付：
+
+- `plans/modules/CONTEXT_PLAN.md`。
+- `plans/modules/MEMORY_PLAN.md`。
+- `plans/modules/RECOVERY_PLAN.md`。
+- Context report。
+- Memory repository / retriever / profile。
+- RunRecord / recovery context。
+
+### 阶段 7：Planner / Executor / Feedback
+
+目标：
+
+- 实现 Plan and Execute 当前 runtime 边界。
+
+交付：
+
+- `plans/modules/PLANNER_PLAN.md`。
+- `plans/modules/EXECUTOR_PLAN.md`。
+- transient PlanRun。
+- 单步 Executor。
+- ExecutionFeedback。
+- final answer 校验。
+
+### 阶段 8：Calendar MCP
+
+目标：
+
+- 实现外部只读工具边界和 MCP 学习切片。
+
+交付：
+
+- `plans/modules/CALENDAR_MCP_PLAN.md`。
+- fixture MCP server。
+- read tools。
+- 可选 OAuth adapter 设计。
+- calendar eval fixture。
+
+### 阶段 9：Inspector / Eval / DAG
+
+目标：
+
+- 补齐面试强化层。
+
+交付：
+
+- `plans/modules/INSPECTOR_PLAN.md`。
+- `plans/modules/EVAL_HARNESS_PLAN.md`。
+- `plans/modules/DAG_SCHEDULER_PLAN.md`。
+- trace reader。
+- eval runner。
+- 串行 DAG scheduler。
+- demo 场景。
+
+### 阶段 10：面试收口
+
+目标：
+
+- 让项目可讲、可跑、可复盘。
+
+交付：
+
+- `docs/RUNTIME_CONCEPTS.md` 详细版。
+- `docs/INTERVIEW_DEMO_GUIDE.md` 完整版。
+- 架构图。
+- 3-5 个 demo 脚本。
+- 初版完成报告。
+
+## 13. 初版完成标准
+
+初版完成必须满足：
+
+- `main.py` 可运行 CLI demo。
+- `app/` 新旧边界清晰。
+- SQLite 作为 Runtime facts / evidence store 可用。
+- Intent / Policy 能阻止 plan 关键词误路由 和未授权写入。
+- LangGraph 编排真实接入。
+- Tasks + Wellbeing 可 read/write。
+- Calendar fixture 读取可用于 planning context。
+- Task / Plan 边界有测试。
+- Executor 返回 结构化反馈。
+- Recovery 可解释上次停点，但不 replay。
+- Inspector 能解释一次 run。
+- Eval 能断言关键 runtime 行为。
+- DAG Scheduler 独立可演示。
+- `docs/` 和 `plans/` 文档体系完成。
+
+## 14. 总施工原则
+
+- 这个文件只做总蓝图，不替模块计划做详细设计。
+- 每个模块施工前必须先写模块计划。
+- 模块计划必须引用本总计划、`docs/ARCHITECTURE.md` 和 `docs/RUNTIME_CONCEPTS.md` 的相关章节。
+- 新代码优先放进 `app/`，不要混入 `legacy_v0/app/`。
+- 新文档优先放进 `docs/` 和 `plans/`，不要继续扩大旧文档体系。
+- 先基础设施，再业务 domain。
+- 先 intent / policy，再 planner / executor。
+- 先 fixture，再真实外部服务。
+- 先 deterministic eval，再考虑 LLM-as-judge。
+- 先 trace，再 inspector 展示。
+- 不迁移职责不清的旧模块；必要时重写轻量 当前 runtime。

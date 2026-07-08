@@ -2,54 +2,29 @@
 
 ## 仓库协作约定
 
-本仓库既是 Agent Runtime 机制学习项目，也是 LifeOps 个人生活管理产品的早期版本。
+本文件只记录 Codex 在本仓库中的协作规则。项目背景、当前状态、架构原则和实施计划分别放在 `README.md`、`docs/` 和 `plans/`。
 
-开始规划或修改前，应先用搜索确认相关文件位置，再按需阅读：
-
-1. `PROJECT_CONTEXT.md`：了解当前项目事实、架构、已实现能力和已知限制。
-2. `LEARNING_PROGRESS.md`：了解当前学习主线、阶段计划和下一步方向。
-3. 与当前任务直接相关的代码、测试和文档片段。
+开始规划或修改前，应先用搜索确认相关文件位置，再按 `README.md` 的 `当前阅读路径` 读取必要上下文。当前模块计划不存在时，先在 `plans/modules/` 创建。
 
 不要默认读取整个仓库。只读取与当前任务相关的文件和片段，避免重复读取未变化内容。
 
-## 文档职责
+## Legacy 读取规则
 
-- `AGENTS.md`：仓库协作规则，保持简洁，不写阶段性施工细节。如果在工作过程中，你认为用户的需求或者任务与这个文件不符，可询问用户是否继续，是否需要修改该文件。
-- `PROJECT_CONTEXT.md`：记录稳定项目事实、架构、重要功能推进、关键实现取舍和验证结果，是后续学习报告的重要历史材料。
-- `LEARNING_PROGRESS.md`：记录当前学习主线、阶段计划、下一步方向和关键学习结论。
-- `CHANGELOG.md`：记录重要阶段节点，格式参考文件本身。
+`legacy_v0/` 只作为历史对照使用。只有在迁移旧模块、追溯旧实现、解释历史行为或对比 V0 和当前实现取舍时，才读取其中内容。
 
-当行为、架构、命令、学习计划、关键实现取舍或验证结果发生变化时，应同步更新相关文档。  
-一般来说，当用户要求实现某个功能，并且代码已经完成后，应把重要功能变化记录到 `PROJECT_CONTEXT.md`。  
-阶段性完成或里程碑变化应写入 `CHANGELOG.md`。这个必须等用户指令才，不要自己随意更新。  
-`LEARNING_PROGRESS.md` 只在学习主线、阶段状态或下一步计划确实变化时更新，不要随手改。
+## Agent Skills
 
-本仓库 Markdown 文件使用 UTF-8 编码。
+### Issue Tracker
 
-## Agent skills
+Issue 存放在 GitHub Issues 中，外部 PR 也视为 triage 请求入口。参见 `docs/agents/issue-tracker.md`。
 
-### Issue tracker
+### Triage 标签
 
-Issues live in GitHub Issues, and external PRs are also treated as a triage request surface. See `docs/agents/issue-tracker.md`.
+使用默认的五标签 triage 词汇表。参见 `docs/agents/triage-labels.md`。
 
-### Triage labels
+### Domain 文档
 
-Use the default five-label triage vocabulary. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Use a single-context domain-doc layout. See `docs/agents/domain.md`.
-
-## 项目背景
-
-LifeOps Agent 的长期方向是成为真实可用的个人生活管理 Agent。
-
-本项目也承担学习目的：通过亲自实现关键 Runtime 机制，理解 Agent 如何处理工具、上下文、状态、副作用、安全和可靠性。
-
-产品目标和学习目标应互相强化。优先选择能让助手更安全、更可观察、更可恢复、更适合真实用户数据的设计。
-
-教学和实现代码可以参考成熟、热门的 Agent 框架、产品和开源项目，例如 OpenClaw、Claude Code、OpenHands、LangGraph 等。参考重点是 Runtime 边界、工具执行、上下文管理、权限控制、可观测性和恢复机制。  
-对非开源或无法直接验证源码的产品，只参考公开文档、公开行为和可复现实验，不臆测内部实现。
+使用单一上下文的 domain 文档布局。参见 `docs/agents/domain.md`。
 
 ## 工作方式
 
@@ -60,11 +35,19 @@ LifeOps Agent 的长期方向是成为真实可用的个人生活管理 Agent。
 - 优先局部修改，不重写整个文件。
 - 只修改与当前任务相关的代码。
 - 不顺手重构无关逻辑。
-- 不确定范围时，以 `PROJECT_CONTEXT.md` 和 `LEARNING_PROGRESS.md` 为准；仍不确定则先向用户确认。
+- 当前工作不确定范围时，以 `docs/CURRENT_STATE.md`、`plans/RUNTIME_REFACTOR_PLAN.md` 和当前模块计划为准；仍不确定则先向用户确认。
+
+### 当前施工规则
+
+- 新代码默认写入 `app/`，不要混入 `legacy_v0/app/`。
+- 新文档默认写入 `docs/`。
+- 新计划默认写入 `plans/`。
+- 每个模块施工前，先创建或阅读对应的 `plans/modules/*_PLAN.md`。
+- 模块计划必须说明目标、V0 参考、当前范围、边界、数据模型、接口、失败模式、测试、文档更新和实施步骤。
+- 模块完成后，应更新 `docs/CURRENT_STATE.md`；改变架构边界时，应新增或更新 `docs/decisions/*.md`。
+- 面试或学习相关知识点应沉淀到 `docs/RUNTIME_CONCEPTS.md`。
 
 ### 上下文管理
-
-为了减少上下文消耗，必须遵守：
 
 - 必须先搜索，再读取文件。
 - 只读取与当前任务相关的文件。
@@ -83,14 +66,11 @@ LifeOps Agent 的长期方向是成为真实可用的个人生活管理 Agent。
 - 不要为了“像某个框架”而引入过大的抽象、依赖或平台化复杂度。
 - 借鉴外部项目时，先提炼核心机制和适用原因，再按本仓库当前阶段做小规模、可解释的实现。
 
-## 工程规则
+## 工程协作红线
 
-- 用户数据安全优先。任何业务写入都必须来自用户当前输入的明确授权。
-- 不要只凭模型文本判断成功。Runtime 状态和成功的 WRITE Action 才是“已保存/已修改”的事实来源。
-- 保持 Skill、Tool、Capability、Context、Runtime State、业务数据和长期 Memory 的边界清晰。
-- Conversation Summary 不等于 Long-term Memory；Context 压缩结果不能自动升级为长期记忆。
-- 修改 Runtime 行为、Context 处理、Memory、写入安全或工具执行时，应添加或更新聚焦的回归测试。
-- 优先做小而可观察的改动，避免大范围重写。
+- 不要为了顺手重构而扩大改动范围。
+- 修改行为时优先补充或更新聚焦测试。
+- 项目 runtime 的设计原则属于 `docs/` 和 `plans/`，不要堆进 `AGENTS.md`。
 
 ## 验证方式
 
@@ -103,11 +83,9 @@ LifeOps Agent 的长期方向是成为真实可用的个人生活管理 Agent。
 常用命令：
 
 ```powershell
-# 运行 Agent
-uv run python main.py
-
-# 查看日志
-uv run python log_viewer.py
-
 # 运行测试
 uv run python -m unittest discover -s tests -v
+
+# 未来当前入口，尚未实现
+uv run python main.py
+```

@@ -1,0 +1,13 @@
+# 模块计划
+
+模块实施计划放在这里。
+
+本目录用于存放聚焦的计划，例如：
+
+- `STORAGE_SQLITE_PLAN.md`
+- `RUNTIME_CORE_PLAN.md`
+- `POLICY_PERMISSION_PLAN.md`
+- `MEMORY_PLAN.md`
+- `EVAL_HARNESS_PLAN.md`
+
+`plans/RUNTIME_REFACTOR_PLAN.md` 保持为总路线图。实现模块前，使用 `MODULE_PLAN_TEMPLATE.md` 在这里创建或更新模块计划。
