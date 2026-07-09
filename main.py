@@ -1,4 +1,4 @@
-"""CLI skeleton for the current LifeOps runtime."""
+"""Interactive CLI skeleton for the current LifeOps runtime."""
 
 from __future__ import annotations
 
@@ -12,10 +12,9 @@ from app.runtime.models import RuntimeRequest, RuntimeSession, RuntimeStatus
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run one CLI request through the current runtime skeleton."""
+    """Run interactive CLI requests through the current runtime skeleton."""
 
-    parser = argparse.ArgumentParser(description="Run one LifeOps runtime request.")
-    parser.add_argument("user_input", nargs="*", help="User input for one runtime turn.")
+    parser = argparse.ArgumentParser(description="Run the LifeOps runtime CLI.")
     parser.add_argument(
         "--config",
         default=str(DEFAULT_CONFIG_PATH),
@@ -23,36 +22,49 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    user_input = " ".join(args.user_input).strip()
-    if not user_input:
-        print("user_input is required.")
-        return 2
-
     runtime = None
+    had_error = False
     try:
         runtime = build_runtime_service(args.config)
         session = RuntimeSession()
-        request = RuntimeRequest(
-            user_input=user_input,
-            session_id=session.session_id,
-        )
-        result = runtime.handle(request)
+
+        print("LifeOps CLI. Type exit or quit to stop.")
+        while True:
+            try:
+                user_input = input("> ").strip()
+            except EOFError:
+                print()
+                break
+
+            if not user_input:
+                continue
+            if user_input.lower() in {"exit", "quit"}:
+                break
+
+            try:
+                request = RuntimeRequest(
+                    user_input=user_input,
+                    session_id=session.session_id,
+                )
+                result = runtime.handle(request)
+            except AppError as exc:
+                had_error = True
+                print(f"error: {exc.message}")
+                continue
+
+            print(result.message)
+            if result.status == RuntimeStatus.ERROR:
+                had_error = True
     except AppError as exc:
-        print(f"error: {exc.code or exc.__class__.__name__}: {exc.message}")
+        print(f"error: {exc.message}")
         return 1
+    except KeyboardInterrupt:
+        print()
     finally:
         if runtime is not None:
             runtime.close()
 
-    print(f"status: {result.status.value}")
-    print(f"run_id: {result.run_id}")
-    print(f"message: {result.message}")
-    if result.intent is not None:
-        print(f"intent: {result.intent.get('intent_type')}")
-    if result.policy is not None:
-        print(f"policy: {result.policy.get('action')}")
-
-    return 1 if result.status == RuntimeStatus.ERROR else 0
+    return 1 if had_error else 0
 
 
 if __name__ == "__main__":

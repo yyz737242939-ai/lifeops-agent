@@ -3,7 +3,24 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
+
+
+class OptionalLogAppender:
+    """Wrap an optional log callback behind a stable append method."""
+
+    def __init__(
+        self,
+        callback: Callable[[str, dict[str, Any] | None], None] | None,
+    ) -> None:
+        self._callback = callback
+
+    def append(self, event_type: str, payload: dict[str, Any] | None = None) -> None:
+        if self._callback is None:
+            return
+        self._callback(event_type, payload)
 
 
 def ensure_application_logger() -> logging.Logger:

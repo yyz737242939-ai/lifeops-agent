@@ -7,10 +7,31 @@ from pathlib import Path
 
 from app.observability.events import LogLlmInteraction, LogTraceEvent
 from app.observability.file_logs import SessionLogWriter
-from app.observability.logger import configure_application_logging
+from app.observability.logger import OptionalLogAppender, configure_application_logging
 
 
 class ObservabilityFileLogsTest(unittest.TestCase):
+    def test_optional_log_appender_ignores_missing_callback(self) -> None:
+        appender = OptionalLogAppender(None)
+
+        appender.append("runtime.intent.started")
+        appender.append("runtime.intent.completed", {"intent_type": "chat"})
+
+    def test_optional_log_appender_forwards_to_callback(self) -> None:
+        calls: list[tuple[str, dict[str, object] | None]] = []
+
+        def record(event_type: str, payload: dict[str, object] | None = None) -> None:
+            calls.append((event_type, payload))
+
+        appender = OptionalLogAppender(record)
+
+        appender.append("runtime.intent.completed", {"intent_type": "chat"})
+
+        self.assertEqual(
+            calls,
+            [("runtime.intent.completed", {"intent_type": "chat"})],
+        )
+
     def test_session_log_writer_creates_metadata_and_jsonl_logs(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             writer = SessionLogWriter.create(

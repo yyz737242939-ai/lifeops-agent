@@ -12,7 +12,11 @@ from app.intent.models import IntentDecision
 from app.intent.service import IntentService
 from app.observability.events import LogTraceEvent
 from app.observability.file_logs import EventLogWriter, SessionLogWriter
-from app.observability.logger import configure_application_logging, ensure_application_logger
+from app.observability.logger import (
+    OptionalLogAppender,
+    configure_application_logging,
+    ensure_application_logger,
+)
 from app.policy.models import PolicyAction, PolicyDecision
 from app.policy.service import PolicyService
 from app.runtime.models import RuntimeRequest, RuntimeResult, RuntimeStatus
@@ -43,34 +47,18 @@ class RuntimeService:
     def handle(self, request: RuntimeRequest) -> RuntimeResult:
         """Run one request through Intent and Policy without executing tools yet."""
 
-        append_trace = self._build_event_appender(request)
+        trace = OptionalLogAppender(self._build_event_appender(request))
 
         if self._conn is None:
-            if append_trace is not None:
-                append_trace("runtime.run.started")
-                append_trace(
-                    "runtime.request.created",
-                    {
-                        "session_id": request.session_id,
-                        "turn_id": request.turn_id,
-                    },
-                )
+            self._append_request_started(request, trace)
             self._logger.info("runtime run started run_id=%s", request.run_id)
-            return self._handle_core(request, append_trace=append_trace)
+            return self._handle_core(request, trace=trace)
 
         with SqliteUnitOfWork(self._conn):
             insert_run_record(self._conn, request)
-            if append_trace is not None:
-                append_trace("runtime.run.started")
-                append_trace(
-                    "runtime.request.created",
-                    {
-                        "session_id": request.session_id,
-                        "turn_id": request.turn_id,
-                    },
-                )
+            self._append_request_started(request, trace)
             self._logger.info("runtime run started run_id=%s", request.run_id)
-            result = self._handle_core(request, append_trace=append_trace)
+            result = self._handle_core(request, trace=trace)
             finish_run_record(self._conn, result)
             return result
 
@@ -84,14 +72,12 @@ class RuntimeService:
         self,
         request: RuntimeRequest,
         *,
-        append_trace: Callable[[str, dict[str, Any] | None], None] | None = None,
+        trace: OptionalLogAppender,
     ) -> RuntimeResult:
         try:
-            if append_trace is not None:
-                append_trace("runtime.intent.started")
+            trace.append("runtime.intent.started")
             intent = self._intent_service.classify(request)
-            if append_trace is not None:
-                append_trace("runtime.intent.completed", _intent_summary(intent))
+            trace.append("runtime.intent.completed", _intent_summary(intent))
         except Exception as exc:
             result = RuntimeResult(
                 run_id=request.run_id,
@@ -101,20 +87,17 @@ class RuntimeService:
                 error_code="runtime.intent_failed",
                 trace_summary=[_safe_error_summary(exc)],
             )
-            if append_trace is not None:
-                append_trace(
-                    "runtime.run.failed",
-                    {"error_code": result.error_code, "stage": "intent"},
-                )
+            trace.append(
+                "runtime.run.failed",
+                {"error_code": result.error_code, "stage": "intent"},
+            )
             self._logger.exception("runtime run failed run_id=%s stage=intent", request.run_id)
             return result
 
         try:
-            if append_trace is not None:
-                append_trace("runtime.policy.started")
+            trace.append("runtime.policy.started")
             policy = self._policy_service.evaluate(request, intent)
-            if append_trace is not None:
-                append_trace("runtime.policy.completed", _policy_summary(policy))
+            trace.append("runtime.policy.completed", _policy_summary(policy))
         except Exception as exc:
             result = RuntimeResult(
                 run_id=request.run_id,
@@ -125,11 +108,10 @@ class RuntimeService:
                 error_code="runtime.policy_failed",
                 trace_summary=[_safe_error_summary(exc)],
             )
-            if append_trace is not None:
-                append_trace(
-                    "runtime.run.failed",
-                    {"error_code": result.error_code, "stage": "policy"},
-                )
+            trace.append(
+                "runtime.run.failed",
+                {"error_code": result.error_code, "stage": "policy"},
+            )
             self._logger.exception("runtime run failed run_id=%s stage=policy", request.run_id)
             return result
 
@@ -142,15 +124,14 @@ class RuntimeService:
             policy=_policy_summary(policy),
             trace_summary=["runtime.orchestration.stubbed"],
         )
-        if append_trace is not None:
-            append_trace(
-                "runtime.orchestration.stubbed",
-                {"status": result.status.value},
-            )
-            append_trace(
-                "runtime.run.completed",
-                {"status": result.status.value},
-            )
+        trace.append(
+            "runtime.orchestration.stubbed",
+            {"status": result.status.value},
+        )
+        trace.append(
+            "runtime.run.completed",
+            {"status": result.status.value},
+        )
         self._logger.info(
             "runtime run completed run_id=%s status=%s",
             request.run_id,
@@ -185,6 +166,20 @@ class RuntimeService:
             )
 
         return append_trace
+
+    def _append_request_started(
+        self,
+        request: RuntimeRequest,
+        trace: OptionalLogAppender,
+    ) -> None:
+        trace.append("runtime.run.started")
+        trace.append(
+            "runtime.request.created",
+            {
+                "session_id": request.session_id,
+                "turn_id": request.turn_id,
+            },
+        )
 
     def _ensure_session_log(self, request: RuntimeRequest) -> SessionLogWriter:
         if self._session_log is not None:
