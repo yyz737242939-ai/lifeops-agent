@@ -1,5 +1,34 @@
 # Intent / Policy 模块计划
 
+## 当前状态
+
+阶段 3 Intent / Policy 初版已完成。
+
+已完成：
+
+- `app/intent/` 已包含 intent models、classifier 接口、规则 classifier、LLM classifier 空实现和 `IntentService`。
+- Intent pipeline 已同时调用规则 classifier 和 LLM classifier 接口。
+- LLM classifier 初版保持 `abstain` / `not_available`，不调用真实模型。
+- `app/policy/` 已包含 `PolicyDecision`、`PolicyAction`、`PermissionScope` 和 `PolicyService`。
+- Policy 已覆盖 `allow`、`deny`、`requires_confirmation`。
+- 不明确写入默认要求确认，非写入 intent 不产生 write authorization。
+- LLM classifier result、metadata 和 planner/checkpoint 模拟字段不能绕过 Policy。
+- Intent / Policy 已接入 Runtime Core trace 摘要。
+- Intent、Policy 和 Runtime integration 聚焦测试已覆盖阶段 3 边界。
+- `docs/CURRENT_STATE.md`、`docs/ARCHITECTURE.md` 和 `docs/RUNTIME_CONCEPTS.md` 已同步当前边界。
+
+仍保留到后续阶段：
+
+- 真实 LLM structured output classifier。
+- 多轮 pending confirmation / Interaction Safety State。
+- Tool System capability / allowed tools 对齐。
+- LangGraph interrupt / human-in-the-loop 映射。
+
+阶段 3 收口验证：
+
+- 已运行 `uv run python -m compileall app tests`。
+- 按用户要求，本次不运行全量测试。
+
 ## 1. 目标
 
 本模块对应 `plans/RUNTIME_REFACTOR_PLAN.md` 的“阶段 3：Runtime Core / Intent / Policy”中的 Intent Layer 和 Policy / Permission Layer。
@@ -370,18 +399,18 @@ $env:UV_CACHE_DIR='D:\lifeops-agent\.tmp\uv-cache'; uv run python -m compileall 
 
 建议小步施工顺序：
 
-1. 创建 `app/intent/` 和 `app/policy/` 空包。
-2. 定义 intent models：`IntentType`、`ClassifierResult`、`IntentDecision`。
-3. 定义 `IntentClassifier` 接口。
-4. 实现 `RuleBasedIntentClassifier`，覆盖最小误触发样例。
-5. 实现 `LlmIntentClassifier` 空实现，返回 abstain / not_available。
-6. 实现 `IntentService`，确保规则和 LLM classifier 都被调用。
-7. 定义 policy models：`PolicyAction`、`PermissionScope`、`PolicyDecision`。
-8. 实现 `PolicyService`，覆盖 allow / deny / requires_confirmation。
-9. 将 IntentService 和 PolicyService 接入 Runtime Core。
-10. 添加 intent、policy 和 runtime integration 聚焦测试。
-11. 更新 `docs/CURRENT_STATE.md`、`docs/ARCHITECTURE.md`、`docs/RUNTIME_CONCEPTS.md` 和 `docs/AGENT_LEARNING_LINKS.md`。
-12. 运行最小相关测试和 compile 检查。
+1. [x] 创建 `app/intent/` 和 `app/policy/` 空包。
+2. [x] 定义 intent models：`IntentType`、`ClassifierResult`、`IntentDecision`。
+3. [x] 定义 `IntentClassifier` 接口。
+4. [x] 实现 `RuleBasedIntentClassifier`，覆盖最小误触发样例。
+5. [x] 实现 `LlmIntentClassifier` 空实现，返回 abstain / not_available。
+6. [x] 实现 `IntentService`，确保规则和 LLM classifier 都被调用。
+7. [x] 定义 policy models：`PolicyAction`、`PermissionScope`、`PolicyDecision`。
+8. [x] 实现 `PolicyService`，覆盖 allow / deny / requires_confirmation。
+9. [x] 将 IntentService 和 PolicyService 接入 Runtime Core。
+10. [x] 添加 intent、policy 和 runtime integration 聚焦测试。
+11. [x] 更新 `docs/CURRENT_STATE.md`、`docs/ARCHITECTURE.md` 和 `docs/RUNTIME_CONCEPTS.md`。
+12. [x] 运行最小相关测试和 compile 检查。
 
 ## Grill-me 检查清单
 

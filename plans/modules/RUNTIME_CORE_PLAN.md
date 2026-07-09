@@ -1,5 +1,30 @@
 # Runtime Core 模块计划
 
+## 当前状态
+
+阶段 3 Runtime Core 初版已完成。
+
+已完成：
+
+- `main.py` 已作为当前 CLI 骨架入口。
+- `app/runtime/` 已包含 `RuntimeRequest`、`RuntimeSession`、`RuntimeResult`、`RuntimeService`、run record helper 和 bootstrap。
+- `RuntimeService` 已接入 `IntentService` 和 `PolicyService`。
+- 每次 run 可以写入 `run_records` 和结构化 `trace_events`。
+- 当前 orchestration / execution 明确保持 stub，并通过 `runtime.orchestration.stubbed` 暴露。
+- Runtime Core 聚焦测试已覆盖成功 run、confirmation、intent failure、policy failure 和 stub execution。
+- `docs/CURRENT_STATE.md`、`docs/ARCHITECTURE.md` 和 `docs/RUNTIME_CONCEPTS.md` 已同步当前边界。
+
+仍保留到后续阶段：
+
+- 真实 LangGraph orchestration 放到阶段 4。
+- Planner、Executor、Tool System 和业务 domain 写入放到后续模块。
+- 多轮 confirmation / persistent session store 后续按明确需求设计。
+
+阶段 3 收口验证：
+
+- 已运行 `uv run python -m compileall app tests`。
+- 按用户要求，本次不运行全量测试。
+
 ## 1. 目标
 
 本模块对应 `plans/RUNTIME_REFACTOR_PLAN.md` 的“阶段 3：Runtime Core / Intent / Policy”中的 Runtime Core 部分。
@@ -24,7 +49,7 @@
 当前可依据的参考是：
 
 - `README.md`：未来 CLI 入口是 `uv run python main.py`。
-- `docs/CURRENT_STATE.md`：`main.py` 尚不存在，当前存储入口尚未接入 `main.py`。
+- `docs/CURRENT_STATE.md`：`main.py` 已存在，当前 Runtime Core / Intent / Policy 仍是阶段 3 stub execution。
 - `docs/ARCHITECTURE.md`：定义 `main -> runtime -> orchestration -> intent / policy / ...` 的高层依赖方向。
 - `docs/decisions/ADR-0001-runtime-boundaries.md`：当前 runtime 使用显式分层，不能隐式依赖 legacy agent。
 - `docs/decisions/ADR-0004-sqlite-storage.md`：启动流程应先连接 SQLite，再 migration，再让 repository / store 读写表。
@@ -314,16 +339,16 @@ $env:UV_CACHE_DIR='D:\lifeops-agent\.tmp\uv-cache'; uv run python -m compileall 
 
 建议小步施工顺序：
 
-1. 创建 `plans/modules/RUNTIME_CORE_PLAN.md` 和 `plans/modules/INTENT_POLICY_PLAN.md`。
-2. 创建 `app/runtime/` 空包和 models/service/bootstrap 文件。
-3. 定义 `RuntimeRequest`、`RuntimeSession`、`RuntimeResult` 和 status 枚举。
-4. 实现 runtime service 的最小 handle 流程，先使用可注入的 Intent / Policy stub。
-5. 接入 `LogTraceStore` 和 `run_records` 写入 helper。
-6. 创建 `main.py`，完成 config、SQLite、migration、runtime service 的启动骨架。
-7. 接入真实阶段 3 Intent service 和 Policy service。
-8. 补 Runtime Core 聚焦测试，使用 `tests/helpers.py` 的测试数据库。
-9. 更新 `docs/CURRENT_STATE.md`、`docs/ARCHITECTURE.md`、`docs/RUNTIME_CONCEPTS.md` 和 `docs/AGENT_LEARNING_LINKS.md`。
-10. 运行最小相关测试和 compile 检查。
+1. [x] 创建 `plans/modules/RUNTIME_CORE_PLAN.md` 和 `plans/modules/INTENT_POLICY_PLAN.md`。
+2. [x] 创建 `app/runtime/` 空包和 models/service/bootstrap 文件。
+3. [x] 定义 `RuntimeRequest`、`RuntimeSession`、`RuntimeResult` 和 status 枚举。
+4. [x] 实现 runtime service 的最小 handle 流程，先使用可注入的 Intent / Policy stub。
+5. [x] 接入 `LogTraceStore` 和 `run_records` 写入 helper。
+6. [x] 创建 `main.py`，完成 config、SQLite、migration、runtime service 的启动骨架。
+7. [x] 接入真实阶段 3 Intent service 和 Policy service。
+8. [x] 补 Runtime Core 聚焦测试，使用 `tests/helpers.py` 的测试数据库。
+9. [x] 更新 `docs/CURRENT_STATE.md`、`docs/ARCHITECTURE.md` 和 `docs/RUNTIME_CONCEPTS.md`。
+10. [x] 运行最小相关测试和 compile 检查。
 
 ## Grill-me 检查清单
 

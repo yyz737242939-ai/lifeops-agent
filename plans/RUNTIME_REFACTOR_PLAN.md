@@ -13,6 +13,13 @@
 
 当前 runtime 的主线是把当前从 V0 / demo 逐步长出来的 Agent Runtime，重构成一个小而完整、边界清晰、可测试、可解释、适合学习与面试展示的工程化 runtime。
 
+当前进度：
+
+- 阶段 0 / 阶段 1：归档边界和文档基础已完成。
+- 阶段 2：Storage / SQLite 基础设施已完成，详见 `plans/modules/STORAGE_SQLITE_PLAN.md`。
+- 阶段 3：Runtime Core / Intent / Policy 初版已完成，详见 `plans/modules/RUNTIME_CORE_PLAN.md` 和 `plans/modules/INTENT_POLICY_PLAN.md`。
+- 下一阶段：阶段 4 LangGraph Orchestration 骨架，应先创建 `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md`。
+
 核心执行链路：
 
 ```text
@@ -438,7 +445,7 @@ SQLite 存储：
 |---|---|---|---|
 | Agent Loop | 旧 `Agent` 聚合过多职责 | 拆成 runtime / orchestration / execution | `plans/modules/RUNTIME_CORE_PLAN.md` |
 | Tool System | registry 和 business tool 偏大 | definition / registry / capability / executor / result 分离 | `plans/modules/TOOL_SYSTEM_PLAN.md` |
-| Policy / Safety | write policy、interaction policy 分散 | 统一 PolicyDecision 和 confirmation model | `plans/modules/POLICY_PERMISSION_PLAN.md` |
+| Policy / Safety | write policy、interaction policy 分散 | 统一 PolicyDecision 和 confirmation model | `plans/modules/INTENT_POLICY_PLAN.md` |
 | Context | 功能强但复杂 | 初版精简 request context，后续版本迁移压缩/ref/index | `plans/modules/CONTEXT_PLAN.md` |
 | Memory | JSON store + 简单检索 | SQLite semantic memory + profile markdown + request-local injection | `plans/modules/MEMORY_PLAN.md` |
 | Task State | JSON TaskStore | SQLite Task repository + user-approved steps | `plans/modules/TASKS_DOMAIN_PLAN.md` |

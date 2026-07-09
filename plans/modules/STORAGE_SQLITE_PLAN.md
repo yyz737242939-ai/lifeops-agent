@@ -1,5 +1,33 @@
 # Storage / SQLite 模块计划
 
+## 当前状态
+
+阶段 2 Storage / SQLite 初版已完成。
+
+已完成：
+
+- `app/common/` 已包含配置读取、ID、UTC 时间、项目错误类型和 JSON 序列化 helper。
+- `app/storage/` 已包含 SQLite connection factory、schema、migration runner、repository helper 和 `SqliteUnitOfWork`。
+- `app/observability/` 已包含结构化 trace event、原始 LLM interaction event、SQLite trace store 和 LLM log store。
+- `config/default.json` 已声明默认数据库路径 `data/lifeops.sqlite3`。
+- SQLite 初版 schema 已包含 `schema_migrations`、`run_records`、`trace_events`、`tool_calls` 和 `llm_interactions`。
+- 测试数据库 helper 已支持 `:memory:` SQLite 和 migration helper，避免触碰真实 `data/lifeops.sqlite3`。
+- `.gitignore` 已覆盖本地 SQLite、JSON 用户数据、导出目录和 legacy 运行输出。
+- `docs/CURRENT_STATE.md`、`docs/ARCHITECTURE.md`、`docs/RUNTIME_CONCEPTS.md` 和 `docs/decisions/ADR-0004-sqlite-storage.md` 已同步阶段 2 边界。
+
+仍保留到后续阶段：
+
+- Tasks、Wellbeing、Memory、Recovery、Inspector 和 Eval 的业务 repository。
+- 旧 V0 数据迁移。
+- 产品 UI、Inspector CLI 和 Eval runner。
+- 复杂 migration 回滚、备份、导出和隐私增强策略。
+
+阶段 2 收口验证：
+
+- 已运行 `uv run python -m compileall app tests`。
+- 阶段 2 聚焦测试覆盖 common、storage、observability 和 test database helper。
+- 按用户要求，本次不运行全量测试。
+
 ## 1. 目标
 
 本模块对应 `plans/RUNTIME_REFACTOR_PLAN.md` 的“阶段 2：存储与基础设施”。
@@ -21,9 +49,9 @@
 当前可依据的参考是：
 
 - `README.md`：当前 runtime 使用 SQLite 作为本地事实和 runtime evidence 存储。
-- `docs/CURRENT_STATE.md`：当前代码尚未实现，新代码放入 `app/`。
+- `docs/CURRENT_STATE.md`：阶段 2 Storage / SQLite 已完成初版，新代码放入 `app/`。
 - `docs/ARCHITECTURE.md`：SQLite repository、成功 WRITE result、用户授权 TaskStep、RunRecord 和 LogTraceEvent 是事实来源。
-- `docs/RUNTIME_CONCEPTS.md`：后续需要补齐 Observability 和 SQLite Local Persistence 学习章节。
+- `docs/RUNTIME_CONCEPTS.md`：已补齐 Observability 和 SQLite Local Persistence 学习章节。
 - `plans/RUNTIME_REFACTOR_PLAN.md`：阶段 2 交付、依赖方向和 SQLite 持久层策略。
 
 V0 的主要问题预计是：
@@ -361,18 +389,18 @@ uv run python -m unittest discover -s tests -v
 
 建议小步施工顺序：
 
-1. 创建 `app/__init__.py`、`app/common/`、`app/storage/`、`app/observability/` 的空包和最小模块文件。
-2. 实现 `common` 的 ID、时间、错误和 JSON 序列化 helper，并添加聚焦测试。
-3. 创建 `config/default.json` 和 config loader，并实现 SQLite connection factory，包含 row factory、foreign key pragma 和明确的数据库路径策略。
-4. 实现 `schema_migrations` 和 migration runner，只创建最小基础 evidence 表。
-5. 实现 `SqliteUnitOfWork`，覆盖 commit / rollback 测试。
-6. 实现 `LogRuntimeEvent` / `LogTraceEvent` 类型和 `LogTraceStore` 的 append / query。
-7. 实现 `LogLlmInteraction` 类型和 `LogLlmInteractionStore` 的 append / query，和 `LogTraceStore` 分开。
-8. 增加 test database helper，确保测试默认不触碰真实 `data/lifeops.sqlite3`。
-9. 检查 `.gitignore` 是否覆盖阶段 2 产生的真实数据路径；如不足，做最小补充。
-10. 更新 `docs/CURRENT_STATE.md`、`docs/ARCHITECTURE.md` 和 `docs/RUNTIME_CONCEPTS.md`。
-11. 如 schema / migration 策略已稳定，新增 `docs/decisions/ADR-0004-sqlite-storage.md`。
-12. 运行最小相关测试；如果基础设施层被多个测试依赖，再运行 `uv run python -m unittest discover -s tests -v`。
+1. [x] 创建 `app/__init__.py`、`app/common/`、`app/storage/`、`app/observability/` 的空包和最小模块文件。
+2. [x] 实现 `common` 的 ID、时间、错误和 JSON 序列化 helper，并添加聚焦测试。
+3. [x] 创建 `config/default.json` 和 config loader，并实现 SQLite connection factory，包含 row factory、foreign key pragma 和明确的数据库路径策略。
+4. [x] 实现 `schema_migrations` 和 migration runner，只创建最小基础 evidence 表。
+5. [x] 实现 `SqliteUnitOfWork`，覆盖 commit / rollback 测试。
+6. [x] 实现 `LogRuntimeEvent` / `LogTraceEvent` 类型和 `LogTraceStore` 的 append / query。
+7. [x] 实现 `LogLlmInteraction` 类型和 `LogLlmInteractionStore` 的 append / query，和 `LogTraceStore` 分开。
+8. [x] 增加 test database helper，确保测试默认不触碰真实 `data/lifeops.sqlite3`。
+9. [x] 检查 `.gitignore` 是否覆盖阶段 2 产生的真实数据路径；如不足，做最小补充。
+10. [x] 更新 `docs/CURRENT_STATE.md`、`docs/ARCHITECTURE.md` 和 `docs/RUNTIME_CONCEPTS.md`。
+11. [x] 如 schema / migration 策略已稳定，新增 `docs/decisions/ADR-0004-sqlite-storage.md`。
+12. [x] 运行最小相关测试和 compile 检查。
 
 ## Grill-me 检查清单
 
