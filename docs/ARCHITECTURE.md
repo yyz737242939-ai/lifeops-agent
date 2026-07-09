@@ -1,6 +1,8 @@
 # Runtime 架构
 
-本文档记录当前架构边界。它故意比模块实施计划更高层。
+本文档记录当前架构快照和当前架构边界。它故意比模块实施计划更高层。
+
+本文档不是递增历史。随着 runtime 推进，过时的架构描述应被替换为当前事实；项目演进过程记录在 `docs/PROGRESS_LOG.md`。
 
 ## 核心边界
 
@@ -89,7 +91,7 @@ RuntimeRequest
 -> RuntimeResult
 ```
 
-传入 SQLite connection 时，Runtime Core 会写入 `run_records` 和 `trace_events`。未传入 connection 时，它保持 request-local 纯内存运行，便于聚焦测试。
+传入 SQLite connection 时，Runtime Core 可以写入 `run_records`。传入 event log 或配置 `log_root` 时，Runtime Core 会把 runtime event 写入 `events.jsonl`。未传入 connection 时，它仍可通过文件 event log 记录运行路径，也可以保持 request-local 纯内存运行，便于聚焦测试。
 
 当前 orchestration / tool execution 仍是 stub。`runtime.orchestration.stubbed` 表示本阶段没有执行真实工具或业务写入。
 
@@ -126,7 +128,7 @@ wellbeing.write_candidate
 
 - `common` 提供配置读取、ID、时间、错误和 JSON 序列化，不依赖业务模块。
 - `storage` 提供 SQLite 连接、schema migration 和 transaction boundary，不依赖 domain service。
-- `observability` 提供 runtime evidence 的写入和读取，不负责业务状态变更。
+- `observability` 提供 event / LLM / normal 程序日志的写入和读取，不负责业务状态变更。
 
 真实数据库默认路径由 `config/default.json` 的 `database.path` 声明。当前默认值是：
 
@@ -136,14 +138,19 @@ data/lifeops.sqlite3
 
 测试必须使用 `:memory:` 或临时文件数据库，不复用真实用户数据库。
 
+真实日志默认根目录由 `config/default.json` 的 `logs.root` 声明。当前默认值是：
+
+```text
+logs/sessions
+```
+
 ## 事实来源
 
 Runtime 的事实来源是：
 
-- 基于 SQLite 的业务和 runtime evidence repository；
+- 基于 SQLite 的业务 repository；
 - 成功的 WRITE tool result；
-- 用户明确授权的 TaskStep；
-- 用作执行证据的 RunRecord 和 LogTraceEvent。
+- 用户明确授权的 TaskStep。
 
 不是事实来源：
 
@@ -158,10 +165,11 @@ Runtime 的事实来源是：
 
 当前 observability 分成两类日志：
 
-- `LogTraceEvent` / `LogTraceStore`：结构化 runtime trace，只保存少量必要字段和紧凑 payload，用于解释 runtime 路径和失败层级。
-- `LogLlmInteraction` / `LogLlmInteractionStore`：原始 LLM / agent request-response 记录，用于人工排查最原始对话，不作为业务事实或写入授权来源。
+- `events.jsonl`：结构化 runtime event，只保存少量必要字段和紧凑 payload，用于解释 runtime 路径和失败层级。
+- `llm.jsonl`：原始 LLM / agent request-response 记录，用于人工排查最原始对话，不作为业务事实或写入授权来源。
+- `application.log`：普通程序日志，用于测试和 debug。
 
-两类日志分别写入 `trace_events` 和 `llm_interactions`，不混表。
+三类日志默认写入 `logs/sessions/session_<timestamp>_<session_id>/`。SQLite 不再默认承载 runtime event log 或 LLM log。
 
 ## Runtime 不变量
 
@@ -182,10 +190,9 @@ PlanRun 是临时 runtime 执行策略。
 
 PlanRun 只有经过明确 WRITE 授权后，才能变成 TaskStep。
 
-## 架构决策
+## 架构维护规则
 
-详细架构决策存放在：
-
-```text
-docs/decisions/
-```
+- 当前架构事实写在本文档。
+- 历史推进和完成状态写在 `docs/PROGRESS_LOG.md`。
+- 学习解释写在 `docs/RUNTIME_CONCEPTS.md`。
+- 外部学习链接写在 `docs/AGENT_LEARNING_LINKS.md`。

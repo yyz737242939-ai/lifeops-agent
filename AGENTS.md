@@ -35,17 +35,18 @@ Issue 存放在 GitHub Issues 中，外部 PR 也视为 triage 请求入口。�
 - 优先局部修改，不重写整个文件。
 - 只修改与当前任务相关的代码。
 - 不顺手重构无关逻辑。
-- 当前工作不确定范围时，以 `docs/CURRENT_STATE.md`、`plans/RUNTIME_REFACTOR_PLAN.md` 和当前模块计划为准；仍不确定则先向用户确认。
+- 当前工作不确定范围时，以 `docs/ARCHITECTURE.md`、`docs/PROGRESS_LOG.md`、`plans/RUNTIME_REFACTOR_PLAN.md` 和当前模块计划为准；仍不确定则先向用户确认。
 
 ### 当前施工规则
 
 - 新代码默认写入 `app/`，不要混入 `legacy_v0/app/`。
 - 新文档默认写入 `docs/`。
 - 新计划默认写入 `plans/`。
-- 每个模块施工前，先创建或阅读对应的 `plans/modules/*_PLAN.md`。
+- 每个模块施工前，先创建或阅读对应的 `plans/modules/*_PLAN.md`。 同时将计划中涉及到的重要知识点的官方文档和权威链接写进`docs/AGENT_LEARNING_LINKS.md`。
 - 模块计划必须说明目标、V0 参考、当前范围、边界、数据模型、接口、失败模式、测试、文档更新和实施步骤。
-- 模块完成后，应更新 `docs/CURRENT_STATE.md`；改变架构边界时，应新增或更新 `docs/decisions/*.md`。
-- 面试或学习相关知识点应沉淀到 `docs/RUNTIME_CONCEPTS.md`。
+- 模块完成后，应更新 `docs/PROGRESS_LOG.md`，只记录已完成、已验证、已学到的推进事实。
+- 改变当前架构边界时，应更新 `docs/ARCHITECTURE.md`。
+- 面试或学习相关知识点应沉淀到 `docs/RUNTIME_CONCEPTS.md`；外部链接只写入 `docs/AGENT_LEARNING_LINKS.md`。
 
 ### 上下文管理
 

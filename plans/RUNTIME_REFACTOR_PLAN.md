@@ -18,6 +18,7 @@
 - 阶段 0 / 阶段 1：归档边界和文档基础已完成。
 - 阶段 2：Storage / SQLite 基础设施已完成，详见 `plans/modules/STORAGE_SQLITE_PLAN.md`。
 - 阶段 3：Runtime Core / Intent / Policy 初版已完成，详见 `plans/modules/RUNTIME_CORE_PLAN.md` 和 `plans/modules/INTENT_POLICY_PLAN.md`。
+- 阶段 3.5：Observability 文件日志校正已完成，详见 `plans/modules/OBSERVABILITY_LOGGING_PLAN.md`。
 - 下一阶段：阶段 4 LangGraph Orchestration 骨架，应先创建 `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md`。
 
 核心执行链路：
@@ -111,7 +112,7 @@ User Input
 - 新入口 `main.py`。
 - 新文档目录 `docs/`。
 - 新计划目录 `plans/`。
-- SQLite 本地持久层作为 当前 runtime 业务事实源和 runtime evidence store；JSON 只保留给 fixture、config 和 sample 数据。
+- SQLite 本地持久层作为当前 runtime 的业务事实和关系数据存储；event / LLM / normal 程序日志走文件；JSON 只保留给 fixture、config 和 sample 数据。
 - Intent Layer。
 - Policy / Permission Layer v0。
 - LangGraph Orchestrator。
@@ -219,6 +220,14 @@ data/
   lifeops.sqlite3
   fixtures/
   exports/
+
+logs/
+  sessions/
+    session_<timestamp>/
+      metadata.json
+      events.jsonl
+      llm.jsonl
+      application.log
 ```
 
 规则：
@@ -332,7 +341,8 @@ app/
   observability/
     events.py
     trace.py
-    trace_store.py
+    event_log.py
+    llm_log.py
     logger.py
 
   inspector/
@@ -369,7 +379,7 @@ main.py
 - `planning` 不调用工具，不授权 WRITE。
 - `execution` 可以调用 tools，但必须使用 PolicyDecision 和 allowed tools。
 - `orchestration` 只做 graph wiring 和 route，不放业务逻辑。
-- `inspector` 只读trace / run evidence，不修改状态。
+- `inspector` 只读 event log、LLM log、application log 和必要业务事实，不修改状态。
 - `evals` 使用 fixture 和测试数据库，不复用真实用户数据。
 - `common` / `storage` / `observability` 是基础设施层，不依赖业务 domain。
 
@@ -395,9 +405,21 @@ main
 - inspector 改业务状态。
 - eval 修改真实 data。
 
-## 6. SQLite 持久层策略
+## 6. 数据与日志存放策略
 
-当前 runtime 建议使用 SQLite 作为本地事实源和 runtime evidence store。
+当前 runtime 使用“数据按用途落位”的策略，而不是把所有信息都写入 SQLite。
+
+SQLite 主要存放：
+
+- 业务事实。
+- 适合关系查询的数据。
+- 需要 transaction / repository / migration 管理的数据。
+
+日志主要存放到文件：
+
+- `events.jsonl`：结构化 runtime event，用于学习、Inspector、Eval 和复盘 runtime path。
+- `llm.jsonl`：原始 LLM request / response，用于回看对话交互具体内容。
+- `application.log`：普通程序日志，用于测试、debug 和类似 Java application log 的工程排查。
 
 JSON 不再承担业务长期事实源职责，只在需要 fixture、config、sample 或外部 mock 数据时使用。
 
@@ -405,7 +427,8 @@ JSON 不再承担业务长期事实源职责，只在需要 fixture、config、s
 
 - Python 标准库支持，不增加重依赖。
 - 减少旧版大量 JSON load/save/version/atomic write 辅助代码。
-- 更适合 Inspector / Eval / Recovery 查询。
+- 避免把学习型 event、原始 LLM 对话和 normal debug log 混进业务数据库。
+- SQLite 保持为业务事实和关系数据服务；日志文件保持 append-only、可读、易排查。
 - 更贴近真实工程，但仍保持本地轻量。
 
 SQLite 存储：
@@ -414,13 +437,17 @@ SQLite 存储：
 - task_steps。
 - wellbeing_entries。
 - semantic_memories。
-- run_records。
-- trace_events。
 - tool_calls。
 - eval_runs。
 - eval_results。
 
-继续使用 Markdown / JSON 的内容：
+文件日志：
+
+- event JSONL。
+- LLM JSONL。
+- normal application log。
+
+继续使用 Markdown / JSON / fixture 文件的内容：
 
 - `profile.md` 和 `profile.example.md`。
 - skill / source manifest。
@@ -444,6 +471,7 @@ SQLite 存储：
 | 模块 | V0 状态 | 当前 runtime 轻量升级方向 | 模块计划 |
 |---|---|---|---|
 | Agent Loop | 旧 `Agent` 聚合过多职责 | 拆成 runtime / orchestration / execution | `plans/modules/RUNTIME_CORE_PLAN.md` |
+| Skill System | 已有 skill routing / reference loader 经验，当前重构计划缺少独立位置 | skill discovery / routing / prompt assembly / progressive references / skill-scoped capabilities 分离 | `plans/modules/SKILL_SYSTEM_PLAN.md` |
 | Tool System | registry 和 business tool 偏大 | definition / registry / capability / executor / result 分离 | `plans/modules/TOOL_SYSTEM_PLAN.md` |
 | Policy / Safety | write policy、interaction policy 分散 | 统一 PolicyDecision 和 confirmation model | `plans/modules/INTENT_POLICY_PLAN.md` |
 | Context | 功能强但复杂 | 初版精简 request context，后续版本迁移压缩/ref/index | `plans/modules/CONTEXT_PLAN.md` |
@@ -452,7 +480,8 @@ SQLite 存储：
 | Wellbeing | domain JSON | SQLite Wellbeing repository + context source | `plans/modules/WELLBEING_DOMAIN_PLAN.md` |
 | Planner | V0 transient plan | 保留 transient PlanRun，明确不授权、不执行、不自动写 Task | `plans/modules/PLANNER_PLAN.md` |
 | Executor | 包装旧 agent loop | 单步执行 + 结构化反馈 + tool evidence | `plans/modules/EXECUTOR_PLAN.md` |
-| Recovery | run/action JSON 摘要 | SQLite run_records + trace evidence + no replay | `plans/modules/RECOVERY_PLAN.md` |
+| Observability Logging | V0 已有三通道文件日志经验，当前重构阶段误放进 SQLite | event JSONL / LLM JSONL / application.log 三通道文件日志 | `plans/modules/OBSERVABILITY_LOGGING_PLAN.md` |
+| Recovery | run/action JSON 摘要 | 基于 event logs 和必要业务状态生成解释型 recovery context，不自动 replay | `plans/modules/RECOVERY_PLAN.md` |
 | LangGraph | 尚未正式接入 | StateGraph 主编排，自研节点 | `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md` |
 | MCP Calendar | 旧 mock package MCP | Calendar fixture 读取 MCP + optional OAuth 只读| `plans/modules/CALENDAR_MCP_PLAN.md` |
 | DAG | 尚未实现 | 独立串行 DAG Scheduler | `plans/modules/DAG_SCHEDULER_PLAN.md` |
@@ -493,7 +522,7 @@ SQLite 存储：
 单元测试、集成测试、eval scenario、trace 验证点。
 
 ## 9. 文档更新
-需要更新 docs/CURRENT_STATE、ARCHITECTURE、RUNTIME_CONCEPTS、INTERVIEW_DEMO_GUIDE 的哪些部分。
+需要更新 docs/PROGRESS_LOG、ARCHITECTURE、RUNTIME_CONCEPTS、AGENT_LEARNING_LINKS 的哪些部分。
 
 ## 10. 实施步骤
 小步施工顺序。
@@ -504,9 +533,9 @@ SQLite 存储：
 - 不把模块内部设计写进总计划。
 - 不引入跨层依赖，除非模块计划显式说明并获得确认。
 - 不为了复用 V0 代码而继承 V0 的职责混乱。
-- 模块完成后必须更新 `docs/CURRENT_STATE.md`。
-- 改变架构边界时必须新增或更新 ADR。
-- 面试相关学习点必须进入 `docs/RUNTIME_CONCEPTS.md`。
+- 模块完成后必须更新 `docs/PROGRESS_LOG.md`。
+- 改变当前架构边界时必须更新 `docs/ARCHITECTURE.md`，不再新增 ADR。
+- 面试相关学习点必须进入 `docs/RUNTIME_CONCEPTS.md`，外部链接只进入 `docs/AGENT_LEARNING_LINKS.md`。
 - 新增核心 Agent 概念时，必须先向用户确认准备沉淀的重点方向；确认后再同步更新 `docs/AGENT_LEARNING_LINKS.md`，沉淀权威官方文档、specification 或高质量官方博客链接。
 - 有 runtime 行为变化时必须有测试或 eval。
 
@@ -516,17 +545,11 @@ SQLite 存储：
 
 ```text
 docs/
-  CURRENT_STATE.md
+  PROGRESS_LOG.md
   ARCHITECTURE.md
   RUNTIME_CONCEPTS.md
-  INTERVIEW_DEMO_GUIDE.md
   MIGRATION_INDEX.md
   agents/
-  decisions/
-    ADR-0001-runtime-boundaries.md
-    ADR-0002-task-vs-plan.md
-    ADR-0003-langgraph-boundary.md
-    ADR-0004-sqlite-storage.md
 
 legacy_v0/
   app/
@@ -554,13 +577,11 @@ plans/
 | 文档 | 作用 |
 |---|---|
 | `README.md` | 项目入口、如何运行、当前状态、文档导航 |
-| `docs/CURRENT_STATE.md` | 当前真实项目框架和实现状态，给人和 AI 快速了解项目 |
-| `docs/ARCHITECTURE.md` | 总架构、模块边界、依赖方向、状态生命周期 |
-| `docs/RUNTIME_CONCEPTS.md` | 详细学习手册：每个模块的知识点、实现解释、官方链接、面试讲法 |
-| `docs/AGENT_LEARNING_LINKS.md` | Agent 核心概念的权威文档、specification 和官方学习链接索引 |
-| `docs/INTERVIEW_DEMO_GUIDE.md` | 面试 demo 脚本、讲解路径、常见追问 |
+| `docs/PROGRESS_LOG.md` | 递增推进记录：只记录已完成、已验证、已学到的项目演进事实 |
+| `docs/ARCHITECTURE.md` | 当前架构快照：模块边界、依赖方向、状态生命周期；随实现推进覆盖更新 |
+| `docs/RUNTIME_CONCEPTS.md` | 学习手册：每个模块的知识点、实现解释、面试讲法；不直接维护外部链接 |
+| `docs/AGENT_LEARNING_LINKS.md` | 已学习或当前阶段正在学习的权威文档、specification 和官方链接索引 |
 | `docs/MIGRATION_INDEX.md` | V0 文件/模块/文档到 当前 runtime 的迁移、重写、归档、延后记录 |
-| `docs/decisions/*.md` | 架构决策记录 |
 | `docs/agents/` | Codex 协作、triage 和 domain-doc 规则 |
 | `legacy_v0/` | V0 代码、文档、数据、日志、测试、旧计划和旧入口归档，不作为默认上下文 |
 | `plans/RUNTIME_REFACTOR_PLAN.md` | 本总计划 |
@@ -572,10 +593,11 @@ plans/
 
 ```text
 1. README.md
-2. docs/CURRENT_STATE.md
-3. plans/RUNTIME_REFACTOR_PLAN.md
-4. 当前模块对应的 plans/modules/*_PLAN.md
-5. 与任务直接相关的代码、测试、文档片段
+2. docs/PROGRESS_LOG.md
+3. docs/ARCHITECTURE.md
+4. plans/RUNTIME_REFACTOR_PLAN.md
+5. 当前模块对应的 plans/modules/*_PLAN.md
+6. 与任务直接相关的代码、测试、文档片段
 ```
 
 只在以下情况读取 `legacy_v0/`：
@@ -606,13 +628,10 @@ plans/
 
 ### 面试时怎么讲
 
-### 继续学习
-- Official docs
-- Framework docs
-- 本项目相关文件
+### 相关项目文件
 ```
 
-`docs/AGENT_LEARNING_LINKS.md` 负责沉淀跨模块的权威学习链接。新增链接前，先列出候选重点方向并向用户确认，避免提前收录后续模块资料。`docs/RUNTIME_CONCEPTS.md` 负责把这些概念解释成本项目自己的 runtime 语言。两者要互相引用，但不要把大段外部资料复制进仓库。
+`docs/AGENT_LEARNING_LINKS.md` 负责沉淀跨模块的权威学习链接。新增链接前，先列出候选重点方向并向用户确认，避免提前收录后续模块资料。`docs/RUNTIME_CONCEPTS.md` 负责把这些概念解释成本项目自己的 runtime 语言，不直接维护 URL。两者要互相引用，但不要把大段外部资料复制进仓库。
 
 必须覆盖：
 
@@ -740,7 +759,7 @@ final_answer
 ```text
 plans/modules/EVAL_HARNESS_PLAN.md
 docs/RUNTIME_CONCEPTS.md#Eval-Harness
-docs/INTERVIEW_DEMO_GUIDE.md
+docs/RUNTIME_CONCEPTS.md
 ```
 
 ## 12. 施工阶段
@@ -767,11 +786,10 @@ docs/INTERVIEW_DEMO_GUIDE.md
 
 交付：
 
-- `docs/CURRENT_STATE.md`。
+- `docs/PROGRESS_LOG.md`。
 - `docs/ARCHITECTURE.md`。
 - `docs/RUNTIME_CONCEPTS.md` 骨架。
-- `docs/INTERVIEW_DEMO_GUIDE.md` 骨架。
-- `docs/decisions/ADR-0001-runtime-boundaries.md`。
+- `docs/AGENT_LEARNING_LINKS.md` 骨架。
 - `plans/RUNTIME_REFACTOR_PLAN.md`。
 - 更新 `AGENTS.md` 的 默认读取顺序。
 
@@ -805,6 +823,22 @@ docs/INTERVIEW_DEMO_GUIDE.md
 - `app/policy/`。
 - intent / policy tests。
 
+### 阶段 3.5：Observability 文件日志校正
+
+目标：
+
+- 把 runtime event、LLM interaction 和 normal 程序日志从 SQLite evidence 表校正为文件日志。
+- 明确 SQLite 只默认承载业务事实和适合关系查询的数据。
+
+交付：
+
+- `plans/modules/OBSERVABILITY_LOGGING_PLAN.md`。
+- `logs/sessions/session_<timestamp>/events.jsonl`。
+- `logs/sessions/session_<timestamp>/llm.jsonl`。
+- `logs/sessions/session_<timestamp>/application.log`。
+- event / LLM / normal log writer。
+- 聚焦测试验证日志文件格式、顺序、脱敏和 debug 可用性。
+
 ### 阶段 4：LangGraph Orchestration 骨架
 
 目标：
@@ -820,17 +854,21 @@ docs/INTERVIEW_DEMO_GUIDE.md
 - graph path trace。
 - route tests。
 
-### 阶段 5：Tool System 与 Domains
+### 阶段 5：Skill System / Tool System 与 Domains
 
 目标：
 
-- 建立工具系统和两个内部 domain。
+- 建立 Skill System、工具系统和两个内部 domain。
+- Skill System 先明确 skill discovery、routing、prompt assembly、progressive reference loading、skill-scoped capabilities 和多轮 skill state 的边界。
+- Tool System 再处理 tool definition、tool execution、tool result 和 domain tool 的运行时边界。
 
 交付：
 
+- `plans/modules/SKILL_SYSTEM_PLAN.md`。
 - `plans/modules/TOOL_SYSTEM_PLAN.md`。
 - `plans/modules/TASKS_DOMAIN_PLAN.md`。
 - `plans/modules/WELLBEING_DOMAIN_PLAN.md`。
+- skill loader / router / prompt assembly / reference loader。
 - tool registry / capability / executor。
 - Tasks repository / service / tools。
 - Wellbeing repository / service / tools。
@@ -848,7 +886,7 @@ docs/INTERVIEW_DEMO_GUIDE.md
 - `plans/modules/RECOVERY_PLAN.md`。
 - Context report。
 - Memory repository / retriever / profile。
-- RunRecord / recovery context。
+- session event logs / recovery context。
 
 ### 阶段 7：Planner / Executor / Feedback
 
@@ -904,7 +942,7 @@ docs/INTERVIEW_DEMO_GUIDE.md
 交付：
 
 - `docs/RUNTIME_CONCEPTS.md` 详细版。
-- `docs/INTERVIEW_DEMO_GUIDE.md` 完整版。
+- `docs/RUNTIME_CONCEPTS.md` 面试讲法章节。
 - 架构图。
 - 3-5 个 demo 脚本。
 - 初版完成报告。

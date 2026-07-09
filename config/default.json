@@ -1,5 +1,8 @@
 {
   "database": {
     "path": "data/lifeops.sqlite3"
+  },
+  "logs": {
+    "root": "logs/sessions"
   }
 }

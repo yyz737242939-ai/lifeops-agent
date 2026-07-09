@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
 
+from app.observability.file_logs import SessionLogWriter
 from app.intent.models import IntentDecision, IntentType
 from app.policy.models import PolicyAction, PolicyDecision
 from app.runtime.models import RuntimeRequest, RuntimeStatus
@@ -10,53 +12,67 @@ from tests.helpers import create_test_connection
 
 
 class RuntimeServiceTest(unittest.TestCase):
-    def test_handle_writes_run_record_and_trace_events(self) -> None:
+    def test_handle_writes_run_record_and_event_log(self) -> None:
         conn = create_test_connection()
         try:
-            request = RuntimeRequest(
-                user_input="把明天跑步加入任务",
-                session_id="session_test",
-                run_id="run_runtime_success",
-            )
+            with tempfile.TemporaryDirectory() as tmpdir:
+                request = RuntimeRequest(
+                    user_input="把明天跑步加入任务",
+                    session_id="session_test",
+                    run_id="run_runtime_success",
+                )
+                session_log = SessionLogWriter.create(
+                    tmpdir,
+                    session_id=request.session_id,
+                )
 
-            result = RuntimeService(conn=conn).handle(request)
+                result = RuntimeService(
+                    conn=conn,
+                    event_log=session_log.event_log,
+                ).handle(request)
 
-            self.assertEqual(result.status, RuntimeStatus.OK)
-            self.assertEqual(result.intent["intent_type"], "write_request")
-            self.assertEqual(result.policy["action"], "allow")
+                self.assertEqual(result.status, RuntimeStatus.OK)
+                self.assertEqual(result.intent["intent_type"], "write_request")
+                self.assertEqual(result.policy["action"], "allow")
 
-            row = conn.execute(
-                "SELECT id, status, error_code FROM run_records WHERE id = ?",
-                (request.run_id,),
-            ).fetchone()
-            self.assertEqual(row["id"], request.run_id)
-            self.assertEqual(row["status"], "ok")
-            self.assertIsNone(row["error_code"])
+                row = conn.execute(
+                    "SELECT id, status, error_code FROM run_records WHERE id = ?",
+                    (request.run_id,),
+                ).fetchone()
+                self.assertEqual(row["id"], request.run_id)
+                self.assertEqual(row["status"], "ok")
+                self.assertIsNone(row["error_code"])
 
-            events = conn.execute(
-                """
-                SELECT event_type
-                FROM trace_events
-                WHERE run_id = ?
-                ORDER BY seq
-                """,
-                (request.run_id,),
-            ).fetchall()
-            self.assertEqual(
-                [event["event_type"] for event in events],
-                [
-                    "runtime.run.started",
-                    "runtime.request.created",
-                    "runtime.intent.started",
-                    "runtime.intent.completed",
-                    "runtime.policy.started",
-                    "runtime.policy.completed",
-                    "runtime.orchestration.stubbed",
-                    "runtime.run.completed",
-                ],
-            )
+                events = session_log.event_log.read_all()
+                self.assertEqual(
+                    [event["event_type"] for event in events],
+                    [
+                        "runtime.run.started",
+                        "runtime.request.created",
+                        "runtime.intent.started",
+                        "runtime.intent.completed",
+                        "runtime.policy.started",
+                        "runtime.policy.completed",
+                        "runtime.orchestration.stubbed",
+                        "runtime.run.completed",
+                    ],
+                )
+                self.assertEqual(events[0]["run_id"], request.run_id)
+                self.assertEqual(events[0]["session_id"], request.session_id)
         finally:
             conn.close()
+
+    def test_handle_can_write_event_log_without_sqlite_connection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            request = _request("把明天跑步加入任务")
+            session_log = SessionLogWriter.create(tmpdir, session_id=request.session_id)
+
+            result = RuntimeService(event_log=session_log.event_log).handle(request)
+
+            self.assertEqual(result.status, RuntimeStatus.OK)
+            events = session_log.event_log.read_all()
+            self.assertEqual(events[0]["event_type"], "runtime.run.started")
+            self.assertEqual(events[-1]["event_type"], "runtime.run.completed")
 
     def test_requires_confirmation_result_does_not_claim_write(self) -> None:
         result = RuntimeService().handle(_request("计划一下"))

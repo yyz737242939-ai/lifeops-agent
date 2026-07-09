@@ -1,29 +1,31 @@
-# 当前状态
+# 推进日志
 
-本文档是 LifeOps Agent 的当前状态地图。
+本文档是 LifeOps Agent 的递增推进记录。
 
 ## 目的
 
-通过本文档了解当前项目事实：
+通过本文档追溯项目已经完成、已经验证、已经学到的演进过程：
 
-- 当前启用的架构是什么；
 - 哪些模块已经存在；
 - 哪些模块已经规划但尚未实现；
 - 当前阶段哪些命令和测试是有效的；
 - 哪些已知限制是有意保留的。
 
-对于当前工作，本文档取代旧 `legacy_v0/docs/PROJECT_CONTEXT_legacy.md` 的角色。
+本文档只记录已经发生的事实和已经沉淀的学习点。不记录尚未学习的概念，不替代当前架构快照；当前 runtime 边界以 `docs/ARCHITECTURE.md` 为准。
 
 ## 当前阶段
 
 项目已完成 Runtime 重构的阶段 2：Storage / SQLite 基础设施。
 
-项目已完成阶段 3：Runtime Core / Intent / Policy 初版，当前准备进入阶段 4：LangGraph Orchestration 骨架。
+项目已完成阶段 3：Runtime Core / Intent / Policy 初版。
+
+项目已完成阶段 3.5：Observability 文件日志校正，当前准备进入阶段 4：LangGraph Orchestration 骨架。
 
 当前状态：
 
 - 当前基础设施代码已经完成阶段 2 初版。
 - Runtime Core / Intent / Policy 已完成阶段 3 初版。
+- Observability 文件日志已完成阶段 3.5 初版。
 - 旧 runtime 已归档到 `legacy_v0/app/`。
 - 当前代码放在 `app/`。
 - 当前计划放在 `plans/`。
@@ -33,13 +35,13 @@
 已实现的当前 runtime 基础设施：
 
 - `app/common/`：配置读取、ID、UTC 时间、项目错误类型和 JSON 序列化。
-- `app/storage/`：SQLite 连接、schema migration、基础 evidence / LLM log 表和 `SqliteUnitOfWork`。
-- `app/observability/`：结构化 trace log 和原始 LLM request-response log 的模型与 SQLite store。
+- `app/storage/`：SQLite 连接、schema migration、`run_records` / `tool_calls` 基础表和 `SqliteUnitOfWork`。
+- `app/observability/`：event JSONL、LLM JSONL、application log 的文件日志模型和 writer。
 - `app/runtime/`：`RuntimeRequest`、`RuntimeSession`、`RuntimeResult`、`RuntimeService`、run record 写入 helper 和启动 bootstrap。
 - `app/intent/`：intent models、规则 classifier、LLM classifier 空实现和 `IntentService`。
 - `app/policy/`：policy models、permission scope 和 `PolicyService`。
-- `config/default.json`：声明默认数据库路径 `data/lifeops.sqlite3`。
-- `main.py`：当前 CLI 骨架入口，负责 config、SQLite、migration、runtime service bootstrap 和单轮输入输出。
+- `config/default.json`：声明默认数据库路径 `data/lifeops.sqlite3` 和默认日志根目录 `logs/sessions`。
+- `main.py`：当前 CLI 骨架入口，负责 config、SQLite、migration、文件日志 bootstrap 和单轮输入输出。
 - `tests/`：基础设施、Intent、Policy 和 Runtime Core 聚焦测试，以及测试数据库 helper。
 
 ## 当前 Runtime
@@ -75,9 +77,10 @@ RuntimeRequest
 
 - 阶段 2 Storage / SQLite 已完成初版。
 - 阶段 3 Runtime Core / Intent / Policy 已完成初版。
-- `docs/ARCHITECTURE.md` 已记录 Runtime Core、Intent / Policy 和 stub execution 边界。
-- `docs/RUNTIME_CONCEPTS.md` 已记录 Runtime Core、Intent Layer、Policy / Permission Layer 和 Write Safety 学习章节。
-- `plans/modules/STORAGE_SQLITE_PLAN.md`、`plans/modules/RUNTIME_CORE_PLAN.md` 和 `plans/modules/INTENT_POLICY_PLAN.md` 已记录完成状态。
+- 阶段 3.5 Observability 文件日志校正已完成初版。
+- `docs/ARCHITECTURE.md` 已记录 Runtime Core、Intent / Policy、文件日志和 stub execution 边界。
+- `docs/RUNTIME_CONCEPTS.md` 已记录 Runtime Core、Intent Layer、Policy / Permission Layer、Write Safety、Observability 和 SQLite Local Persistence 学习章节。
+- `plans/modules/STORAGE_SQLITE_PLAN.md`、`plans/modules/RUNTIME_CORE_PLAN.md`、`plans/modules/INTENT_POLICY_PLAN.md` 和 `plans/modules/OBSERVABILITY_LOGGING_PLAN.md` 已记录完成状态。
 - 下一阶段应创建并施工 `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md`，开始阶段 4：LangGraph Orchestration 骨架。
 
 当前有效测试命令：
@@ -117,10 +120,11 @@ plans/RUNTIME_REFACTOR_PLAN.md
 
 ```text
 1. README.md
-2. docs/CURRENT_STATE.md
-3. plans/RUNTIME_REFACTOR_PLAN.md
-4. 当前模块对应的 plans/modules/*_PLAN.md
-5. 与任务直接相关的代码、测试和文档
+2. docs/PROGRESS_LOG.md
+3. docs/ARCHITECTURE.md
+4. plans/RUNTIME_REFACTOR_PLAN.md
+5. 当前模块对应的 plans/modules/*_PLAN.md
+6. 与任务直接相关的代码、测试和文档
 ```
 
 默认不要读取 `legacy_v0/docs/PROJECT_CONTEXT_legacy.md`、`legacy_v0/docs/LEARNING_PROGRESS_legacy.md` 或 `legacy_v0/plans/*.md`。

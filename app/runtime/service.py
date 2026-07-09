@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import sqlite3
+import logging
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from app.intent.models import IntentDecision
 from app.intent.service import IntentService
 from app.observability.events import LogTraceEvent
-from app.observability.trace_store import LogTraceStore
+from app.observability.file_logs import EventLogWriter, SessionLogWriter
+from app.observability.logger import configure_application_logging, ensure_application_logger
 from app.policy.models import PolicyAction, PolicyDecision
 from app.policy.service import PolicyService
 from app.runtime.models import RuntimeRequest, RuntimeResult, RuntimeStatus
@@ -24,42 +28,48 @@ class RuntimeService:
         intent_service: IntentService | None = None,
         policy_service: PolicyService | None = None,
         conn: sqlite3.Connection | None = None,
+        event_log: EventLogWriter | None = None,
+        log_root: str | Path | None = None,
     ) -> None:
         self._intent_service = intent_service or IntentService()
         self._policy_service = policy_service or PolicyService()
         self._conn = conn
-        self._trace_store = LogTraceStore(conn) if conn is not None else None
+        self._event_log = event_log
+        self._log_root = Path(log_root) if log_root is not None else None
+        self._session_log: SessionLogWriter | None = None
+        ensure_application_logger()
+        self._logger = logging.getLogger("lifeops.runtime")
 
     def handle(self, request: RuntimeRequest) -> RuntimeResult:
         """Run one request through Intent and Policy without executing tools yet."""
 
-        if self._conn is None or self._trace_store is None:
-            return self._handle_core(request)
+        append_trace = self._build_event_appender(request)
 
-        seq = 0
-
-        def append_trace(event_type: str, payload: dict[str, Any] | None = None) -> None:
-            nonlocal seq
-            seq += 1
-            self._trace_store.append_event(
-                LogTraceEvent(
-                    run_id=request.run_id,
-                    seq=seq,
-                    event_type=event_type,
-                    payload=payload or {},
+        if self._conn is None:
+            if append_trace is not None:
+                append_trace("runtime.run.started")
+                append_trace(
+                    "runtime.request.created",
+                    {
+                        "session_id": request.session_id,
+                        "turn_id": request.turn_id,
+                    },
                 )
-            )
+            self._logger.info("runtime run started run_id=%s", request.run_id)
+            return self._handle_core(request, append_trace=append_trace)
 
         with SqliteUnitOfWork(self._conn):
             insert_run_record(self._conn, request)
-            append_trace("runtime.run.started")
-            append_trace(
-                "runtime.request.created",
-                {
-                    "session_id": request.session_id,
-                    "turn_id": request.turn_id,
-                },
-            )
+            if append_trace is not None:
+                append_trace("runtime.run.started")
+                append_trace(
+                    "runtime.request.created",
+                    {
+                        "session_id": request.session_id,
+                        "turn_id": request.turn_id,
+                    },
+                )
+            self._logger.info("runtime run started run_id=%s", request.run_id)
             result = self._handle_core(request, append_trace=append_trace)
             finish_run_record(self._conn, result)
             return result
@@ -74,7 +84,7 @@ class RuntimeService:
         self,
         request: RuntimeRequest,
         *,
-        append_trace: Any | None = None,
+        append_trace: Callable[[str, dict[str, Any] | None], None] | None = None,
     ) -> RuntimeResult:
         try:
             if append_trace is not None:
@@ -96,6 +106,7 @@ class RuntimeService:
                     "runtime.run.failed",
                     {"error_code": result.error_code, "stage": "intent"},
                 )
+            self._logger.exception("runtime run failed run_id=%s stage=intent", request.run_id)
             return result
 
         try:
@@ -119,6 +130,7 @@ class RuntimeService:
                     "runtime.run.failed",
                     {"error_code": result.error_code, "stage": "policy"},
                 )
+            self._logger.exception("runtime run failed run_id=%s stage=policy", request.run_id)
             return result
 
         result = RuntimeResult(
@@ -139,7 +151,53 @@ class RuntimeService:
                 "runtime.run.completed",
                 {"status": result.status.value},
             )
+        self._logger.info(
+            "runtime run completed run_id=%s status=%s",
+            request.run_id,
+            result.status.value,
+        )
         return result
+
+    def _build_event_appender(
+        self,
+        request: RuntimeRequest,
+    ) -> Callable[[str, dict[str, Any] | None], None] | None:
+        event_log = self._event_log
+        if event_log is None and self._log_root is not None:
+            event_log = self._ensure_session_log(request).event_log
+        if event_log is None:
+            return None
+
+        seq = 0
+
+        def append_trace(event_type: str, payload: dict[str, Any] | None = None) -> None:
+            nonlocal seq
+            seq += 1
+            event_log.append(
+                LogTraceEvent(
+                    run_id=request.run_id,
+                    seq=seq,
+                    event_type=event_type,
+                    payload=payload or {},
+                    session_id=request.session_id,
+                    turn_id=request.turn_id,
+                )
+            )
+
+        return append_trace
+
+    def _ensure_session_log(self, request: RuntimeRequest) -> SessionLogWriter:
+        if self._session_log is not None:
+            return self._session_log
+        if self._log_root is None:
+            raise RuntimeError("log_root is not configured.")
+        self._session_log = SessionLogWriter.create(
+            self._log_root,
+            session_id=request.session_id,
+            metadata={"first_run_id": request.run_id},
+        )
+        configure_application_logging(self._session_log.session_dir)
+        return self._session_log
 
 
 def _status_from_policy(policy: PolicyDecision) -> RuntimeStatus:

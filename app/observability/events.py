@@ -15,6 +15,9 @@ class LogRuntimeEvent:
     seq: int
     event_type: str
     payload: dict[str, Any] = field(default_factory=dict)
+    session_id: str | None = None
+    turn_id: str | None = None
+    level: str = "info"
     id: str = field(default_factory=lambda: new_id("logevt"))
     created_at: str = field(default_factory=utc_now_iso)
 
@@ -25,6 +28,12 @@ class LogRuntimeEvent:
             raise ValueError("seq must be greater than zero.")
         if not self.event_type.strip():
             raise ValueError("event_type must be non-empty.")
+        if self.session_id is not None and not self.session_id.strip():
+            raise ValueError("session_id must be non-empty when provided.")
+        if self.turn_id is not None and not self.turn_id.strip():
+            raise ValueError("turn_id must be non-empty when provided.")
+        if not self.level.strip():
+            raise ValueError("level must be non-empty.")
 
 
 @dataclass(frozen=True)
@@ -39,6 +48,8 @@ class LogLlmInteraction:
     run_id: str
     seq: int
     request: dict[str, Any]
+    session_id: str | None = None
+    turn_id: str | None = None
     provider: str | None = None
     model: str | None = None
     response: dict[str, Any] | None = None
@@ -54,6 +65,10 @@ class LogLlmInteraction:
             raise ValueError("seq must be greater than zero.")
         if not isinstance(self.request, dict):
             raise ValueError("request must be a dict.")
+        if self.session_id is not None and not self.session_id.strip():
+            raise ValueError("session_id must be non-empty when provided.")
+        if self.turn_id is not None and not self.turn_id.strip():
+            raise ValueError("turn_id must be non-empty when provided.")
         if self.response is not None and not isinstance(self.response, dict):
             raise ValueError("response must be a dict when provided.")
         if not self.status.strip():

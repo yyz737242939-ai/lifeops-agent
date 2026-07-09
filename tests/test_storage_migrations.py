@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import unittest
-import sqlite3
 
 from app.common.errors import MigrationError
 from app.storage.migrations import get_schema_version, migrate
@@ -19,7 +18,7 @@ class StorageMigrationsTest(unittest.TestCase):
     def test_empty_database_starts_at_schema_version_zero(self) -> None:
         self.assertEqual(get_schema_version(self.conn), 0)
 
-    def test_migrate_creates_initial_evidence_tables(self) -> None:
+    def test_migrate_creates_initial_storage_tables(self) -> None:
         report = migrate(self.conn)
 
         self.assertEqual(report.previous_version, 0)
@@ -29,9 +28,7 @@ class StorageMigrationsTest(unittest.TestCase):
         self.assert_tables_exist(
             "schema_migrations",
             "run_records",
-            "trace_events",
             "tool_calls",
-            "llm_interactions",
         )
 
     def test_migrate_is_idempotent(self) -> None:
@@ -45,29 +42,6 @@ class StorageMigrationsTest(unittest.TestCase):
 
         rows = self.conn.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()
         self.assertEqual(rows["count"], 1)
-
-    def test_trace_events_enforce_run_sequence_uniqueness(self) -> None:
-        migrate(self.conn)
-        self.conn.execute(
-            """
-            INSERT INTO run_records (id, started_at, status, created_at)
-            VALUES ('run_1', '2026-07-08T00:00:00+00:00', 'running', '2026-07-08T00:00:00+00:00')
-            """
-        )
-        self.conn.execute(
-            """
-            INSERT INTO trace_events (id, run_id, seq, event_type, payload_json, created_at)
-            VALUES ('evt_1', 'run_1', 1, 'test.event', '{}', '2026-07-08T00:00:00+00:00')
-            """
-        )
-
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.conn.execute(
-                """
-                INSERT INTO trace_events (id, run_id, seq, event_type, payload_json, created_at)
-                VALUES ('evt_2', 'run_1', 1, 'test.event', '{}', '2026-07-08T00:00:00+00:00')
-                """
-            )
 
     def test_newer_database_version_is_rejected(self) -> None:
         self.conn.execute(

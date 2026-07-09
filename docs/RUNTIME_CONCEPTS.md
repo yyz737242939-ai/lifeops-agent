@@ -2,6 +2,8 @@
 
 本文档是 Runtime 的详细学习和面试手册。
 
+本文档只记录已经随项目推进学到、实现过或正在用于当前阶段解释的概念。外部链接统一维护在 `docs/AGENT_LEARNING_LINKS.md`，本文档不直接维护 URL。
+
 每个概念使用以下模板：
 
 ```markdown
@@ -21,10 +23,7 @@
 
 ### 面试解释
 
-### 延伸学习
-- 官方文档
-- 框架文档
-- 项目文件
+### 相关项目文件
 ```
 
 ## 必需章节
@@ -52,25 +51,7 @@
 - Observability
 - SQLite Local Persistence
 
-## 官方参考
-
-LangGraph 和 LangChain：
-
-- LangGraph overview: https://docs.langchain.com/oss/python/langgraph/overview
-- LangGraph low-level concepts: https://langchain-ai.github.io/langgraph/concepts/low_level/
-- LangGraph persistence: https://docs.langchain.com/oss/python/langgraph/persistence
-- LangGraph interrupts: https://docs.langchain.com/oss/python/langgraph/interrupts
-- LangChain overview: https://docs.langchain.com/oss/python/langchain/overview
-- LangChain tools: https://docs.langchain.com/oss/python/langchain/tools
-
-MCP：
-
-- MCP introduction: https://modelcontextprotocol.io/docs/getting-started/intro
-- MCP specification: https://modelcontextprotocol.io/specification
-- MCP tools: https://modelcontextprotocol.io/docs/concepts/tools
-- MCP resources: https://modelcontextprotocol.io/docs/concepts/resources
-
-当前 runtime 项目参考：
+## 当前 runtime 项目参考
 
 - `plans/RUNTIME_REFACTOR_PLAN.md`
 - `docs/ARCHITECTURE.md`
@@ -110,7 +91,7 @@ RuntimeRequest
 -> RuntimeResult
 ```
 
-传入 SQLite connection 时，它会写入 `run_records` 和结构化 `trace_events`。当前 orchestration 和 tool execution 仍是 stub。
+传入 SQLite connection 时，它可以写入 `run_records`。传入 event log 或配置 `log_root` 时，它会把结构化 runtime event 写入 `events.jsonl`。当前 orchestration 和 tool execution 仍是 stub。
 
 ### 输入 / 输出 / 不负责什么
 
@@ -133,13 +114,13 @@ Runtime Core 不负责自然语言深度理解，不授权写入，不执行业�
 
 - `tests/test_runtime_service.py`
 
-可以通过 `run_records` 和 `trace_events` 观察一次 run 的开始、intent、policy、stub orchestration 和完成事件。
+可以通过 `events.jsonl` 观察一次 run 的开始、intent、policy、stub orchestration 和完成事件。需要关系查询时，`run_records` 仍可记录 run 状态。
 
 ### 面试解释
 
 可以这样讲：本项目先把 agent runtime 的外壳做清楚。Runtime Core 不直接“聪明地回答问题”，而是负责把一轮输入变成 request、run、result 和 evidence。这样后续 LangGraph、Planner、Executor 都只是挂进明确生命周期里的模块，不会吞掉授权和事实来源边界。
 
-### 延伸学习
+### 相关项目文件
 
 - 本项目：`app/runtime/`
 - 本项目：`plans/modules/RUNTIME_CORE_PLAN.md`
@@ -198,7 +179,7 @@ Intent 不授权写入，不调用工具，不写 SQLite，不把 LLM classifier
 
 可以这样讲：Intent 是语义层，只回答“用户可能想做什么”。它可以使用规则、LLM structured output 或相似样例检索，但这些都只是信号。是否允许写入必须交给 Policy。
 
-### 延伸学习
+### 相关项目文件
 
 - 本项目：`app/intent/`
 - 本项目：`plans/modules/INTENT_POLICY_PLAN.md`
@@ -252,7 +233,7 @@ Policy 不调用工具，不调用 Planner，不写业务 repository，也不读
 
 可以这样讲：Intent 判断“用户可能想干什么”，Policy 判断“系统现在被允许干什么”。即使未来 LLM classifier 很强，它也只能提供 intent signal。真正的写入授权来自 Policy，并且必须绑定当前用户输入。
 
-### 延伸学习
+### 相关项目文件
 
 - 本项目：`app/policy/`
 - 本项目：`plans/modules/INTENT_POLICY_PLAN.md`
@@ -297,7 +278,7 @@ Write Safety 不等于自然语言理解，不等于完整权限平台，也不�
 
 可以这样讲：本项目把“理解用户想做什么”和“允许系统做什么”拆开。这样即使分类器或 Planner 猜错了，也不会自动变成写入权限。
 
-### 延伸学习
+### 相关项目文件
 
 - 本项目：`docs/ARCHITECTURE.md`
 - 本项目：`app/policy/`
@@ -310,59 +291,58 @@ Observability 让 runtime 行为可以被解释和复盘。它回答“这次 ru
 
 ### 核心概念
 
-- 结构化 trace log：少量必要字段，便于机器读取和 Inspector 展示。
-- 原始 LLM interaction log：保存 request / response JSON，便于人工排查。
-- Runtime evidence：能证明运行路径和结果的持久化记录，但不自动等于业务事实。
+- event log：少量必要字段，便于机器读取、Inspector 展示和 Eval 断言。
+- LLM interaction log：保存 request / response JSON，便于人工排查。
+- normal application log：普通程序日志，便于测试和 debug。
+- Runtime evidence：能解释运行路径和结果的记录，但不自动等于业务事实。
 
 ### 当前 runtime 实现
 
 当前实现位于：
 
 - `app/observability/events.py`
-- `app/observability/trace_store.py`
-- `app/observability/llm_log_store.py`
+- `app/observability/file_logs.py`
+- `app/observability/logger.py`
 
-`LogTraceEvent` 写入 `trace_events`。`LogLlmInteraction` 写入 `llm_interactions`。两类日志分表保存。
+`LogTraceEvent` 写入 `events.jsonl`。`LogLlmInteraction` 写入 `llm.jsonl`。Python 标准 `logging` 写入 `application.log`。三类日志默认在同一个 session log directory 下，但不混成一个文件。
 
 ### 输入 / 输出 / 不负责什么
 
 输入是 `run_id`、`seq`、事件类型、payload 或 LLM request-response。
 
-输出是可按 `run_id` 读取、按 `seq` 排序的日志对象。
+输出是 append-only 文件日志，可按 `session_id` / `run_id` / `seq` 读取和复盘。
 
 Observability 不负责授权写入，不负责改变业务状态，也不把 assistant 文本或 LLM response 自动升级成事实。
 
 ### 常见失败模式
 
-- 缺少对应 `run_records`，外键写入失败。
 - payload 不能 JSON 序列化。
-- 测试 fixture 未提交，导致事务边界冲突。
+- session log directory 不可写。
+- application logger 重复添加 handler，导致重复日志。
 - 原始 LLM log 过大或包含敏感字段，后续接入真实外部凭证前需要脱敏策略。
 
 ### 如何测试和观察
 
 当前测试包括：
 
-- `tests/test_observability_trace_store.py`
-- `tests/test_observability_llm_log_store.py`
+- `tests/test_observability_file_logs.py`
 
-它们验证 append / list、run_id 过滤、seq 排序、外键约束和 JSON 序列化失败。
+它验证 metadata、`events.jsonl`、`llm.jsonl`、`application.log` 和 logging 幂等性。
 
 ### 面试解释
 
-可以这样讲：本项目把 observability 分成结构化 trace 和原始 LLM interaction 两条线。trace 给系统和 Inspector 判断 runtime 路径，LLM log 给人回看原始模型交互。两者都是 evidence，但不绕过 policy，也不是业务写入授权来源。
+可以这样讲：本项目把 observability 分成三条文件日志。event log 给系统和 Inspector 判断 runtime 路径，LLM log 给人回看原始模型交互，application log 给工程 debug。日志是观测材料，不绕过 policy，也不是业务写入授权来源；SQLite 主要留给业务事实和适合关系查询的数据。
 
-### 延伸学习
+### 相关项目文件
 
 - 本项目：`app/observability/`
-- 本项目：`app/storage/schema.py`
-- 后续对照：OpenTelemetry / LangSmith
+- 本项目：`plans/modules/OBSERVABILITY_LOGGING_PLAN.md`
 
 ## SQLite Local Persistence
 
 ### 解决什么问题
 
-SQLite Local Persistence 为本地 runtime 提供轻量、可测试、可查询的事实和 evidence 存储。
+SQLite Local Persistence 为本地 runtime 提供轻量、可测试、可查询的业务事实和关系数据存储。
 
 ### 核心概念
 
@@ -416,8 +396,8 @@ Storage 不负责 intent、policy、planning、tool execution 或业务语义。
 
 可以这样讲：本项目不用 ORM，先用 Python 标准库 `sqlite3` 建一个透明的本地持久层。启动时先连接数据库，再跑 schema migration，之后 repository / store 假设表结构已经准备好。写入通过 unit of work 统一 commit 或 rollback，避免半截运行证据落库。
 
-### 延伸学习
+### 相关项目文件
 
-- Python sqlite3: https://docs.python.org/3/library/sqlite3.html
+- SQLite / Local Persistence 相关链接维护在 `docs/AGENT_LEARNING_LINKS.md`。
 - 本项目：`app/storage/`
 - 本项目：`plans/modules/STORAGE_SQLITE_PLAN.md`

@@ -4,16 +4,21 @@
 
 阶段 2 Storage / SQLite 初版已完成。
 
+当前边界：
+
+- SQLite 主要服务业务事实、适合关系查询的数据、repository 和 migration；不要因为信息“结构化”就默认写入 SQLite。
+- Runtime event、LLM interaction 和 normal 程序日志属于 `plans/modules/OBSERVABILITY_LOGGING_PLAN.md`，当前实现写入 `events.jsonl`、`llm.jsonl` 和 `application.log`。
+
 已完成：
 
 - `app/common/` 已包含配置读取、ID、UTC 时间、项目错误类型和 JSON 序列化 helper。
 - `app/storage/` 已包含 SQLite connection factory、schema、migration runner、repository helper 和 `SqliteUnitOfWork`。
-- `app/observability/` 已包含结构化 trace event、原始 LLM interaction event、SQLite trace store 和 LLM log store。
+- `app/observability/` 已包含 event JSONL、LLM JSONL 和 application log 的文件日志 writer。
 - `config/default.json` 已声明默认数据库路径 `data/lifeops.sqlite3`。
-- SQLite 初版 schema 已包含 `schema_migrations`、`run_records`、`trace_events`、`tool_calls` 和 `llm_interactions`。
+- SQLite 当前 schema 包含 `schema_migrations`、`run_records` 和 `tool_calls`。
 - 测试数据库 helper 已支持 `:memory:` SQLite 和 migration helper，避免触碰真实 `data/lifeops.sqlite3`。
 - `.gitignore` 已覆盖本地 SQLite、JSON 用户数据、导出目录和 legacy 运行输出。
-- `docs/CURRENT_STATE.md`、`docs/ARCHITECTURE.md`、`docs/RUNTIME_CONCEPTS.md` 和 `docs/decisions/ADR-0004-sqlite-storage.md` 已同步阶段 2 边界。
+- `docs/PROGRESS_LOG.md`、`docs/ARCHITECTURE.md` 和 `docs/RUNTIME_CONCEPTS.md` 已同步阶段 2 边界。
 
 仍保留到后续阶段：
 
@@ -36,7 +41,7 @@
 
 - `app/common/`：跨模块基础类型、时间、ID、错误和序列化工具。
 - `app/storage/`：SQLite 连接、schema、migration、repository 基类和 unit of work。
-- `app/observability/`：结构化事件、原始 LLM 对话记录接口和 SQLite trace / LLM log store。
+- `app/observability/`：event、LLM 和 normal 程序日志接口；当前文件日志实现由 Observability Logging 模块维护。
 - 可重复创建的 test database 策略。
 - 明确的本地数据、fixture、eval 数据和真实用户数据隔离规则。
 
@@ -48,11 +53,11 @@
 
 当前可依据的参考是：
 
-- `README.md`：当前 runtime 使用 SQLite 作为本地事实和 runtime evidence 存储。
-- `docs/CURRENT_STATE.md`：阶段 2 Storage / SQLite 已完成初版，新代码放入 `app/`。
-- `docs/ARCHITECTURE.md`：SQLite repository、成功 WRITE result、用户授权 TaskStep、RunRecord 和 LogTraceEvent 是事实来源。
+- `README.md`：当前 runtime 使用 SQLite 存放业务事实和适合关系查询的数据；event / LLM / normal 程序日志默认走文件。
+- `docs/PROGRESS_LOG.md`：阶段 2 Storage / SQLite 已完成初版，新代码放入 `app/`。
+- `docs/ARCHITECTURE.md`：SQLite repository、成功 WRITE result 和用户授权 TaskStep 是业务事实来源；event / LLM / normal 程序日志是观测材料，不是业务事实或授权来源。
 - `docs/RUNTIME_CONCEPTS.md`：已补齐 Observability 和 SQLite Local Persistence 学习章节。
-- `plans/RUNTIME_REFACTOR_PLAN.md`：阶段 2 交付、依赖方向和 SQLite 持久层策略。
+- `plans/RUNTIME_REFACTOR_PLAN.md`：阶段 2 交付、依赖方向和“按用途选择 SQLite / 文件日志 / JSON”的数据策略。
 
 V0 的主要问题预计是：
 
@@ -72,8 +77,8 @@ V0 的主要问题预计是：
 - 建立显式 schema version 和按序 migration skeleton。
 - 建立 `lifeops.sqlite3` 的连接工厂和 pragma 初始化。
 - 建立 repository / unit of work 的最小接口。
-- 建立 trace event 和 run record 的基础表。
-- 建立两类日志：结构化 runtime trace，以及原始 LLM / agent request-response 记录。
+- 建立 run record 和后续 tool call 的基础表。
+- 为 observability 预留模型边界；日志落盘由 Observability Logging 模块负责。
 - 提供 test database 工厂，支持内存数据库和临时文件数据库。
 - 提供 seed / reset / fixture 的边界设计，但不写业务 fixture 内容。
 - 更新 `.gitignore` 或确认现有规则覆盖本地 SQLite 和用户数据。
@@ -101,8 +106,7 @@ V0 的主要问题预计是：
 - SQLite 数据库路径。
 - migration 定义。
 - repository 查询 / 写入请求。
-- observability 事件和 trace event。
-- LLM / agent 的原始 request-response 记录。
+- 需要关系查询或事务管理的运行记录。
 - 测试或 eval 提供的 fixture seed 数据。
 
 输出：
@@ -110,15 +114,14 @@ V0 的主要问题预计是：
 - 初始化后的 SQLite connection。
 - schema version 状态。
 - repository 读写结果。
-- 已持久化的 run record、trace event、tool call 等 runtime evidence。
-- 已持久化的 LLM / agent 原始 request-response 记录。
-- 可被 Inspector / Eval 只读查询的执行证据。
+- 已持久化的 run record、tool call 等关系数据。
+- 可被后续 Inspector / Eval 只读查询的关系数据；event / LLM / normal 日志由文件日志读取。
 
 依赖：
 
 - `app/common` 可被所有模块依赖，但不能依赖业务模块。
 - `app/storage` 可依赖 `app/common`，不能依赖 domain service、orchestration、policy 或 planner。
-- `app/observability` 可依赖 `app/common` 和 `app/storage`，不依赖业务 service。
+- `app/observability` 可依赖 `app/common`，不依赖 storage 或业务 service。
 
 不负责：
 
@@ -132,17 +135,15 @@ V0 的主要问题预计是：
 关键边界：
 
 - `storage` 是持久化机制，不是业务模型层。
-- `observability` 记录 runtime evidence，不直接改变业务事实。
-- `trace_events` 记录少量必要结构化字段，用于判断 runtime 路径、状态变化和失败层级。
-- `llm_interactions` 记录 LLM / agent 的原始 request-response，用于人工回看最原始对话；它是调试材料，不是业务事实或写入授权来源。
-- `inspector` 未来只能读 trace / evidence，不能通过本模块修改状态。
+- `observability` 记录 runtime event、LLM interaction 和 normal 程序日志，不直接改变业务事实。
+- `inspector` 未来只能读日志和业务事实的只读视图，不能通过本模块修改状态。
 - `evals` 必须使用测试数据库，不能复用真实 `data/lifeops.sqlite3`。
 
 ## 5. 数据模型 / 存储
 
-建议初版 schema 分两类：基础 evidence / LLM log 表先实现，业务表只记录方向，等后续 domain 模块计划再设计和实现。
+当前 SQLite schema 只保留适合关系查询的基础表。event / LLM / normal 程序日志由文件日志负责，业务表等后续 domain 模块计划再设计和实现。
 
-阶段 2 必须实现的基础表：
+当前已实现的基础表：
 
 ```text
 schema_migrations
@@ -160,14 +161,6 @@ run_records
 - error_code
 - created_at
 
-trace_events
-- id
-- run_id
-- seq
-- event_type
-- payload_json
-- created_at
-
 tool_calls
 - id
 - run_id
@@ -179,17 +172,6 @@ tool_calls
 - error_code
 - created_at
 
-llm_interactions
-- id
-- run_id
-- seq
-- provider
-- model
-- request_json
-- response_json
-- status
-- error_code
-- created_at
 ```
 
 后续 domain 模块再设计的业务表方向：
@@ -289,23 +271,21 @@ app/observability/events.py
 - LogTraceEvent
 - LogLlmInteraction
 
-app/observability/trace_store.py
-- LogTraceStore
-- append_event(...)
-- list_events(run_id: str) -> list[LogTraceEvent]
+app/observability/file_logs.py
+- SessionLogWriter
+- EventLogWriter
+- LlmLogWriter
 
-app/observability/llm_log_store.py
-- LogLlmInteractionStore
-- append_interaction(...)
-- list_interactions(run_id: str) -> list[LogLlmInteraction]
+app/observability/logger.py
+- configure_application_logging(...)
 ```
 
 接口原则：
 
 - 所有写入应返回结构化结果或抛出项目内错误类型。
-- payload 用 JSON 字符串入库，但上层接口使用 dict / dataclass / pydantic model。
-- trace event 不保存超大原文；只保存摘要、引用和结构化字段。
-- LLM interaction 可以保存原始 request / response JSON，但必须与 trace event 分表，避免结构化运行证据和原始对话混在一起。
+- 进入 SQLite 的 payload 才用 JSON 字符串入库；文件日志使用 JSONL。
+- event log 不保存超大原文；只保存摘要、引用和结构化字段。
+- LLM interaction 保存原始 request / response JSON，但进入 `llm.jsonl`，不进入 SQLite。
 - ID 和时间由 `common` 生成，便于测试替换。
 
 ## 7. 失败模式
@@ -318,7 +298,7 @@ app/observability/llm_log_store.py
 - JSON payload 无法序列化。
 - repository 违反唯一约束或外键约束。
 - 测试误连真实数据库。
-- observability 写入失败影响主流程。
+- 文件日志写入失败影响主流程。
 - LLM request / response 体积过大或包含敏感字段。
 
 处理原则：
@@ -326,19 +306,19 @@ app/observability/llm_log_store.py
 - migration 失败必须抛出 `MigrationError`，不能静默继续。
 - schema version 过新时拒绝启动，提示当前代码过旧。
 - repository 失败抛出 `StorageError` 或更具体错误。
-- observability 写入失败初版可以抛错，让测试暴露问题；后续再考虑降级策略。
+- 文件日志写入失败初版可以抛错，让测试暴露问题；后续再考虑降级策略。
 - test database helper 应尽量要求显式路径或显式 `:memory:`，避免默认真实路径。
-- trace payload 必须控制大小，避免把完整用户输入、token 或大工具输出直接落库。
+- event payload 必须控制大小，避免把完整用户输入、token 或大工具输出直接落盘。
 - LLM interaction 是专门的原始记录通道，可以保留原始 request-response；后续如接入真实 token / OAuth / 外部凭证，需要先增加脱敏策略。
 
-Trace 记录建议：
+Event 记录建议：
 
 - `storage.migration.started`
 - `storage.migration.applied`
 - `storage.migration.failed`
 - `storage.transaction.committed`
 - `storage.transaction.rolled_back`
-- `trace.event.appended`
+- `event.appended`
 - `llm.interaction.appended`
 
 这些事件先用于测试和未来 Inspector，不作为业务事实授权来源。
@@ -352,8 +332,8 @@ Trace 记录建议：
 - schema version 正确记录。
 - `connect_sqlite` 初始化 row factory、foreign keys 和 WAL / journal 策略。
 - unit of work 成功时 commit，异常时 rollback。
-- trace store 可 append / list，且按 run_id + seq 排序。
-- LLM log store 可 append / list 原始 request-response，且和 trace_events 分表存储。
+- event JSONL writer 可 append / read，且按写入顺序保留 seq。
+- LLM JSONL writer 可 append / read 原始 request-response。
 - JSON payload 序列化失败能被明确捕获。
 - test DB helper 不会创建或触碰真实 `data/lifeops.sqlite3`。
 
@@ -374,15 +354,15 @@ uv run python -m unittest discover -s tests -v
 
 阶段 2 完成后应更新：
 
-- `docs/CURRENT_STATE.md`：记录 `app/common`、`app/storage`、`app/observability` 已存在，以及有效测试命令。
-- `docs/ARCHITECTURE.md`：补充基础设施层、SQLite facts/evidence、trace store 的边界。
+- `docs/PROGRESS_LOG.md`：记录 `app/common`、`app/storage`、`app/observability` 已存在，以及有效测试命令。
+- `docs/ARCHITECTURE.md`：补充基础设施层、SQLite facts、文件日志和 observability 的当前边界。
 - `docs/RUNTIME_CONCEPTS.md`：补充 `Observability` 和 `SQLite Local Persistence` 章节。
-- `docs/decisions/ADR-0004-sqlite-storage.md`：如果正式确认 SQLite schema / migration 策略，应新增该 ADR。
+- `docs/ARCHITECTURE.md`：如果正式确认 SQLite schema / migration 策略，应更新当前架构快照。
 
 通常不需要更新：
 
 - `README.md`：除非入口或运行方式发生变化。
-- `docs/INTERVIEW_DEMO_GUIDE.md`：除非阶段 2 同时提供了可演示的 Inspector / trace demo。
+- `docs/RUNTIME_CONCEPTS.md`：只沉淀已经实现和学到的 SQLite / Observability 解释。
 - `CHANGELOG.md`：除非用户明确要求记录里程碑。
 
 ## 10. 实施步骤
@@ -392,14 +372,14 @@ uv run python -m unittest discover -s tests -v
 1. [x] 创建 `app/__init__.py`、`app/common/`、`app/storage/`、`app/observability/` 的空包和最小模块文件。
 2. [x] 实现 `common` 的 ID、时间、错误和 JSON 序列化 helper，并添加聚焦测试。
 3. [x] 创建 `config/default.json` 和 config loader，并实现 SQLite connection factory，包含 row factory、foreign key pragma 和明确的数据库路径策略。
-4. [x] 实现 `schema_migrations` 和 migration runner，只创建最小基础 evidence 表。
+4. [x] 实现 `schema_migrations` 和 migration runner，只创建最小基础 storage 表。
 5. [x] 实现 `SqliteUnitOfWork`，覆盖 commit / rollback 测试。
-6. [x] 实现 `LogRuntimeEvent` / `LogTraceEvent` 类型和 `LogTraceStore` 的 append / query。
-7. [x] 实现 `LogLlmInteraction` 类型和 `LogLlmInteractionStore` 的 append / query，和 `LogTraceStore` 分开。
+6. [x] 实现 `LogRuntimeEvent` / `LogTraceEvent` / `LogLlmInteraction` 类型。
+7. [x] 通过 Observability Logging 模块实现 event / LLM / normal 文件日志。
 8. [x] 增加 test database helper，确保测试默认不触碰真实 `data/lifeops.sqlite3`。
 9. [x] 检查 `.gitignore` 是否覆盖阶段 2 产生的真实数据路径；如不足，做最小补充。
-10. [x] 更新 `docs/CURRENT_STATE.md`、`docs/ARCHITECTURE.md` 和 `docs/RUNTIME_CONCEPTS.md`。
-11. [x] 如 schema / migration 策略已稳定，新增 `docs/decisions/ADR-0004-sqlite-storage.md`。
+10. [x] 更新 `docs/PROGRESS_LOG.md`、`docs/ARCHITECTURE.md` 和 `docs/RUNTIME_CONCEPTS.md`。
+11. [x] 如 schema / migration 策略已稳定，同步 `docs/ARCHITECTURE.md`。
 12. [x] 运行最小相关测试和 compile 检查。
 
 ## Grill-me 检查清单
@@ -411,13 +391,13 @@ uv run python -m unittest discover -s tests -v
   - 当前目标是小而可解释的本地 runtime。`sqlite3` 标准库足够覆盖学习、测试和面试讲解，ORM 会过早增加平台复杂度。
 
 - 什么是事实来源，什么不是？
-  - SQLite repository、成功 WRITE tool result、用户授权 TaskStep、RunRecord / LogTraceEvent 是事实或证据来源。assistant 文本、Planner 输出、Recovery Context、LangGraph checkpoint 和 conversation summary 不是。
+  - SQLite repository、成功 WRITE tool result、用户授权 TaskStep 是业务事实来源。event / LLM / normal log 是观测材料，不是业务事实或授权来源。assistant 文本、Planner 输出、Recovery Context、LangGraph checkpoint 和 conversation summary 也不是。
 
 - trace event 会不会变成又一个日志垃圾桶？
   - 初版必须限制 payload 大小和结构，只记录 run_id、seq、event_type、摘要、引用和必要结构字段。
 
 - 原始 LLM 对话放在哪里？
-  - 放在独立的 `llm_interactions` / `LogLlmInteractionStore` 中，和 `trace_events` 分开。trace 用来解释 runtime 路径，LLM log 用来人工查看最原始 request-response。
+  - 后续放在独立的 `llm.jsonl` 中，和 `events.jsonl` 分开。event log 用来解释 runtime 路径，LLM log 用来人工查看最原始 request-response。
 
 - migration 是不是旧数据迁移？
   - 不是。这里的 migration 是 SQLite schema 版本演进。当前没有旧数据需要迁入，阶段 2 不做 V0 数据迁移。
@@ -426,4 +406,4 @@ uv run python -m unittest discover -s tests -v
   - 所有测试通过显式 test DB factory 创建独立数据库；eval 也使用 fixture/test DB，不复用 `data/lifeops.sqlite3`。
 
 - 哪些表现在建，哪些等 domain 计划？
-  - `schema_migrations`、`run_records`、`trace_events`、`tool_calls`、`llm_interactions` 可以先建。业务语义强的表等 Tasks、Wellbeing、Memory、Eval 模块计划确认后再实现。
+  - 当前只保留 `schema_migrations`、`run_records`、`tool_calls`。业务语义强的表等 Tasks、Wellbeing、Memory、Eval 模块计划确认后再实现。

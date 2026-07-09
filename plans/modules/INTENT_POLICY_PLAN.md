@@ -15,7 +15,7 @@
 - LLM classifier result、metadata 和 planner/checkpoint 模拟字段不能绕过 Policy。
 - Intent / Policy 已接入 Runtime Core trace 摘要。
 - Intent、Policy 和 Runtime integration 聚焦测试已覆盖阶段 3 边界。
-- `docs/CURRENT_STATE.md`、`docs/ARCHITECTURE.md` 和 `docs/RUNTIME_CONCEPTS.md` 已同步当前边界。
+- `docs/PROGRESS_LOG.md`、`docs/ARCHITECTURE.md` 和 `docs/RUNTIME_CONCEPTS.md` 已同步当前边界。
 
 仍保留到后续阶段：
 
@@ -56,7 +56,7 @@
 
 - `docs/ARCHITECTURE.md`：业务写入必须来自用户当前输入中的明确授权。
 - `docs/ARCHITECTURE.md`：Planner 输出、LangGraph checkpoint state、Recovery Context、conversation summary 和原始 LLM log 都不是事实来源。
-- `docs/decisions/ADR-0001-runtime-boundaries.md`：runtime 使用 intent first，tool exposure 或 execution 之前先经过 policy。
+- `docs/ARCHITECTURE.md`：runtime 使用 intent first，tool exposure 或 execution 之前先经过 policy。
 - `plans/RUNTIME_REFACTOR_PLAN.md`：先判断 intent，再决定是否 planning，避免关键词误触发；Policy 是权限事实源。
 - `plans/modules/STORAGE_SQLITE_PLAN.md`：observability 和 storage 只提供 evidence，不负责授权。
 
@@ -283,7 +283,7 @@ LLM classifier 初版原则：
 - 具有和未来真实 classifier 相同的接口。
 - 默认返回 `abstain` / `not_available`。
 - 不调用真实模型。
-- 不写 `llm_interactions`，除非未来真的发起 LLM request。
+- 不写 LLM log，除非未来真的发起 LLM request；后续真实 LLM request / response 应写入 `llm.jsonl`。
 - 在测试中可证明 pipeline 调用了它。
 
 IntentService 合成原则：
@@ -382,7 +382,7 @@ $env:UV_CACHE_DIR='D:\lifeops-agent\.tmp\uv-cache'; uv run python -m compileall 
 
 阶段 3 Intent / Policy 完成后应更新：
 
-- `docs/CURRENT_STATE.md`：记录 `app/intent/`、`app/policy/` 已存在，LLM classifier 当前为空实现。
+- `docs/PROGRESS_LOG.md`：记录 `app/intent/`、`app/policy/` 已存在，LLM classifier 当前为空实现。
 - `docs/ARCHITECTURE.md`：补充 Intent 和 Policy 的依赖方向、授权事实源和禁止反向授权。
 - `docs/RUNTIME_CONCEPTS.md`：补充 Intent Layer、Policy / Permission Layer、Write Safety 的学习章节。
 - `docs/AGENT_LEARNING_LINKS.md`：补充 structured output、guardrails 和 permission / safety 相关权威学习链接；不提前加入 Tool System、MCP 或 human-in-the-loop 链接。
@@ -390,10 +390,10 @@ $env:UV_CACHE_DIR='D:\lifeops-agent\.tmp\uv-cache'; uv run python -m compileall 
 通常不需要更新：
 
 - `README.md`：除非阶段 3 入口已经成为正式 demo。
-- `docs/INTERVIEW_DEMO_GUIDE.md`：除非要展示误触发防护 demo。
+- `docs/RUNTIME_CONCEPTS.md`：沉淀阶段 3 已经学到的误触发防护和 write safety 解释。
 - `CHANGELOG.md`：除非用户明确要求记录里程碑。
 
-如实施时改变授权事实源，应新增或更新 `docs/decisions/*.md`。
+如实施时改变授权事实源，应更新 `docs/ARCHITECTURE.md`。
 
 ## 10. 实施步骤
 
@@ -409,7 +409,7 @@ $env:UV_CACHE_DIR='D:\lifeops-agent\.tmp\uv-cache'; uv run python -m compileall 
 8. [x] 实现 `PolicyService`，覆盖 allow / deny / requires_confirmation。
 9. [x] 将 IntentService 和 PolicyService 接入 Runtime Core。
 10. [x] 添加 intent、policy 和 runtime integration 聚焦测试。
-11. [x] 更新 `docs/CURRENT_STATE.md`、`docs/ARCHITECTURE.md` 和 `docs/RUNTIME_CONCEPTS.md`。
+11. [x] 更新 `docs/PROGRESS_LOG.md`、`docs/ARCHITECTURE.md` 和 `docs/RUNTIME_CONCEPTS.md`。
 12. [x] 运行最小相关测试和 compile 检查。
 
 ## Grill-me 检查清单

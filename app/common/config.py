@@ -15,6 +15,7 @@ DEFAULT_CONFIG_PATH = Path("config/default.json")
 @dataclass(frozen=True)
 class AppConfig:
     database_path: Path
+    log_root: Path
 
 
 def load_app_config(path: str | Path = DEFAULT_CONFIG_PATH) -> AppConfig:
@@ -36,7 +37,8 @@ def load_app_config(path: str | Path = DEFAULT_CONFIG_PATH) -> AppConfig:
         ) from exc
 
     database_path = _read_database_path(raw, config_path)
-    return AppConfig(database_path=database_path)
+    log_root = _read_log_root(raw)
+    return AppConfig(database_path=database_path, log_root=log_root)
 
 
 def _read_database_path(raw: Any, config_path: Path) -> Path:
@@ -56,4 +58,14 @@ def _read_database_path(raw: Any, config_path: Path) -> Path:
             details={"path": str(config_path)},
         )
 
+    return Path(value)
+
+
+def _read_log_root(raw: Any) -> Path:
+    value = raw.get("logs", {}).get("root", "logs/sessions") if isinstance(raw, dict) else "logs/sessions"
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(
+            "Application config logs.root must be a non-empty string.",
+            code="config_log_root_invalid",
+        )
     return Path(value)

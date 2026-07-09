@@ -4,15 +4,22 @@
 
 阶段 3 Runtime Core 初版已完成。
 
+当前边界：
+
+- Runtime event 写入 `events.jsonl`。
+- LLM interaction 写入 `llm.jsonl`。
+- normal 程序日志写入 `application.log`。
+- SQLite 不承载 runtime event / LLM log；它主要承载业务事实和适合关系查询的数据。
+
 已完成：
 
 - `main.py` 已作为当前 CLI 骨架入口。
 - `app/runtime/` 已包含 `RuntimeRequest`、`RuntimeSession`、`RuntimeResult`、`RuntimeService`、run record helper 和 bootstrap。
 - `RuntimeService` 已接入 `IntentService` 和 `PolicyService`。
-- 每次 run 可以写入 `run_records` 和结构化 `trace_events`。
+- 每次 run 可以写入 `run_records`，并把结构化 runtime event 写入 `events.jsonl`。
 - 当前 orchestration / execution 明确保持 stub，并通过 `runtime.orchestration.stubbed` 暴露。
 - Runtime Core 聚焦测试已覆盖成功 run、confirmation、intent failure、policy failure 和 stub execution。
-- `docs/CURRENT_STATE.md`、`docs/ARCHITECTURE.md` 和 `docs/RUNTIME_CONCEPTS.md` 已同步当前边界。
+- `docs/PROGRESS_LOG.md`、`docs/ARCHITECTURE.md` 和 `docs/RUNTIME_CONCEPTS.md` 已同步当前边界。
 
 仍保留到后续阶段：
 
@@ -36,7 +43,7 @@
 - `main.py` 作为当前 CLI demo 入口。
 - `app/runtime/` 作为 request lifecycle、session lifecycle、run lifecycle 和 result model 的归属。
 - 一轮用户输入可以形成 `RuntimeRequest`，经过 Intent 和 Policy，返回 `RuntimeResult`。
-- 每次 run 可以写入 `run_records` 和结构化 `trace_events`。
+- 每次 run 可以形成结构化 runtime event，并写入文件日志。
 - session 初版保持 request-local / process-local，不新增持久化 sessions 表。
 - LangGraph、Planner、Executor、Tool System 和 Domain 写入先保留扩展点，不在本阶段提前实现。
 
@@ -48,12 +55,11 @@
 
 当前可依据的参考是：
 
-- `README.md`：未来 CLI 入口是 `uv run python main.py`。
-- `docs/CURRENT_STATE.md`：`main.py` 已存在，当前 Runtime Core / Intent / Policy 仍是阶段 3 stub execution。
+- `README.md`：CLI 入口是 `uv run python main.py`。
+- `docs/PROGRESS_LOG.md`：`main.py` 已存在，当前 Runtime Core / Intent / Policy 仍是阶段 3 stub execution。
 - `docs/ARCHITECTURE.md`：定义 `main -> runtime -> orchestration -> intent / policy / ...` 的高层依赖方向。
-- `docs/decisions/ADR-0001-runtime-boundaries.md`：当前 runtime 使用显式分层，不能隐式依赖 legacy agent。
-- `docs/decisions/ADR-0004-sqlite-storage.md`：启动流程应先连接 SQLite，再 migration，再让 repository / store 读写表。
-- `plans/modules/STORAGE_SQLITE_PLAN.md`：`run_records`、`trace_events` 和 unit of work 已作为 runtime evidence 底座。
+- `docs/ARCHITECTURE.md`：当前 runtime 使用显式分层，不能隐式依赖 legacy agent；启动流程会连接 SQLite、执行 migration，并初始化文件日志。
+- `plans/modules/STORAGE_SQLITE_PLAN.md`：`run_records`、`tool_calls` 和 unit of work 是当前 SQLite storage 底座；event / LLM 日志由 `OBSERVABILITY_LOGGING_PLAN.md` 文件化。
 
 V0 的主要问题预计是：
 
@@ -69,12 +75,12 @@ V0 的主要问题预计是：
 
 - 创建 `main.py` 作为当前 CLI 骨架入口。
 - 创建 `app/runtime/` 包，定义 request、result、session、run lifecycle 和 runtime service。
-- 启动时加载 `config/default.json`，连接 SQLite，执行 migration，初始化 trace store。
+- 启动时加载 `config/default.json`，连接 SQLite，执行 migration，初始化 observability writer。
 - 接受一轮用户输入，创建 `RuntimeRequest`。
 - 为每次 request 生成 `session_id` 和 `run_id`。
 - 调用 Intent service 和 Policy service。
 - 返回结构化 `RuntimeResult`，CLI 打印 final message。
-- 写入 `run_records` 和关键 `trace_events`，让 Inspector / Eval 后续可以解释一次 run。
+- 写入关键 runtime event 到 `events.jsonl`，让 Inspector / Eval 后续可以解释一次 run。
 - 在 orchestration / execution 尚未实现时，返回明确的 stub response。
 
 初版不做：
@@ -92,7 +98,7 @@ V0 的主要问题预计是：
 - 接入 Context / Memory / State Assembly。
 - 接入 Planner / Direct Executor。
 - 接入 Tool System、Domain repository 和 ExecutionFeedback。
-- 让 Inspector 基于 run evidence 生成更完整的 runtime report。
+- 让 Inspector 基于 event log 和必要的业务事实生成更完整的 runtime report。
 - 如果多轮确认和长会话成为明确需求，再设计 session store。
 
 ## 4. Runtime 边界
@@ -104,14 +110,14 @@ V0 的主要问题预计是：
 - config 中的 SQLite 数据库路径。
 - Intent service。
 - Policy service。
-- observability store。
+- observability file log writer。
 
 输出：
 
 - `RuntimeRequest`：当前 request 的结构化输入。
 - `RuntimeResult`：本轮 runtime 可展示结果。
-- `run_records`：一次 run 的持久化 evidence。
-- `trace_events`：Intent、Policy、stub routing、失败等 runtime 路径 evidence。
+- `run_records`：当前实现中的一次 run 持久化记录。
+- `events.jsonl`：Intent、Policy、stub routing、失败等 runtime 路径 event。
 
 依赖：
 
@@ -128,7 +134,7 @@ Runtime Core 可以：
 - 初始化 SQLite 和 migration。
 - 创建 run id / session id。
 - 调用 Intent 和 Policy。
-- 记录 runtime evidence。
+- 记录 runtime event。
 - 包装错误为结构化 result。
 
 Runtime Core 不负责：
@@ -146,27 +152,29 @@ Runtime Core 不负责：
 - `RuntimeRequest` 是 request-local 输入对象，不是长期 conversation memory。
 - `RuntimeResult` 是本轮对用户展示的结果，不是业务事实来源。
 - `session_id` 初版用于关联当前进程或当前请求链路，不写入 SQLite。
-- `run_id` 是持久化 evidence 的主关联键，应写入 `run_records` 并被 trace events 引用。
+- `run_id` 是日志和可选持久化记录的主关联键，应被 `events.jsonl`、`llm.jsonl` 和必要的关系数据引用。
 - Runtime Core 只相信 Policy 返回的授权结果，不从 Intent、Planner、assistant 文本或 checkpoint 推断授权。
 
 ## 5. 数据模型 / 存储
 
 初版不新增 SQLite schema。
 
-使用阶段 2 已存在的基础表：
+当前阶段使用已存在的基础 storage 表，并通过文件日志记录 runtime event：
 
 ```text
 run_records
-trace_events
-llm_interactions
 tool_calls
+events.jsonl
+llm.jsonl
+application.log
 ```
 
 阶段 3 Runtime Core 使用方式：
 
 - `run_records` 记录每次 run 的开始、结束、状态、摘要和错误码。
-- `trace_events` 记录 runtime 生命周期关键事件。
-- `llm_interactions` 初版不要求写入；如果后续为了证明 LLM intent classifier 被跳过或不可用，可只记录结构化 trace，不记录伪 LLM interaction。
+- `events.jsonl` 记录 runtime 生命周期关键事件。
+- `llm.jsonl` 初版为空文件；后续真实 LLM request / response 写入该文件。
+- `application.log` 记录 runtime started / completed / failed 等 normal 程序日志。
 - `tool_calls` 初版不写入，因为本阶段不执行真实工具。
 
 建议 trace event：
@@ -191,14 +199,14 @@ request-local 状态：
 - stub orchestration result。
 - exception / error context。
 
-可以写入 SQLite 的状态：
+可以写入持久化记录的状态：
 
 - run id、status、summary、error code。
-- 压缩后的 trace payload。
+- 压缩后的 event payload，写入 `events.jsonl`。
 - 后续真实 tool evidence。
-- 后续真实 LLM interaction log。
+- 后续真实 LLM interaction log，目标是写入 `llm.jsonl`。
 
-不能写入 SQLite 或不能作为事实来源的状态：
+不能写入业务数据库或不能作为事实来源的状态：
 
 - 临时 intent classifier 中间分数。
 - assistant final answer 文本作为业务事实。
@@ -297,8 +305,8 @@ RuntimeResult
 
 - `RuntimeRequest` / `RuntimeResult` 可以构造并包含 run/session id。
 - `RuntimeService.handle(...)` 调用 Intent service 和 Policy service。
-- 每次成功 run 写入 `run_records`。
-- 每次成功 run 写入按序 `trace_events`。
+- 每次成功 run 写入 runtime event；是否写入 `run_records` 取决于后续是否需要关系查询。
+- 每次成功 run 写入按序 runtime event 到 `events.jsonl`。
 - Intent 失败时返回 error result，且不调用 Policy 或不产生授权。
 - Policy 失败时返回 error result，且不执行后续 stub。
 - session id 不写入 SQLite sessions 表，因为初版没有该表。
@@ -306,7 +314,7 @@ RuntimeResult
 
 暂不做 Eval：
 
-- 阶段 3 Runtime Core 只提供可被后续 Eval 查询的 evidence。
+- Runtime Core 提供可被后续 Eval 读取的 event log。
 - 完整 Eval Harness 留到 `plans/modules/EVAL_HARNESS_PLAN.md`。
 
 验证命令建议：
@@ -322,18 +330,18 @@ $env:UV_CACHE_DIR='D:\lifeops-agent\.tmp\uv-cache'; uv run python -m compileall 
 
 阶段 3 Runtime Core 完成后应更新：
 
-- `docs/CURRENT_STATE.md`：记录 `main.py`、`app/runtime/`、阶段 3 有效测试命令和当前仍是 stub execution。
+- `docs/PROGRESS_LOG.md`：记录 `main.py`、`app/runtime/`、阶段 3 有效测试命令和当前仍是 stub execution。
 - `docs/ARCHITECTURE.md`：补充 Runtime Core、RuntimeRequest、RuntimeResult、session/run lifecycle 边界。
 - `docs/RUNTIME_CONCEPTS.md`：补充 Agent Loop / Runtime Core / request-result lifecycle 的学习章节。
-- `docs/AGENT_LEARNING_LINKS.md`：补充 Agent Runtime、run lifecycle、trace / evidence 和本地 persistence 相关权威学习链接；
+- `docs/AGENT_LEARNING_LINKS.md`：补充 Agent Runtime、run lifecycle、observability 和本地 persistence 相关权威学习链接；
 
 通常不需要更新：
 
 - `README.md`：除非 `uv run python main.py` 已经成为正式可演示入口。
-- `docs/INTERVIEW_DEMO_GUIDE.md`：除非阶段 3 已经形成可讲解 demo。
+- `docs/RUNTIME_CONCEPTS.md`：沉淀阶段 3 已经学到的 Runtime Core / request lifecycle / stub execution 解释。
 - `CHANGELOG.md`：除非用户明确要求记录里程碑。
 
-如实施时改变架构边界，应新增或更新 `docs/decisions/*.md`。
+如实施时改变架构边界，应更新 `docs/ARCHITECTURE.md`。
 
 ## 10. 实施步骤
 
@@ -343,20 +351,20 @@ $env:UV_CACHE_DIR='D:\lifeops-agent\.tmp\uv-cache'; uv run python -m compileall 
 2. [x] 创建 `app/runtime/` 空包和 models/service/bootstrap 文件。
 3. [x] 定义 `RuntimeRequest`、`RuntimeSession`、`RuntimeResult` 和 status 枚举。
 4. [x] 实现 runtime service 的最小 handle 流程，先使用可注入的 Intent / Policy stub。
-5. [x] 接入 `LogTraceStore` 和 `run_records` 写入 helper。
+5. [x] 接入 event 文件日志和 `run_records` 写入 helper。
 6. [x] 创建 `main.py`，完成 config、SQLite、migration、runtime service 的启动骨架。
 7. [x] 接入真实阶段 3 Intent service 和 Policy service。
 8. [x] 补 Runtime Core 聚焦测试，使用 `tests/helpers.py` 的测试数据库。
-9. [x] 更新 `docs/CURRENT_STATE.md`、`docs/ARCHITECTURE.md` 和 `docs/RUNTIME_CONCEPTS.md`。
+9. [x] 更新 `docs/PROGRESS_LOG.md`、`docs/ARCHITECTURE.md` 和 `docs/RUNTIME_CONCEPTS.md`。
 10. [x] 运行最小相关测试和 compile 检查。
 
 ## Grill-me 检查清单
 
 - 为什么阶段 3 先做 Runtime Core，而不是直接做 LangGraph？
-  - 因为当前需要先固定入口、request/result、run evidence 和授权边界。LangGraph 后续只接入 orchestration，不应该吞掉 runtime 自己的事实源和 policy 边界。
+  - 因为当前需要先固定入口、request/result、event log 和授权边界。LangGraph 后续只接入 orchestration，不应该吞掉 runtime 自己的事实源和 policy 边界。
 
 - 为什么 session 初版不入库？
-  - 因为阶段 3 还没有多轮 confirmation、long-term conversation 或 inspector session 查询需求。先持久化 run evidence，避免过早 schema 设计。
+  - 因为阶段 3 还没有多轮 confirmation、long-term conversation 或 inspector session 查询需求。session 先体现在文件日志目录和 request-local id 中，避免过早 schema 设计。
 
 - 为什么 RuntimeResult 不是事实来源？
   - 因为它是给用户看的本轮输出。业务事实必须来自 repository、成功 WRITE result 和用户授权后的写入证据。
