@@ -160,6 +160,12 @@ Skill root
 
 生产 bootstrap 根据 `config/default.json` 的 `skills.root` 总是执行 discovery，并直接构造 `SkillSelectionClient()`、Registry 与必需的 `SkillService`；模型和 provider 地址不再通过 bootstrap 或 JSON 配置逐层传参。不存在 Skill 开关或空 service 分支。`prepare_skills` 只位于 Policy allow 路径。稳定事件只包含 `skill.selected`、`skill.loaded`、`skill.reference.loaded` 及其失败事件，不记录机械化文件读取 lifecycle。LLM selection reason 保留在 request-local `SkillSelection` 中，不写 event payload，避免间接复述用户原文。原始 provider interaction 等统一 LLM Gateway 出现后再集中进入 `llm.jsonl`。最终完整 prompt assembly 仍未实现。Skill metadata 不提供工具授权；未来 capability、Policy 和 Guardrail 仍由 Tool System 统一求交与执行。
 
+## Tool System
+
+Tool System 当前只完成第一步模型层，位于 `app/tools/models.py`。`ToolDefinition` 是代码配置的不可变契约，只描述 input/output schema、effect、risk、required scopes 和 required capabilities，不直接持有 handler；handler 绑定、重复注册与完整 schema validation 属于下一步 registry。
+
+当前模型层还定义了 request-local `ToolCapabilitySet`、`ToolCall`、结构化 `ToolResult` / `ToolError`、`ExecutionEvidence`，以及 pre/post 两阶段的 `GuardrailDecision`。它们不依赖 LangChain 或 LangGraph。当前 orchestration 仍使用 `stub_execute`，尚不存在真实 Tool Gateway，也尚未写入 `tool_calls` 或 tool events。
+
 ## Intent / Policy
 
 Intent Layer 当前实现位于：

@@ -10,10 +10,28 @@ from app.common.config import DEFAULT_CONFIG_PATH, load_app_config
 from app.common.errors import AppError, ConfigError, MigrationError, SerializationError, StorageError
 from app.common.ids import new_id
 from app.common.serialization import from_json, to_json
+from app.common.text import contains_any, normalize_search_text
 from app.common.time import utc_now_iso
+from app.common.validation import (
+    require_non_empty_string,
+    require_unique_non_empty_strings,
+)
 
 
 class CommonHelpersTest(unittest.TestCase):
+    def test_validation_helpers_reject_blank_and_duplicate_strings(self) -> None:
+        with self.assertRaises(ValueError):
+            require_non_empty_string(" ", "name")
+        with self.assertRaises(ValueError):
+            require_unique_non_empty_strings(("read", "read"), "capabilities")
+
+    def test_text_helpers_normalize_and_match_literal_patterns(self) -> None:
+        text = normalize_search_text("  CREATE   A ToDo  ")
+
+        self.assertEqual(text, "create a todo")
+        self.assertTrue(contains_any(text, ("任务", "todo")))
+        self.assertFalse(contains_any(text, ("memory", "记忆")))
+
     def test_new_id_uses_readable_prefix_and_uuid_hex(self) -> None:
         value = new_id("run")
 

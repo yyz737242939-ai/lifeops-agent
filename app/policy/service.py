@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.common.text import contains_any, normalize_search_text
 from app.intent.models import IntentDecision, IntentType
 from app.policy.models import PermissionScope, PolicyAction, PolicyDecision
 from app.runtime.models import RuntimeRequest
@@ -58,16 +59,12 @@ class PolicyService:
 
 
 def _infer_write_scopes(user_input: str) -> list[PermissionScope]:
-    text = " ".join(user_input.strip().lower().split())
+    text = normalize_search_text(user_input)
     scopes: list[PermissionScope] = []
-    if _has_any(text, ("任务", "待办", "todo", "task")):
+    if contains_any(text, ("任务", "待办", "todo", "task")):
         scopes.append(PermissionScope.TASK_WRITE_CANDIDATE)
-    if _has_any(text, ("记忆", "memory")):
+    if contains_any(text, ("记忆", "memory")):
         scopes.append(PermissionScope.MEMORY_WRITE_CANDIDATE)
-    if _has_any(text, ("健康记录", "状态记录", "wellbeing")):
+    if contains_any(text, ("健康记录", "状态记录", "wellbeing")):
         scopes.append(PermissionScope.WELLBEING_WRITE_CANDIDATE)
     return scopes
-
-
-def _has_any(text: str, patterns: tuple[str, ...]) -> bool:
-    return any(pattern in text for pattern in patterns)

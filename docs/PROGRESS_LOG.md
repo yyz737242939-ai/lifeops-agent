@@ -41,6 +41,7 @@
 - `tests/fixtures/skills/` 已建立 schema version 1 的长期 Eval case 形状，覆盖 Research、Travel、跨 Domain、零 Skill，以及未知 ID、重复 ID、空 reason 等结构失败。
 - Agent Skills specification 和 Deep Agents Skills 仅作为格式、命名约束与 progressive disclosure 的实现参考；框架 adapter 保留为未来边界。
 - Tool System 采用 LifeOps 原生安全核心与可选 LangChain adapter；所有工具经过统一 Tool Gateway 和 pre/post Guardrails。
+- Tool System 第一步已完成框架无关的核心模型：Tool definition 与 handler 分离，并定义 capability、call/result/error、execution evidence 和结构化 pre/post guardrail decision；registry、capability intersection 与 gateway 尚未实现。
 - 两个内部 Domain 从原路线图的 Tasks + Wellbeing 调整为 Research / Personal Knowledge + Travel。
 - Research 首个外部只读场景是 Hugging Face Daily Papers / Blog briefing；临时结果不自动保存为知识或 Memory。
 - Travel 先定义 typed external Ports 并使用 fixture adapters；真实 Calendar MCP 仍在阶段 8 接入。

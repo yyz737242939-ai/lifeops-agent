@@ -6,22 +6,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import re
 
+from app.common.validation import (
+    require_non_empty_string,
+    require_unique_non_empty_strings,
+)
+
 
 _SKILL_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-
-
-def _require_non_empty(value: str, field_name: str) -> None:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field_name} must be a non-empty string.")
-
-
-def _require_unique_non_empty(values: tuple[str, ...], field_name: str) -> None:
-    if not isinstance(values, tuple):
-        raise ValueError(f"{field_name} must be a tuple.")
-    for value in values:
-        _require_non_empty(value, field_name)
-    if len(set(values)) != len(values):
-        raise ValueError(f"{field_name} must not contain duplicates.")
 
 
 @dataclass(frozen=True)
@@ -33,10 +24,10 @@ class SkillReferenceDefinition:
     description: str | None = None
 
     def __post_init__(self) -> None:
-        _require_non_empty(self.reference_id, "reference_id")
-        _require_non_empty(self.relative_path, "relative_path")
+        require_non_empty_string(self.reference_id, "reference_id")
+        require_non_empty_string(self.relative_path, "relative_path")
         if self.description is not None:
-            _require_non_empty(self.description, "description")
+            require_non_empty_string(self.description, "description")
 
 
 @dataclass(frozen=True)
@@ -50,10 +41,10 @@ class SkillReference:
     content: str
 
     def __post_init__(self) -> None:
-        _require_non_empty(self.skill_id, "skill_id")
-        _require_non_empty(self.reference_id, "reference_id")
-        _require_non_empty(self.relative_path, "relative_path")
-        _require_non_empty(self.content, "content")
+        require_non_empty_string(self.skill_id, "skill_id")
+        require_non_empty_string(self.reference_id, "reference_id")
+        require_non_empty_string(self.relative_path, "relative_path")
+        require_non_empty_string(self.content, "content")
         if not isinstance(self.description, str):
             raise ValueError("description must be a string.")
 
@@ -69,8 +60,8 @@ class SkillDefinition:
     references: tuple[SkillReferenceDefinition, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
-        _require_non_empty(self.skill_id, "skill_id")
-        _require_non_empty(self.description, "description")
+        require_non_empty_string(self.skill_id, "skill_id")
+        require_non_empty_string(self.description, "description")
         if len(self.skill_id) > 64 or not _SKILL_ID_PATTERN.fullmatch(self.skill_id):
             raise ValueError(
                 "skill_id must be at most 64 characters and contain only "
@@ -80,7 +71,7 @@ class SkillDefinition:
             raise ValueError("description must be at most 1024 characters.")
         if not isinstance(self.root_path, Path):
             raise ValueError("root_path must be a Path.")
-        _require_unique_non_empty(self.capability_hints, "capability_hints")
+        require_unique_non_empty_strings(self.capability_hints, "capability_hints")
         if not isinstance(self.references, tuple):
             raise ValueError("references must be a tuple.")
         if any(not isinstance(item, SkillReferenceDefinition) for item in self.references):
@@ -100,7 +91,7 @@ class LoadedSkill:
     def __post_init__(self) -> None:
         if not isinstance(self.definition, SkillDefinition):
             raise ValueError("definition must be a SkillDefinition.")
-        _require_non_empty(self.body, "body")
+        require_non_empty_string(self.body, "body")
 
 
 @dataclass(frozen=True)
@@ -111,9 +102,9 @@ class SkillSelection:
     reason: str | None = None
 
     def __post_init__(self) -> None:
-        _require_unique_non_empty(self.selected_skill_ids, "selected_skill_ids")
+        require_unique_non_empty_strings(self.selected_skill_ids, "selected_skill_ids")
         if self.reason is not None:
-            _require_non_empty(self.reason, "reason")
+            require_non_empty_string(self.reason, "reason")
 
 
 @dataclass(frozen=True)
@@ -125,9 +116,9 @@ class PromptContribution:
     capability_hints: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
-        _require_non_empty(self.skill_id, "skill_id")
-        _require_non_empty(self.instructions, "instructions")
-        _require_unique_non_empty(self.capability_hints, "capability_hints")
+        require_non_empty_string(self.skill_id, "skill_id")
+        require_non_empty_string(self.instructions, "instructions")
+        require_unique_non_empty_strings(self.capability_hints, "capability_hints")
 
 
 @dataclass(frozen=True)
@@ -141,7 +132,7 @@ class SkillPreparation:
     def __post_init__(self) -> None:
         if not isinstance(self.selection, SkillSelection):
             raise ValueError("selection must be a SkillSelection.")
-        _require_unique_non_empty(self.loaded_skill_ids, "loaded_skill_ids")
+        require_unique_non_empty_strings(self.loaded_skill_ids, "loaded_skill_ids")
         if not isinstance(self.prompt_contributions, tuple):
             raise ValueError("prompt_contributions must be a tuple.")
         if any(

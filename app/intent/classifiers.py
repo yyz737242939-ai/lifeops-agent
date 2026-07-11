@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from app.common.text import contains_any, normalize_search_text
 from app.intent.models import ClassifierResult, IntentType
 from app.runtime.models import RuntimeRequest
 
@@ -78,7 +79,7 @@ class RuleBasedIntentClassifier:
     def classify(self, request: RuntimeRequest) -> ClassifierResult:
         """Classify one runtime request using conservative phrase combinations."""
 
-        text = _normalize(request.user_input)
+        text = normalize_search_text(request.user_input)
         if not text:
             return self._result(
                 status="low_confidence",
@@ -93,21 +94,25 @@ class RuleBasedIntentClassifier:
                 confidence=0.35,
                 reason="Planning keyword lacks enough action and object context.",
             )
-        if _has_any(text, self._WRITE_ACTIONS) and _has_any(text, self._WRITE_OBJECTS):
+        if contains_any(text, self._WRITE_ACTIONS) and contains_any(
+            text, self._WRITE_OBJECTS
+        ):
             return self._result(
                 status="matched",
                 intent_type=IntentType.WRITE_REQUEST,
                 confidence=0.9,
                 reason="Input combines a write action with a writable object.",
             )
-        if _has_any(text, self._PLAN_ACTIONS) and _has_any(text, self._PLAN_OBJECTS):
+        if contains_any(text, self._PLAN_ACTIONS) and contains_any(
+            text, self._PLAN_OBJECTS
+        ):
             return self._result(
                 status="matched",
                 intent_type=IntentType.PLAN_REQUEST,
                 confidence=0.85,
                 reason="Input combines a planning action with a planning object.",
             )
-        if _has_any(text, self._READ_ACTIONS):
+        if contains_any(text, self._READ_ACTIONS):
             return self._result(
                 status="matched",
                 intent_type=IntentType.READ,
@@ -153,11 +158,3 @@ class LlmIntentClassifier:
             confidence=0.0,
             reason="LLM intent classifier is not wired yet.",
         )
-
-
-def _normalize(text: str) -> str:
-    return " ".join(text.strip().lower().split())
-
-
-def _has_any(text: str, patterns: tuple[str, ...]) -> bool:
-    return any(pattern in text for pattern in patterns)

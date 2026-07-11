@@ -153,7 +153,7 @@ Domain handler 只调用 service；service 再调用 repository 或 external Por
 
 ## 10. 实施步骤
 
-1. 定义 Tool、Capability、Result、Evidence、Guardrail 模型。
+1. [已完成] 定义 Tool、Capability、Result、Evidence、Guardrail 模型。
 2. 实现 registry 和 schema validation。
 3. 实现 capability intersection。
 4. 实现 pre/post guardrail pipeline。
