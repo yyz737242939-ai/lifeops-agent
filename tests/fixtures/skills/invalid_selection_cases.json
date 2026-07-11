@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "case_id": "unknown_skill_id",
+      "output": {
+        "selected_skill_ids": ["unknown"],
+        "reason": "Invalid fixture output."
+      },
+      "expected_error_code": "skill_selection_unknown_id"
+    },
+    {
+      "case_id": "duplicate_skill_id",
+      "output": {
+        "selected_skill_ids": ["research", "research"],
+        "reason": "Invalid fixture output."
+      },
+      "expected_error_code": "skill_selection_duplicate_id"
+    },
+    {
+      "case_id": "empty_reason",
+      "output": {
+        "selected_skill_ids": ["research"],
+        "reason": ""
+      },
+      "expected_error_code": "skill_selection_invalid_reason"
+    }
+  ]
+}

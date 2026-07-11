@@ -8,7 +8,7 @@ from app.intent.models import IntentDecision, IntentType
 from app.policy.models import PolicyAction, PolicyDecision
 from app.runtime.models import RuntimeRequest, RuntimeStatus
 from app.runtime.service import RuntimeService
-from tests.helpers import create_test_connection
+from tests.helpers import create_test_connection, create_test_skill_service
 
 
 class RuntimeServiceTest(unittest.TestCase):
@@ -27,6 +27,7 @@ class RuntimeServiceTest(unittest.TestCase):
                 )
 
                 result = RuntimeService(
+                    create_test_skill_service(),
                     conn=conn,
                     event_log=session_log.event_log,
                 ).handle(request)
@@ -52,6 +53,7 @@ class RuntimeServiceTest(unittest.TestCase):
                         "intent.classified",
                         "policy.decided",
                         "orchestration.route.selected",
+                        "skill.selected",
                         "runtime.run.completed",
                     ],
                 )
@@ -59,7 +61,7 @@ class RuntimeServiceTest(unittest.TestCase):
                 self.assertEqual(events[3]["payload"]["action"], "allow")
                 self.assertEqual(events[4]["payload"]["route"], "allow")
                 self.assertEqual(
-                    events[5]["payload"]["graph_path"],
+                    events[6]["payload"]["graph_path"],
                     [
                         "classify_intent",
                         "decide_policy",
@@ -78,7 +80,10 @@ class RuntimeServiceTest(unittest.TestCase):
             request = _request("把明天跑步加入任务")
             session_log = SessionLogWriter.create(tmpdir, session_id=request.session_id)
 
-            result = RuntimeService(event_log=session_log.event_log).handle(request)
+            result = RuntimeService(
+                create_test_skill_service(),
+                event_log=session_log.event_log,
+            ).handle(request)
 
             self.assertEqual(result.status, RuntimeStatus.OK)
             events = session_log.event_log.read_all()
@@ -86,7 +91,7 @@ class RuntimeServiceTest(unittest.TestCase):
             self.assertEqual(events[-1]["event_type"], "runtime.run.completed")
 
     def test_requires_confirmation_result_does_not_claim_write(self) -> None:
-        result = RuntimeService().handle(_request("计划一下"))
+        result = RuntimeService(create_test_skill_service()).handle(_request("计划一下"))
 
         self.assertEqual(result.status, RuntimeStatus.REQUIRES_CONFIRMATION)
         self.assertEqual(result.policy["action"], "requires_confirmation")
@@ -94,7 +99,9 @@ class RuntimeServiceTest(unittest.TestCase):
         self.assertNotIn("saved", result.message.lower())
 
     def test_policy_allow_is_still_stubbed_execution(self) -> None:
-        result = RuntimeService().handle(_request("把明天跑步加入任务"))
+        result = RuntimeService(create_test_skill_service()).handle(
+            _request("把明天跑步加入任务")
+        )
 
         self.assertEqual(result.status, RuntimeStatus.OK)
         self.assertEqual(result.policy["action"], "allow")
@@ -104,6 +111,7 @@ class RuntimeServiceTest(unittest.TestCase):
     def test_intent_failure_returns_error_and_skips_policy(self) -> None:
         policy = RecordingPolicyService()
         result = RuntimeService(
+            create_test_skill_service(),
             intent_service=FailingIntentService(),
             policy_service=policy,
         ).handle(_request("hello"))
@@ -115,6 +123,7 @@ class RuntimeServiceTest(unittest.TestCase):
 
     def test_policy_failure_returns_error(self) -> None:
         result = RuntimeService(
+            create_test_skill_service(),
             intent_service=FixedIntentService(),
             policy_service=FailingPolicyService(),
         ).handle(_request("hello"))

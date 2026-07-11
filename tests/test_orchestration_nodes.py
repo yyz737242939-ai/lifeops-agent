@@ -16,6 +16,7 @@ from app.orchestration.state import GraphRoute, create_graph_state
 from app.policy.models import PolicyAction, PolicyDecision
 from app.runtime.models import RuntimeRequest, RuntimeStatus
 from app.runtime.service import RuntimeService
+from tests.helpers import create_test_skill_service
 
 
 class OrchestrationNodesTest(unittest.TestCase):
@@ -36,6 +37,7 @@ class OrchestrationNodesTest(unittest.TestCase):
                 policy_service = FixedPolicyService(policy_action)
                 request = _request("test input")
                 expected = RuntimeService(
+                    create_test_skill_service(),
                     intent_service=intent_service,
                     policy_service=policy_service,
                 ).handle(request)
@@ -55,7 +57,7 @@ class OrchestrationNodesTest(unittest.TestCase):
         state = decide_policy(state, FixedPolicyService(PolicyAction.ALLOW))
         state = prepare_skills(
             state,
-            skill_service=None,
+            skill_service=create_test_skill_service(),
         )
         state = stub_execute(state)
         state = finalize(state)

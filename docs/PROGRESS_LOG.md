@@ -35,7 +35,10 @@
 - LangGraph allow 路径已接入 request-local `prepare_skills`：Policy allow 后执行 Skill selection、selected body loading 和 contribution assembly，再进入现有 stub execution；确认与拒绝分支不调用 selector。
 - `SkillService` 已收敛为与 Intent/Policy service 对称的构造依赖：它长期持有 `SkillRegistry` 和 `SkillSelectionClient`，并在 graph 构建时注入；只有每个 run 不同的 `TraceSink` 留在 `OrchestrationContext`。GraphState 只保存当前 run 的 selection、loaded IDs 和 contributions。
 - Skill 阶段失败返回 `runtime.skill_failed`，不会继续 stub execution。
-- 当前默认 Runtime 尚未配置真实 Skill LLM client，因此安全地产生空选择且不写虚假的 `skill.selected` event；测试通过显式 fake client 验证零选、多选、顺序、失败阻断和分支隔离。
+- 生产 bootstrap 已调用 `discover_skills(config.skill_root)`，构建 `SkillRegistry`、`SkillSelectionClient()` 和 `SkillService` 后注入 Runtime；`config/default.json` 只负责 Skill root，模型与 OpenAI-compatible provider 地址由 client 直接从 `.env` 读取。
+- `SkillSelectionClient` 使用 OpenAI-compatible Chat Completions JSON 输出，只发送用户请求与全量 Skill ID/description，不发送未选中的 body；provider 输出经过 Pydantic 解析和 LifeOps 业务校验。当前只记录关键 Skill event，原始 provider interaction 等统一 LLM Gateway 出现后再集中写入 `llm.jsonl`，不在 `SkillService` 参数中逐层传递日志对象。
+- Skill 永久启用，不再提供 `selection_enabled` 配置或 `SkillService is None` 分支；Runtime、Orchestrator 和 graph 都要求显式注入 `SkillService`。
+- `tests/fixtures/skills/` 已建立 schema version 1 的长期 Eval case 形状，覆盖 Research、Travel、跨 Domain、零 Skill，以及未知 ID、重复 ID、空 reason 等结构失败。
 - Agent Skills specification 和 Deep Agents Skills 仅作为格式、命名约束与 progressive disclosure 的实现参考；框架 adapter 保留为未来边界。
 - Tool System 采用 LifeOps 原生安全核心与可选 LangChain adapter；所有工具经过统一 Tool Gateway 和 pre/post Guardrails。
 - 两个内部 Domain 从原路线图的 Tasks + Wellbeing 调整为 Research / Personal Knowledge + Travel。

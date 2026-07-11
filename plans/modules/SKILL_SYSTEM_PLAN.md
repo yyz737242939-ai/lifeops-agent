@@ -195,9 +195,9 @@ Skill System 输出 LifeOps 类型，同时保持 `SKILL.md` 资源格式与 Age
 2. [已完成] 对照 Agent Skills specification 和 Deep Agents Skills 实现，确定兼容 frontmatter 子集与 adapter 边界。
 3. [已完成] 使用 LifeOps 原生薄实现完成 discovery / metadata validation；框架 loader / middleware 只作参考，不作为运行时依赖。
 4. [已完成] 建立 Research / Travel Skill skeleton；当前只包含可发现 metadata、领域说明、边界和 planned workflow，不提前声明或执行尚未实现的工具。
-5. [已完成] 实现基于全部 Skill metadata 的 LLM selection 薄接口、LifeOps 结构校验和关键语义 trace；provider 通过 `SkillSelectionClient` 注入，当前不绑定框架或具体 SDK。
+5. [已完成] 实现基于全部 Skill metadata 的 LLM selection、LifeOps 结构校验和关键语义 trace；`SkillSelectionClient` 初始化时从 `.env` 读取模型与 OpenAI-compatible provider 配置，通过 Chat Completions 请求 JSON，并在本地使用 Pydantic 解析，不引入 Agent 框架。
 6. [已完成] 实现 body / reference lazy loading、大小限制、manifest ID 白名单和 traversal 防护。
 7. [已完成] 实现 framework-independent prompt contribution assembler；只把 selected-and-loaded Skill body 与 capability hints 转为 `PromptContribution`，保留选择顺序并拒绝重复 ID，不负责 core rules、工具描述、Context budget 或最终 prompt 排序。
-8. [已完成] 接入 orchestration 的 request-local `prepare_skills` 阶段但不执行工具；仅 allow 路径执行 selection/load/contribution，确认和拒绝分支跳过。`SkillService` 持有 Registry 与 LLM client，并像 Intent/Policy service 一样在 graph 构建时注入；只有 request-local `TraceSink` 通过 `OrchestrationContext` 传入。失败以 `runtime.skill_failed` 在 stub execution 前终止。
-9. 补聚焦测试和长期 Eval fixture 形状。
-10. 更新当前架构、概念和推进事实。
+8. [已完成] 接入 orchestration 和生产 bootstrap：Skill 永久启用，启动时总是 discover `app/skills/` 并构建 Registry / `SkillService`。request-local `prepare_skills` 仅在 allow 路径执行 selection/load/contribution；`SkillService` 是 Runtime 必需依赖，只有 `TraceSink` 通过 `OrchestrationContext` 传入。失败以 `runtime.skill_failed` 在 stub execution 前终止。
+9. [已完成] 补聚焦测试和版本化长期 Eval fixture 形状；固定覆盖 Research、Travel、跨 Domain、零选择、未知 ID、重复 ID 和空 reason。
+10. [已完成] 更新当前架构、概念、学习链接和推进事实，并完成全量回归与离线 bootstrap smoke 验证。

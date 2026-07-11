@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import json
+import os
 from collections.abc import Mapping, Sequence
-from typing import Any, Protocol
+from typing import Any
+
+from dotenv import load_dotenv
+from openai import OpenAI
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.observability.logger import TraceSink
 from app.runtime.models import RuntimeRequest
@@ -11,8 +17,33 @@ from app.skills.errors import SkillSelectionError
 from app.skills.models import SkillDefinition, SkillSelection
 
 
-class SkillSelectionClient(Protocol):
-    """Thin model boundary; implementations return JSON-like structured output."""
+class _SkillSelectionOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    selected_skill_ids: list[str] = Field(default_factory=list)
+    reason: str
+
+
+class SkillSelectionClient:
+    """Select Skills through the OpenAI-compatible provider configured in .env."""
+
+    def __init__(self) -> None:
+        load_dotenv()
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        base_url = os.getenv("OPENROUTER_BASE_URL")
+        model = os.getenv("MODEL", "deepseek/deepseek-v4-flash")
+        if not api_key or not base_url or not model:
+            raise SkillSelectionError(
+                "Skill selection LLM configuration is incomplete.",
+                code="skill_selection_config_invalid",
+            )
+        self._model = model
+        self._client = OpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=30,
+            max_retries=0,
+        )
 
     def select(
         self,
@@ -20,6 +51,48 @@ class SkillSelectionClient(Protocol):
         skill_metadata: tuple[SkillDefinition, ...],
     ) -> Mapping[str, Any]:
         """Select zero or more Skills using all supplied metadata."""
+
+        request_payload = {
+            "user_input": request.user_input,
+            "skills": [
+                {"skill_id": item.skill_id, "description": item.description}
+                for item in skill_metadata
+            ],
+        }
+        response = self._client.chat.completions.create(
+            model=self._model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Select zero or more Skills needed for the user request. "
+                        "Use only the supplied skill IDs. Select multiple Skills for "
+                        "cross-domain requests. Return JSON with selected_skill_ids "
+                        "and a short reason."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(request_payload, ensure_ascii=False),
+                },
+            ],
+            response_format={"type": "json_object"},
+            temperature=0,
+        )
+        content = response.choices[0].message.content
+        if not content:
+            raise SkillSelectionError(
+                "Skill selection response is empty.",
+                code="skill_selection_empty_response",
+            )
+        try:
+            parsed = _SkillSelectionOutput.model_validate_json(content)
+        except ValueError as exc:
+            raise SkillSelectionError(
+                "Skill selection response is not valid structured output.",
+                code="skill_selection_invalid_provider_output",
+            ) from exc
+        return parsed.model_dump()
 
 
 def select_skills(

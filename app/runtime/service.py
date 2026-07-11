@@ -29,12 +29,12 @@ class RuntimeService:
 
     def __init__(
         self,
+        skill_service: SkillService,
         intent_service: IntentService | None = None,
         policy_service: PolicyService | None = None,
         conn: sqlite3.Connection | None = None,
         event_log: EventLogWriter | None = None,
         log_root: str | Path | None = None,
-        skill_service: SkillService | None = None,
     ) -> None:
         self._intent_service = intent_service or IntentService()
         self._policy_service = policy_service or PolicyService()

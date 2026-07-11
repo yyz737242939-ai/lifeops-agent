@@ -122,7 +122,7 @@ Policy allow
 -> stub execution
 ```
 
-`SkillService` 长期持有 `SkillRegistry` 和 `SkillSelectionClient`，像 Intent/Policy service 一样在 graph 构建时注入；每个 run 不同的 `TraceSink` 才通过 `OrchestrationContext` 传入。selection、loaded IDs 和 contributions 是当前 run 的 `GraphState` 数据。当前默认 runtime 未配置真实 `SkillService`，因此安全地产生空选择。
+`SkillService` 长期持有 `SkillRegistry` 和 `SkillSelectionClient`，像 Intent/Policy service 一样在 graph 构建时注入；每个 run 不同的 `TraceSink` 通过 `OrchestrationContext` 传入。Skill 永久启用，Runtime 不接受空 `SkillService`。selection、loaded IDs 和 contributions 是当前 run 的 `GraphState` 数据。生产 bootstrap 会发现内置 Skill，并组装使用 OpenAI Responses structured output 的 selection adapter；测试注入 deterministic fake client。
 
 ### 输入 / 输出 / 不负责什么
 
@@ -141,7 +141,7 @@ Skill System 不执行工具、不授权写入、不决定 Context budget、不�
 
 ### 如何测试和观察
 
-聚焦测试覆盖 metadata discovery、多 Skill 选择顺序、空选择、selection 结构校验、body/reference lazy loading、manifest 白名单、trace 脱敏、allow 接入、失败阻断以及 confirmation/deny 分支隔离。
+聚焦测试覆盖 metadata discovery、多 Skill 选择顺序、空选择、selection 结构校验、`.env` provider 配置、OpenAI-compatible JSON 请求、body/reference lazy loading、manifest 白名单、trace 脱敏、生产 bootstrap、allow 接入、失败阻断以及 confirmation/deny 分支隔离。`tests/fixtures/skills/` 使用带 `schema_version` 的固定 case 形状，为后续真实模型 Eval 保留稳定输入和 expected IDs。
 
 ### 面试解释
 

@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "case_id": "research_only",
+      "user_input": "整理 Hugging Face 最近的 AI 论文并生成带来源的简报",
+      "expected_skill_ids": ["research"]
+    },
+    {
+      "case_id": "travel_only",
+      "user_input": "比较十月去东京的交通住宿并生成行程草案",
+      "expected_skill_ids": ["travel"]
+    },
+    {
+      "case_id": "research_and_travel",
+      "user_input": "先研究东京 AI 活动，再根据活动日期规划旅行",
+      "expected_skill_ids": ["research", "travel"]
+    },
+    {
+      "case_id": "no_skill",
+      "user_input": "你好，介绍一下你自己",
+      "expected_skill_ids": []
+    }
+  ]
+}

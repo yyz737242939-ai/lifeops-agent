@@ -7,6 +7,7 @@ from app.orchestration.graph import RuntimeOrchestrator, build_runtime_graph
 from app.orchestration.state import create_graph_state
 from app.policy.models import PolicyAction, PolicyDecision
 from app.runtime.models import RuntimeRequest, RuntimeStatus
+from tests.helpers import create_test_skill_service
 
 
 class OrchestrationGraphTest(unittest.TestCase):
@@ -14,6 +15,7 @@ class OrchestrationGraphTest(unittest.TestCase):
         timeline: list[tuple[str, str]] = []
         sink = TimelineTraceSink(timeline)
         orchestrator = RuntimeOrchestrator(
+            create_test_skill_service(),
             intent_service=TimelineIntentService(timeline),
             policy_service=TimelinePolicyService(timeline),
         )
@@ -37,6 +39,7 @@ class OrchestrationGraphTest(unittest.TestCase):
         secret = "private-user-input-9384"
         sink = RecordingTraceSink()
         orchestrator = RuntimeOrchestrator(
+            create_test_skill_service(),
             intent_service=FixedIntentService(IntentType.CHAT),
             policy_service=FixedPolicyService(PolicyAction.ALLOW),
         )
@@ -97,6 +100,7 @@ class OrchestrationGraphTest(unittest.TestCase):
         policy_service = RecordingPolicyService(PolicyAction.ALLOW)
         sink = RecordingTraceSink()
         orchestrator = RuntimeOrchestrator(
+            create_test_skill_service(),
             intent_service=FailingIntentService(),
             policy_service=policy_service,
         )
@@ -111,6 +115,7 @@ class OrchestrationGraphTest(unittest.TestCase):
     def test_policy_failure_ends_graph_before_execution(self) -> None:
         sink = RecordingTraceSink()
         orchestrator = RuntimeOrchestrator(
+            create_test_skill_service(),
             intent_service=FixedIntentService(IntentType.CHAT),
             policy_service=FailingPolicyService(),
         )
@@ -126,6 +131,7 @@ class OrchestrationGraphTest(unittest.TestCase):
 
     def test_runtime_orchestrator_handle_returns_graph_result(self) -> None:
         result = RuntimeOrchestrator(
+            create_test_skill_service(),
             intent_service=FixedIntentService(IntentType.WRITE_REQUEST),
             policy_service=FixedPolicyService(PolicyAction.ALLOW),
         ).handle(_request())
@@ -138,6 +144,7 @@ def _invoke(intent_type: IntentType, action: PolicyAction):
     graph = build_runtime_graph(
         FixedIntentService(intent_type),
         FixedPolicyService(action),
+        create_test_skill_service(),
     )
     return graph.invoke(create_graph_state(_request()))
 

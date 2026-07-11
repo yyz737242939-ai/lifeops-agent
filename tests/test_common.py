@@ -70,6 +70,7 @@ class CommonHelpersTest(unittest.TestCase):
         self.assertEqual(DEFAULT_CONFIG_PATH, Path("config/default.json"))
         self.assertEqual(config.database_path, Path("data/lifeops.sqlite3"))
         self.assertEqual(config.log_root, Path("logs/sessions"))
+        self.assertEqual(config.skill_root, Path("app/skills"))
 
     def test_config_rejects_missing_database_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -170,6 +170,9 @@ LifeOps 自研 runtime
 - [LangChain Skills pattern](https://docs.langchain.com/oss/python/langchain/multi-agent/skills)
   学习重点：LangChain Core 中 Skill 更接近 prompt-driven specialization / progressive disclosure 架构模式；真正的 built-in Skill 支持位于 Deep Agents。对照本项目为什么仍需要自己的 deterministic routing reason 和 capability intersection。
 
+- [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
+  学习重点：理解 provider 侧 schema 约束与应用侧结构校验的差别。LifeOps 当前通过 OpenAI-compatible Chat Completions 请求 JSON，并用 Pydantic 解析 `selected_skill_ids` 与 `reason`，再在本地校验未知 ID、重复 ID 和业务边界；OpenAI SDK 不接管 Registry、Skill loading 或 orchestration。
+
 ### LangChain Tools 与 LifeOps Tool Adapter
 
 - [LangChain Tools](https://docs.langchain.com/oss/python/langchain/tools)

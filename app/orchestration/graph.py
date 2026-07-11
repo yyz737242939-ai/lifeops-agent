@@ -38,7 +38,7 @@ class OrchestrationContext:
 def build_runtime_graph(
     intent_service: IntentService,
     policy_service: PolicyService,
-    skill_service: SkillService | None = None,
+    skill_service: SkillService,
 ) -> CompiledStateGraph:
     """Build and compile the stage-4 runtime orchestration graph."""
 
@@ -57,9 +57,7 @@ def build_runtime_graph(
     )
     graph.add_node(
         "prepare_skills",
-        _with_runtime_trace(
-            partial(prepare_skills, skill_service=skill_service),
-        ),
+        _prepare_skills_with_runtime(skill_service),
     )
     graph.add_node("stub_execute", stub_execute)
     graph.add_node("requires_confirmation", require_confirmation)
@@ -105,9 +103,9 @@ class RuntimeOrchestrator:
 
     def __init__(
         self,
+        skill_service: SkillService,
         intent_service: IntentService | None = None,
         policy_service: PolicyService | None = None,
-        skill_service: SkillService | None = None,
     ) -> None:
         self._intent_service = intent_service or IntentService()
         self._policy_service = policy_service or PolicyService()
@@ -173,6 +171,23 @@ def _route_after_skill_preparation(
     if state["error_code"] is not None:
         return "error"
     return "continue"
+
+
+def _prepare_skills_with_runtime(
+    skill_service: SkillService,
+) -> Callable[[GraphState, Runtime[OrchestrationContext]], GraphState]:
+    def invoke_node(
+        state: GraphState,
+        runtime: Runtime[OrchestrationContext],
+    ) -> GraphState:
+        context = runtime.context or OrchestrationContext()
+        return prepare_skills(
+            state,
+            skill_service=skill_service,
+            trace=context.trace,
+        )
+
+    return invoke_node
 
 
 def _with_runtime_trace(

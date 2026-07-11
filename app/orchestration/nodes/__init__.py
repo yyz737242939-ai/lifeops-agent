@@ -12,7 +12,6 @@ from app.orchestration.state import GraphState, append_graph_path
 from app.policy.models import PolicyDecision
 from app.policy.service import PolicyService
 from app.runtime.models import RuntimeResult, RuntimeStatus
-from app.skills.models import SkillSelection
 from app.skills.service import SkillService
 
 
@@ -108,20 +107,12 @@ def decide_policy(
 def prepare_skills(
     state: GraphState,
     *,
-    skill_service: SkillService | None,
+    skill_service: SkillService,
     trace: TraceSink | None = None,
 ) -> GraphState:
     """Select and load request-local Skills without executing tools."""
 
     updated = _append_node(state, "prepare_skills")
-    if skill_service is None:
-        updated["skill_selection"] = SkillSelection(
-            reason="Skill selection is not configured for this runtime."
-        )
-        updated["loaded_skill_ids"] = []
-        updated["prompt_contributions"] = []
-        return updated
-
     request = updated["request"]
     try:
         preparation = skill_service.prepare(request, trace=trace)

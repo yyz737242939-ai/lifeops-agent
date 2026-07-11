@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import sqlite3
+from typing import Any
 
+from app.runtime.models import RuntimeRequest
+from app.skills.models import SkillDefinition
+from app.skills.registry import SkillRegistry
+from app.skills.service import SkillService
 from app.storage.migrations import migrate
 from app.storage.sqlite import connect_sqlite
 
@@ -22,3 +27,16 @@ def insert_test_run_record(conn: sqlite3.Connection, run_id: str = "run_1") -> N
         (run_id,),
     )
     conn.commit()
+
+
+def create_test_skill_service() -> SkillService:
+    return SkillService(SkillRegistry(), _NoSkillSelectionClient())
+
+
+class _NoSkillSelectionClient:
+    def select(
+        self,
+        request: RuntimeRequest,
+        skill_metadata: tuple[SkillDefinition, ...],
+    ) -> dict[str, Any]:
+        return {"selected_skill_ids": [], "reason": "No test Skill applies."}

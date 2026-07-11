@@ -4,5 +4,8 @@
   },
   "logs": {
     "root": "logs/sessions"
+  },
+  "skills": {
+    "root": "app/skills"
   }
 }

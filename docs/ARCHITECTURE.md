@@ -138,7 +138,7 @@ Skill System 当前实现位于 `app/skills/`。`SkillDefinition`、`LoadedSkill
 
 当前内置 Skill skeleton 是 `research` 和 `travel`。它们的 `SKILL.md` body 只描述领域用途、临时结果与持久化事实边界以及 planned workflow；尚未实现的 source、helper、Travel Port、tool 和 capability 不作为可用能力暴露。
 
-`select_skills(request, skill_metadata, llm)` 把 `RuntimeRequest` 和全量 Skill metadata 交给注入的 `SkillSelectionClient`。LLM/provider 只返回 JSON-like 结构；LifeOps 校验输出只能包含 `selected_skill_ids` 和非空 `reason`，并拒绝重复或未知 ID。该接口不预先按 Intent、关键词或 Domain 缩小候选集，也不绑定具体框架或 provider SDK。
+`select_skills(request, skill_metadata, llm)` 把 `RuntimeRequest` 和全量 Skill metadata 交给 `SkillSelectionClient`。该 client 在初始化时从 `.env` 读取 `OPENROUTER_API_KEY`、`OPENROUTER_BASE_URL` 和 `MODEL`，通过 OpenAI-compatible Chat Completions 请求 JSON 结果；请求只包含用户请求以及全部 Skill ID/description。provider 返回值先经过 Pydantic 结构解析，随后由 LifeOps 校验只能包含 `selected_skill_ids` 和非空 `reason`，并拒绝重复或未知 ID。该接口不预先按 Intent、关键词或 Domain 缩小候选集，也不依赖 Agent 框架。
 
 `load_skill(definition)` 只在选中后读取对应 `SKILL.md` body。`read_skill_reference(definition, reference_id)` 只接受 `references/manifest.json` 白名单中的稳定 ID，并限制为 Skill root 内的 Markdown 相对路径。body/reference 均有空内容和字符数上限校验；正文不进入 trace payload。
 
@@ -158,7 +158,7 @@ Skill root
 -> existing stub execution
 ```
 
-`prepare_skills` 只位于 Policy allow 路径。未注入 `SkillService` 时，它产生安全空选择并继续现有 stub，不伪造 Skill trace；显式注入后才进行 LLM selection 和 lazy loading。稳定事件只包含 `skill.selected`、`skill.loaded`、`skill.reference.loaded` 及其失败事件，不记录机械化文件读取 lifecycle。LLM selection reason 保留在 request-local `SkillSelection` 中，不写 event payload，避免间接复述用户原文。最终完整 prompt assembly 仍未实现。Skill metadata 不提供工具授权；未来 capability、Policy 和 Guardrail 仍由 Tool System 统一求交与执行。
+生产 bootstrap 根据 `config/default.json` 的 `skills.root` 总是执行 discovery，并直接构造 `SkillSelectionClient()`、Registry 与必需的 `SkillService`；模型和 provider 地址不再通过 bootstrap 或 JSON 配置逐层传参。不存在 Skill 开关或空 service 分支。`prepare_skills` 只位于 Policy allow 路径。稳定事件只包含 `skill.selected`、`skill.loaded`、`skill.reference.loaded` 及其失败事件，不记录机械化文件读取 lifecycle。LLM selection reason 保留在 request-local `SkillSelection` 中，不写 event payload，避免间接复述用户原文。原始 provider interaction 等统一 LLM Gateway 出现后再集中进入 `llm.jsonl`。最终完整 prompt assembly 仍未实现。Skill metadata 不提供工具授权；未来 capability、Policy 和 Guardrail 仍由 Tool System 统一求交与执行。
 
 ## Intent / Policy
 

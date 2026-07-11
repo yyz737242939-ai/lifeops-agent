@@ -16,6 +16,7 @@ DEFAULT_CONFIG_PATH = Path("config/default.json")
 class AppConfig:
     database_path: Path
     log_root: Path
+    skill_root: Path
 
 
 def load_app_config(path: str | Path = DEFAULT_CONFIG_PATH) -> AppConfig:
@@ -38,7 +39,12 @@ def load_app_config(path: str | Path = DEFAULT_CONFIG_PATH) -> AppConfig:
 
     database_path = _read_database_path(raw, config_path)
     log_root = _read_log_root(raw)
-    return AppConfig(database_path=database_path, log_root=log_root)
+    skill_root = _read_skill_config(raw)
+    return AppConfig(
+        database_path=database_path,
+        log_root=log_root,
+        skill_root=skill_root,
+    )
 
 
 def _read_database_path(raw: Any, config_path: Path) -> Path:
@@ -69,3 +75,19 @@ def _read_log_root(raw: Any) -> Path:
             code="config_log_root_invalid",
         )
     return Path(value)
+
+
+def _read_skill_config(raw: Any) -> Path:
+    skills = raw.get("skills", {}) if isinstance(raw, dict) else {}
+    if not isinstance(skills, dict):
+        raise ConfigError(
+            "Application config skills must be an object.",
+            code="config_skills_invalid",
+        )
+    root = skills.get("root", "app/skills")
+    if not isinstance(root, str) or not root.strip():
+        raise ConfigError(
+            "Application config skills.root must be a non-empty string.",
+            code="config_skill_root_invalid",
+        )
+    return Path(root)
