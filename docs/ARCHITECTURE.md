@@ -117,18 +117,48 @@ LangGraph Orchestration 当前实现位于：
 START
 -> classify_intent
 -> decide_policy
--> allow -----------------> stub_execute -----------\
+-> allow -----------------> prepare_skills -> stub_execute \
 -> requires_confirmation -> requires_confirmation --+-> finalize -> END
 -> deny ------------------> deny -------------------/
 ```
 
-Intent 或 Policy 失败时，graph 在对应节点后直接进入 `END`，不执行后续 Policy 或结果节点。
+Intent、Policy 或 Skill preparation 失败时，graph 在对应节点后直接进入 `END`。Skill 失败不会进入 `stub_execute`；确认和拒绝分支不会调用 Skill selector。
 
-`GraphState` 只保存当前 request 的编排数据：request、intent、policy、route、result、error、graph path 和紧凑 trace summary。它不保存长期 Memory、Task 事实、工具执行事实或授权替代来源。
+`GraphState` 只保存当前 request 的编排数据：request、intent、policy、route、Skill selection、loaded Skill IDs、prompt contributions、result、error、graph path 和紧凑 trace summary。它不保存 `SkillService`、Skill registry/client、长期 Memory、Task 事实、工具执行事实或授权替代来源。
 
-`OrchestrationContext` 是 request-local 运行依赖，目前只携带应用拥有的 `TraceSink`。它通过 LangGraph `context_schema` / `Runtime` 提供给节点，不进入 `GraphState` 或 checkpoint。Intent / Policy node 在真实 service 返回后分别写 `intent.classified` / `policy.decided`，失败时写对应 failed event；Policy 分支确定后写 `orchestration.route.selected`。机械化的 graph/node started/completed 不进入稳定事件契约。
+`IntentService`、`PolicyService` 和 `SkillService` 是 graph 构建期依赖。`SkillService` 长期持有 `SkillRegistry` 与 `SkillSelectionClient`，统一执行 selection、lazy loading 和 contribution assembly。`OrchestrationContext` 只携带每个 run 不同的应用 `TraceSink`；它通过 LangGraph `context_schema` / `Runtime` 提供给节点，不进入 `GraphState` 或 checkpoint。Intent / Policy node 在真实 service 返回后分别写 `intent.classified` / `policy.decided`，失败时写对应 failed event；Policy 分支确定后写 `orchestration.route.selected`。机械化的 graph/node started/completed 不进入稳定事件契约。
 
 LangGraph 不负责 Policy 决策、业务事实、工具安全、真实执行或持久化；这些边界仍由 LifeOps 自研 runtime 拥有。
+
+## Skill System
+
+Skill System 当前实现位于 `app/skills/`。`SkillDefinition`、`LoadedSkill`、`SkillSelection`、`SkillReferenceDefinition` 和 `PromptContribution` 是框架无关的 LifeOps 类型；`SkillRegistry` 提供确定性 metadata 查询和重复 ID 防护。
+
+`discover_skills(root)` 使用 LifeOps 原生薄实现扫描根目录的直接子目录。当前只读取每个 `SKILL.md` frontmatter 中的 `name` 和 `description`，校验 Agent Skills 命名约束、父目录同名、必填项和未知字段；不读取 Markdown body、reference、script 或 asset。Deep Agents / LangChain Skills 只作为文件约定和 progressive disclosure 参考，不是 runtime 依赖。
+
+当前内置 Skill skeleton 是 `research` 和 `travel`。它们的 `SKILL.md` body 只描述领域用途、临时结果与持久化事实边界以及 planned workflow；尚未实现的 source、helper、Travel Port、tool 和 capability 不作为可用能力暴露。
+
+`select_skills(request, skill_metadata, llm)` 把 `RuntimeRequest` 和全量 Skill metadata 交给注入的 `SkillSelectionClient`。LLM/provider 只返回 JSON-like 结构；LifeOps 校验输出只能包含 `selected_skill_ids` 和非空 `reason`，并拒绝重复或未知 ID。该接口不预先按 Intent、关键词或 Domain 缩小候选集，也不绑定具体框架或 provider SDK。
+
+`load_skill(definition)` 只在选中后读取对应 `SKILL.md` body。`read_skill_reference(definition, reference_id)` 只接受 `references/manifest.json` 白名单中的稳定 ID，并限制为 Skill root 内的 Markdown 相对路径。body/reference 均有空内容和字符数上限校验；正文不进入 trace payload。
+
+`build_prompt_contributions(loaded_skills)` 按 selection/load 顺序把 `LoadedSkill.body` 和声明式 capability hints 转换为独立 `PromptContribution`。它只消费实际已加载的 Skill，拒绝重复 Skill ID；不拼接 core rules、工具描述或最终 system prompt，也不决定 Context budget 和最终排列顺序。
+
+当前 request-local Skill 链路是：
+
+```text
+Skill root
+-> direct child SKILL.md
+-> strict metadata validation
+-> SkillDefinition
+-> SkillRegistry
+-> LLM selection + LifeOps validation
+-> selected body / declared reference lazy loading
+-> PromptContribution list
+-> existing stub execution
+```
+
+`prepare_skills` 只位于 Policy allow 路径。未注入 `SkillService` 时，它产生安全空选择并继续现有 stub，不伪造 Skill trace；显式注入后才进行 LLM selection 和 lazy loading。稳定事件只包含 `skill.selected`、`skill.loaded`、`skill.reference.loaded` 及其失败事件，不记录机械化文件读取 lifecycle。LLM selection reason 保留在 request-local `SkillSelection` 中，不写 event payload，避免间接复述用户原文。最终完整 prompt assembly 仍未实现。Skill metadata 不提供工具授权；未来 capability、Policy 和 Guardrail 仍由 Tool System 统一求交与执行。
 
 ## Intent / Policy
 
@@ -185,7 +215,7 @@ Runtime 的事实来源是：
 
 - 基于 SQLite 的业务 repository；
 - 成功的 WRITE tool result；
-- 用户明确授权的 TaskStep。
+- 用户明确授权且由成功 ToolResult / ExecutionEvidence 支持的 Domain WRITE。
 
 不是事实来源：
 
@@ -220,13 +250,15 @@ Runtime 的事实来源是：
 - `TraceSink` 是运行依赖，不进入 `GraphState`；event payload 不写完整 GraphState 或原始用户输入。
 - 修改 Runtime 行为、Context 处理、Memory、写入安全或工具执行时，需要聚焦的回归测试。
 
-## Task vs Plan
+## PlanRun vs Domain Facts
 
-Task 是长期业务状态。
+`PlanRun` / `PlanStep` 是跨 Domain 的通用 runtime 执行策略。它们可以为了暂停、恢复、fault tolerance 和审计而持久化，但不会因此成为 Research 或 Travel 业务事实。
 
-PlanRun 是临时 runtime 执行策略。
+Research / Travel 是业务逻辑分组：各自拥有 models、service、repository 和 tools。Planner / Executor 位于 Domain 之上，一个 PlanRun 可以交叉调用多个 Domain 的 tools。
 
-PlanRun 只有经过明确 WRITE 授权后，才能变成 TaskStep。
+PlanStep 不自动转换成长期 Task。只有绑定当前用户授权、通过 Tool Guardrails、成功执行并产生 evidence 的 Domain WRITE，才能创建或修改 Source、Note、ResearchBrief、Trip、Itinerary 等长期事实。
+
+LangGraph checkpoint 保存 graph/thread state，可用于恢复和 time travel；已经提交到 Domain repository 或外部系统的副作用不会因为恢复旧 checkpoint 而自动回滚。
 
 ## 架构维护规则
 

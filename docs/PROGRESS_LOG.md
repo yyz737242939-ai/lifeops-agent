@@ -23,6 +23,30 @@
 
 项目已完成阶段 4：LangGraph Orchestration 骨架，当前准备进入阶段 5：Skill System / Tool System 与 Domains。
 
+阶段 5 已完成计划收敛，并已开始 Skill System 的分步实现：
+
+- Skill System 已完成核心模型、错误、metadata registry 和原生 discovery / validation；当前严格支持 `name`、`description` frontmatter 子集，不引入 Deep Agents / LangChain loader 或 middleware。
+- discovery 只扫描根目录的直接 Skill 子目录，只读取 `SKILL.md` metadata；完整 body 和附属资源仍保持未加载。
+- `app/skills/research/SKILL.md` 和 `app/skills/travel/SKILL.md` skeleton 已建立，记录各自适用场景、事实边界和 planned workflow；尚未实现的工具与 capability 不伪装成可用能力。
+- Skill selector 已通过 `SkillSelectionClient` 薄接口接收 `RuntimeRequest + 全量 Skill metadata`，支持零到多个 Skill；LifeOps 校验严格输出字段、非空 reason、重复 ID 和未知 ID，不依赖框架 selector。
+- selected Skill body 已支持按需加载；reference 只能通过 `references/manifest.json` 中的稳定 ID 读取相对 Skill root 的 Markdown 文件，并校验 traversal、文件类型、空正文和大小限制。
+- Skill trace 只记录 selection、body load、reference load 的成功或失败语义事件；不记录机械文件 lifecycle，不泄漏用户原文、LLM selection reason、Skill body 或 reference 正文。
+- prompt contribution assembler 已实现：只从 selected-and-loaded Skills 生成 `PromptContribution`，保留选择顺序并拒绝重复 Skill ID；core rules、工具描述、Context budget 和最终 prompt 排序仍不属于 Skill System。
+- LangGraph allow 路径已接入 request-local `prepare_skills`：Policy allow 后执行 Skill selection、selected body loading 和 contribution assembly，再进入现有 stub execution；确认与拒绝分支不调用 selector。
+- `SkillService` 已收敛为与 Intent/Policy service 对称的构造依赖：它长期持有 `SkillRegistry` 和 `SkillSelectionClient`，并在 graph 构建时注入；只有每个 run 不同的 `TraceSink` 留在 `OrchestrationContext`。GraphState 只保存当前 run 的 selection、loaded IDs 和 contributions。
+- Skill 阶段失败返回 `runtime.skill_failed`，不会继续 stub execution。
+- 当前默认 Runtime 尚未配置真实 Skill LLM client，因此安全地产生空选择且不写虚假的 `skill.selected` event；测试通过显式 fake client 验证零选、多选、顺序、失败阻断和分支隔离。
+- Agent Skills specification 和 Deep Agents Skills 仅作为格式、命名约束与 progressive disclosure 的实现参考；框架 adapter 保留为未来边界。
+- Tool System 采用 LifeOps 原生安全核心与可选 LangChain adapter；所有工具经过统一 Tool Gateway 和 pre/post Guardrails。
+- 两个内部 Domain 从原路线图的 Tasks + Wellbeing 调整为 Research / Personal Knowledge + Travel。
+- Research 首个外部只读场景是 Hugging Face Daily Papers / Blog briefing；临时结果不自动保存为知识或 Memory。
+- Travel 先定义 typed external Ports 并使用 fixture adapters；真实 Calendar MCP 仍在阶段 8 接入。
+- 阶段 5 模块计划已记录 Context、Memory、Planner、Executor、Recovery、MCP、DAG、Inspector、Eval 的未来接入边界。
+- Domain 已明确为业务 models/service/repository/tools 的逻辑分组，不是独立 Agent 或执行边界；同一通用 PlanRun 可以交叉调用 Research 与 Travel tools。
+- 简单单工具请求未来走 Direct Executor；复杂、多步骤或有依赖请求走 Planner → Executor。PlanStep 绑定 objective/capability/candidate tools，WRITE 默认逐 step 授权。
+- PlanRun / PlanStep 可为跨进程恢复而持久化，但不是业务事实；跨 Domain 部分成功时不做全局回滚，保留成功 evidence，从失败 step 恢复或 bounded replan。
+- LangGraph checkpoint 是未来保存 graph/thread state、interrupt、fault tolerance 和 time travel 的候选机制，不负责撤销已经提交的 Domain WRITE 或外部副作用。
+
 当前状态：
 
 - 当前基础设施代码已经完成阶段 2 初版。

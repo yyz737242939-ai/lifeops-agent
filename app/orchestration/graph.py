@@ -18,12 +18,14 @@ from app.orchestration.nodes import (
     decide_policy,
     deny,
     finalize,
+    prepare_skills,
     require_confirmation,
     stub_execute,
 )
 from app.orchestration.state import GraphRoute, GraphState, create_graph_state
 from app.policy.service import PolicyService
 from app.runtime.models import RuntimeRequest, RuntimeResult
+from app.skills.service import SkillService
 
 
 @dataclass(frozen=True)
@@ -36,6 +38,7 @@ class OrchestrationContext:
 def build_runtime_graph(
     intent_service: IntentService,
     policy_service: PolicyService,
+    skill_service: SkillService | None = None,
 ) -> CompiledStateGraph:
     """Build and compile the stage-4 runtime orchestration graph."""
 
@@ -50,6 +53,12 @@ def build_runtime_graph(
         "decide_policy",
         _with_runtime_trace(
             partial(decide_policy, policy_service=policy_service),
+        ),
+    )
+    graph.add_node(
+        "prepare_skills",
+        _with_runtime_trace(
+            partial(prepare_skills, skill_service=skill_service),
         ),
     )
     graph.add_node("stub_execute", stub_execute)
@@ -70,9 +79,17 @@ def build_runtime_graph(
         "decide_policy",
         _route_after_policy_or_error,
         {
-            GraphRoute.ALLOW: "stub_execute",
+            GraphRoute.ALLOW: "prepare_skills",
             GraphRoute.REQUIRES_CONFIRMATION: "requires_confirmation",
             GraphRoute.DENY: "deny",
+            "error": END,
+        },
+    )
+    graph.add_conditional_edges(
+        "prepare_skills",
+        _route_after_skill_preparation,
+        {
+            "continue": "stub_execute",
             "error": END,
         },
     )
@@ -90,12 +107,15 @@ class RuntimeOrchestrator:
         self,
         intent_service: IntentService | None = None,
         policy_service: PolicyService | None = None,
+        skill_service: SkillService | None = None,
     ) -> None:
         self._intent_service = intent_service or IntentService()
         self._policy_service = policy_service or PolicyService()
+        self._skill_service = skill_service
         self._graph = build_runtime_graph(
             self._intent_service,
             self._policy_service,
+            self._skill_service,
         )
 
     def invoke(
@@ -145,6 +165,14 @@ def _route_after_policy_or_error(
     if route is None:
         raise ValueError("route must be available after policy evaluation.")
     return route
+
+
+def _route_after_skill_preparation(
+    state: GraphState,
+) -> Literal["continue", "error"]:
+    if state["error_code"] is not None:
+        return "error"
+    return "continue"
 
 
 def _with_runtime_trace(

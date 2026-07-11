@@ -8,6 +8,7 @@ from app.orchestration.nodes import (
     decide_policy,
     deny,
     finalize,
+    prepare_skills,
     require_confirmation,
     stub_execute,
 )
@@ -52,14 +53,26 @@ class OrchestrationNodesTest(unittest.TestCase):
 
         state = classify_intent(state, FixedIntentService(IntentType.WRITE_REQUEST))
         state = decide_policy(state, FixedPolicyService(PolicyAction.ALLOW))
+        state = prepare_skills(
+            state,
+            skill_service=None,
+        )
         state = stub_execute(state)
         state = finalize(state)
 
         self.assertEqual(state["route"], GraphRoute.ALLOW)
         self.assertEqual(
             state["graph_path"],
-            ["classify_intent", "decide_policy", "stub_execute", "finalize"],
+            [
+                "classify_intent",
+                "decide_policy",
+                "prepare_skills",
+                "stub_execute",
+                "finalize",
+            ],
         )
+        self.assertEqual(state["skill_selection"].selected_skill_ids, ())
+        self.assertEqual(state["prompt_contributions"], [])
         self.assertEqual(state["result"].status, RuntimeStatus.OK)
         self.assertEqual(
             state["result"].trace_summary,

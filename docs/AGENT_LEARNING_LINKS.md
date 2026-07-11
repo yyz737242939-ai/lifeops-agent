@@ -14,11 +14,19 @@
 - LangGraph persistence / checkpoint / interrupt：只学习边界，不在阶段 4 实现，不作为 LifeOps 事实源或授权来源。
 - LangChain models / tools / structured output：只做后续 Planner / Executor / Tool System 的预备阅读，本阶段不引入 chain、agent 或 tool abstraction。
 
+阶段 5 的模块计划把学习范围扩展到：
+
+- 原生 Skill discovery / routing / progressive reference 与 framework adapter 的边界。
+- LifeOps 原生 Tool Gateway、capability intersection、pre/post Guardrails 和 execution evidence。
+- LangChain tool schema / ToolNode / middleware 作为可选 adapter，不替代 Policy、Guardrail 或业务事实来源。
+- Hugging Face 白名单外部来源、provenance、临时 observation 与用户确认保存边界。
+- Travel typed Port + fixture adapter；真实 Calendar MCP 仍留在阶段 8。
+
 ## 选择标准
 
 - 优先官方文档、正式 specification 和成熟开源项目的核心文档。
 - 每个链接都必须能解释当前阶段已实现、正在实现或明确准备学习的 runtime 边界。
-- 不提前收录 Tool System、MCP、Eval Harness、DAG Scheduler、长期 Memory 或多轮 human-in-the-loop 的实现资料。
+- 不提前收录 MCP、Eval Harness、DAG Scheduler、长期 Memory 或完整多轮 human-in-the-loop 的实现资料。
 - 如果一个主题只是后续扩展点，而不是当前阶段的学习重点，先放在“暂不收录”。
 
 ## 阶段 3：Runtime Core / Intent / Policy
@@ -93,7 +101,7 @@
 阅读顺序：
 
 1. [LangGraph persistence](https://docs.langchain.com/oss/python/langgraph/persistence)  
-   学习重点：理解 checkpointer 和 store 的区别。checkpointer 是 thread-scoped graph state snapshot；store 是 application-defined long-term data。
+   学习重点：理解 checkpointer 和 store 的区别。checkpointer 是 thread-scoped graph state snapshot，可支持 continuity、interrupt、fault tolerance 和 time travel；store 是 application-defined long-term data。Checkpoint restore 只恢复 graph state，不会自动撤销已经提交到 Domain repository 或外部系统的副作用。
 
 2. [LangGraph interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)  
    学习重点：理解 human-in-the-loop 能力和暂停 / 恢复流程。
@@ -149,11 +157,52 @@ LifeOps 自研 runtime
 
 面试讲法：本项目不是为了“套上 LangGraph”而重写 runtime，而是先建立自研 runtime 的事实源、授权源和 trace 边界，再把 LangGraph 映射到控制流编排层。这样既能学习主流框架，也能说明自己理解 agent runtime 的底层职责拆分。
 
+## 阶段 5：Skill / Tool / Research / Travel
+
+### Agent Skills / Deep Agents
+
+- [Agent Skills Specification](https://agentskills.io/specification)
+  学习重点：`SKILL.md` 的目录结构、必填 `name` / `description`、命名约束和三级 progressive disclosure。LifeOps 阶段 5 采用严格原生子集，只解析启动时需要的 metadata；可选 frontmatter 字段和附属资源在后续步骤按本项目边界扩展。
+
+- [Deep Agents Skills](https://docs.langchain.com/oss/python/deepagents/skills)
+  学习重点：Deep Agents 如何读取 `SKILL.md` frontmatter、按描述匹配、延迟读取正文和附属资源，以及 skills 与 Memory 的区别。LifeOps 只参考其 progressive disclosure 和失败模式，不复用 `SkillsMiddleware` 或 Deep Agents harness；现有 Intent、Policy、Tool Gateway 和业务事实来源继续由 LifeOps 拥有。
+
+- [LangChain Skills pattern](https://docs.langchain.com/oss/python/langchain/multi-agent/skills)
+  学习重点：LangChain Core 中 Skill 更接近 prompt-driven specialization / progressive disclosure 架构模式；真正的 built-in Skill 支持位于 Deep Agents。对照本项目为什么仍需要自己的 deterministic routing reason 和 capability intersection。
+
+### LangChain Tools 与 LifeOps Tool Adapter
+
+- [LangChain Tools](https://docs.langchain.com/oss/python/langchain/tools)
+  学习重点：tool schema、结构化输入输出、`ToolRuntime` 和 `ToolNode`。项目只把这些作为 adapter 候选；LifeOps `ToolGateway` 仍负责 capability、Policy、Guardrail 和 execution evidence。尤其要避免让工具通过 framework store 直接保存业务事实或 Memory。
+
+- [Python typing.Protocol](https://docs.python.org/3/library/typing.html#typing.Protocol)
+  学习重点：用 structural subtyping 定义小而稳定的 external Port。Travel 的 Calendar、Weather、Transport、Lodging、Place adapters 应能用 fixture 和未来真实实现共享 contract，而不让 Domain 依赖具体 provider。
+
+### Guardrails / Human Approval 对照
+
+- [LangChain Guardrails](https://docs.langchain.com/oss/python/langchain/guardrails)
+  学习重点：deterministic / model-based guardrails 以及 before/after/tool-call interception。对照 LifeOps 为什么把 pre-execution 授权检查和 post-execution success evidence 检查放进 framework-agnostic Tool Gateway。
+
+- [LangChain Human-in-the-loop](https://docs.langchain.com/oss/python/langchain/human-in-the-loop)
+  学习重点：approve/edit/reject 与暂停执行的框架实现。阶段 5 只对照 confirmation 边界，不引入完整 interrupt/checkpointer resume；LifeOps Policy 仍是授权事实源。
+
+### Hugging Face 外部来源
+
+- [Hugging Face Hub API](https://huggingface.co/docs/hub/en/api)
+  学习重点：Hub 官方 API/OpenAPI 入口和 provider contract。阶段 5 首版仍可基于声明的 Papers/Blog 页面 fixture 重写 V0 briefing，但 source identity、fetch metadata、失败和 provenance 必须使用稳定结构，未来 adapter 可以切换到官方 API。
+
+### 当前阶段明确不提前实现
+
+- LangChain `create_agent` 替换现有 Runtime/LangGraph 主流程。
+- Tool 通过 `ToolRuntime.store` 直接写 LifeOps Memory 或 Domain facts。
+- Travel 真实预订、付款、Calendar 写入或具体商业 provider 集成。
+- semantic retrieval、embedding、向量数据库和完整 RAG。
+- 完整 LangGraph interrupt/checkpointer confirmation resume。
+
 ## 暂不收录
 
 以下主题已经在总路线图或后续模块中规划，但不属于当前阶段学习链接范围。等对应模块施工时，再按模块 plan 补充权威链接：
 
-- Tool System / Executor tool calling。
 - MCP / Calendar external integration。
 - Eval Harness。
 - DAG Scheduler。

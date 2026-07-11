@@ -55,7 +55,7 @@
 
 - `README.md`：当前 runtime 使用 SQLite 存放业务事实和适合关系查询的数据；event / LLM / normal 程序日志默认走文件。
 - `docs/PROGRESS_LOG.md`：阶段 2 Storage / SQLite 已完成初版，新代码放入 `app/`。
-- `docs/ARCHITECTURE.md`：SQLite repository、成功 WRITE result 和用户授权 TaskStep 是业务事实来源；event / LLM / normal 程序日志是观测材料，不是业务事实或授权来源。
+- `docs/ARCHITECTURE.md`：SQLite repository 与有 ToolResult / ExecutionEvidence 支持的授权 Domain WRITE 是业务事实来源；event / LLM / normal 程序日志和 PlanRun state 是观测或执行材料，不是业务事实或授权来源。
 - `docs/RUNTIME_CONCEPTS.md`：已补齐 Observability 和 SQLite Local Persistence 学习章节。
 - `plans/RUNTIME_REFACTOR_PLAN.md`：阶段 2 交付、依赖方向和“按用途选择 SQLite / 文件日志 / JSON”的数据策略。
 
@@ -176,10 +176,17 @@ tool_calls
 
 后续 domain 模块再设计的业务表方向：
 
+以下名称只是后续模块的候选方向，不属于阶段 2 已实现 schema。当前 `V1_INITIAL_STORAGE_SCHEMA` 仍只有 `run_records` 和 `tool_calls`；Research / Travel 或 Memory / Eval 真正施工时，必须各自新增 schema migration 和 repository 测试，不能因为本计划列出名称就视为已经落库。
+
 ```text
-tasks
-task_steps
-wellbeing_entries
+research_topics
+research_sources
+research_notes
+research_briefs
+trips
+travel_constraints
+travel_itineraries
+travel_decisions
 semantic_memories
 eval_runs
 eval_results
@@ -206,7 +213,7 @@ Repository 策略：
 - `app/storage/sqlite.py`：连接工厂、row factory、pragma 初始化。
 - `app/storage/repositories.py`：基础 repository helper，例如执行查询、映射 row、事务内共享 connection。
 - `app/storage/unit_of_work.py`：事务边界，提供 commit / rollback。
-- 具体业务 repository 放在对应模块，例如 `app/domains/tasks/repository.py`，不堆进 `storage/repositories.py`。
+- 具体业务 repository 放在对应模块，例如 `app/domains/research/repository.py` 或 `app/domains/travel/repository.py`，不堆进 `storage/repositories.py`。
 
 Test database 策略：
 
@@ -391,7 +398,7 @@ uv run python -m unittest discover -s tests -v
   - 当前目标是小而可解释的本地 runtime。`sqlite3` 标准库足够覆盖学习、测试和面试讲解，ORM 会过早增加平台复杂度。
 
 - 什么是事实来源，什么不是？
-  - SQLite repository、成功 WRITE tool result、用户授权 TaskStep 是业务事实来源。event / LLM / normal log 是观测材料，不是业务事实或授权来源。assistant 文本、Planner 输出、Recovery Context、LangGraph checkpoint 和 conversation summary 也不是。
+  - SQLite repository 与有 ToolResult / ExecutionEvidence 支持的授权 Domain WRITE 是业务事实来源。event / LLM / normal log 和 PlanRun state 是观测或执行材料，不是业务事实或授权来源。assistant 文本、Planner 输出、Recovery Context、LangGraph checkpoint 和 conversation summary 也不是。
 
 - trace event 会不会变成又一个日志垃圾桶？
   - 初版必须限制 payload 大小和结构，只记录 run_id、seq、event_type、摘要、引用和必要结构字段。

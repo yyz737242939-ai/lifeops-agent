@@ -60,7 +60,13 @@ class RuntimeServiceTest(unittest.TestCase):
                 self.assertEqual(events[4]["payload"]["route"], "allow")
                 self.assertEqual(
                     events[5]["payload"]["graph_path"],
-                    ["classify_intent", "decide_policy", "stub_execute", "finalize"],
+                    [
+                        "classify_intent",
+                        "decide_policy",
+                        "prepare_skills",
+                        "stub_execute",
+                        "finalize",
+                    ],
                 )
                 self.assertEqual(events[0]["run_id"], request.run_id)
                 self.assertEqual(events[0]["session_id"], request.session_id)

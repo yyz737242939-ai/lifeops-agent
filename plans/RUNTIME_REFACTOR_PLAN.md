@@ -42,7 +42,7 @@ User Input
 - 先判断 intent，再决定是否 planning，避免关键词误触发。
 - Policy 是权限事实源，Planner、LLM 文本、Recovery Context、LangGraph checkpoint 都不是授权来源。
 - LangGraph 做编排层，自研 runtime 保留 policy、tool safety、context、memory、executor、recovery、facts source。
-- Task 是长期业务事实源；PlanRun 是临时执行计划；PlanRun 写入 TaskSteps 必须经过明确 WRITE 授权。
+- PlanRun / PlanStep 是跨 Domain 的通用执行策略，可为暂停、恢复和审计持久化，但不是业务事实；长期事实只来自经授权且成功执行的 Domain WRITE。
 - Inspector / Eval 是一等公民，不是最后补的日志查看工具。
 - 新旧代码、新旧文档必须明确分离。
 
@@ -75,7 +75,7 @@ User Input
 
 - MCP。
 - Safety State。
-- Task State。
+- Plan / Execution State。
 - Recovery。
 - Plan and Execute。
 - Planner / Executor / Orchestrator。
@@ -119,7 +119,7 @@ User Input
 - LangGraph Orchestrator。
 - Runtime context assembly 初版。
 - Memory 初版。
-- Tasks + Wellbeing 内部 domain。
+- Research / Personal Knowledge + Travel 内部 domain。
 - Calendar MCP fixture read integration。
 - Planner / Executor / ExecutionFeedback。
 - Trace / Inspector。
@@ -290,23 +290,38 @@ app/
   tools/
     definitions.py
     registry.py
-    executor.py
+    gateway.py
+    guardrails.py
     results.py
     capability.py
+    adapters/
+      langchain.py
 
   domains/
-    tasks/
+    research/
       models.py
       repository.py
       service.py
       tools.py
-    wellbeing/
+      context.py
+    travel/
       models.py
       repository.py
       service.py
       tools.py
+      ports.py
 
   integrations/
+    huggingface/
+      client.py
+      parser.py
+      adapter.py
+    travel_fixture/
+      calendar.py
+      weather.py
+      transport.py
+      lodging.py
+      places.py
     calendar_mcp/
       server_fixture.py
       client.py
@@ -376,9 +391,13 @@ main.py
 ### 5.1 分层规则
 
 - `domains/*` 不直接读写 SQLite connection，只通过 repository / service。
+- `domains/*` 不依赖具体 LangChain、MCP 或 HTTP provider 类型；外部能力通过稳定 Port 和 adapter 接入。
+- Skill 只提供 prompt contribution、reference/source 声明和 capability hints，不执行工具或授权写入。
+- 所有工具通道必须经过同一个 Tool Gateway 和 pre/post Guardrails。
 - `policy` 不调用工具，不写业务数据。
 - `planning` 不调用工具，不授权 WRITE。
 - `execution` 可以调用 tools，但必须使用 PolicyDecision 和 allowed tools。
+- Planner / Executor 面向 capability 和 Tool contract，不按 Domain 建立独立执行循环；同一个 PlanRun 可以包含多个 Domain 的步骤。
 - `orchestration` 只做 graph wiring 和 route，不放业务逻辑。
 - `inspector` 只读 event log、LLM log、application log 和必要业务事实，不修改状态。
 - `evals` 使用 fixture 和测试数据库，不复用真实用户数据。
@@ -434,9 +453,8 @@ JSON 不再承担业务长期事实源职责，只在需要 fixture、config、s
 
 SQLite 存储：
 
-- tasks。
-- task_steps。
-- wellbeing_entries。
+- research_topics / research_sources / research_notes / research_briefs。
+- trips / travel_constraints / travel_itineraries / travel_decisions。
 - semantic_memories。
 - tool_calls。
 - eval_runs。
@@ -454,6 +472,7 @@ SQLite 存储：
 - skill / source manifest。
 - eval fixture。
 - calendar fixture data。
+- research / travel fixture data。
 - config examples。
 
 后续必须单独创建 `plans/modules/STORAGE_SQLITE_PLAN.md`，设计：
@@ -472,14 +491,14 @@ SQLite 存储：
 | 模块 | V0 状态 | 当前 runtime 轻量升级方向 | 模块计划 |
 |---|---|---|---|
 | Agent Loop | 旧 `Agent` 聚合过多职责 | 拆成 runtime / orchestration / execution | `plans/modules/RUNTIME_CORE_PLAN.md` |
-| Skill System | 已有 skill routing / reference loader 经验，当前重构计划缺少独立位置 | skill discovery / routing / prompt assembly / progressive references / skill-scoped capabilities 分离 | `plans/modules/SKILL_SYSTEM_PLAN.md` |
-| Tool System | registry 和 business tool 偏大 | definition / registry / capability / executor / result 分离 | `plans/modules/TOOL_SYSTEM_PLAN.md` |
+| Skill System | 已有 skill routing / reference loader 经验，当前重构计划缺少独立位置 | 兼容 Agent Skills / Deep Agents 文件约定；LifeOps 保留 routing / prompt contribution / progressive references / capability hints 边界 | `plans/modules/SKILL_SYSTEM_PLAN.md` |
+| Tool System | registry 和 business tool 偏大 | LifeOps 原生 definition / registry / capability / Guardrail / gateway / result；LangChain 只做可选 adapter | `plans/modules/TOOL_SYSTEM_PLAN.md` |
 | Policy / Safety | write policy、interaction policy 分散 | 统一 PolicyDecision 和 confirmation model | `plans/modules/INTENT_POLICY_PLAN.md` |
 | Context | 功能强但复杂 | 初版精简 request context，后续版本迁移压缩/ref/index | `plans/modules/CONTEXT_PLAN.md` |
 | Memory | JSON store + 简单检索 | SQLite semantic memory + profile markdown + request-local injection | `plans/modules/MEMORY_PLAN.md` |
-| Task State | JSON TaskStore | SQLite Task repository + user-approved steps | `plans/modules/TASKS_DOMAIN_PLAN.md` |
-| Wellbeing | domain JSON | SQLite Wellbeing repository + context source | `plans/modules/WELLBEING_DOMAIN_PLAN.md` |
-| Planner | V0 transient plan | 保留 transient PlanRun，明确不授权、不执行、不自动写 Task | `plans/modules/PLANNER_PLAN.md` |
+| Research / Personal Knowledge | V0 Hugging Face News Skill + 临时 source/helper loop | SQLite knowledge facts + provenance + Hugging Face 外部只读 briefing + future Context/Memory ports | `plans/modules/RESEARCH_KNOWLEDGE_DOMAIN_PLAN.md` |
+| Travel | 无完整 V0 domain | SQLite Trip / Itinerary facts + fixture-backed external ports + planning-only confirmation boundary | `plans/modules/TRAVEL_DOMAIN_PLAN.md` |
+| Planner | V0 transient plan | 保留跨 Domain PlanRun / PlanStep；step 绑定 objective / capability / candidate tools，不授权、不执行、不自动写 Domain facts | `plans/modules/PLANNER_PLAN.md` |
 | Executor | 包装旧 agent loop | 单步执行 + 结构化反馈 + tool evidence | `plans/modules/EXECUTOR_PLAN.md` |
 | Observability Logging | V0 已有三通道文件日志经验，当前重构阶段误放进 SQLite | event JSONL / LLM JSONL / application.log 三通道文件日志 | `plans/modules/OBSERVABILITY_LOGGING_PLAN.md` |
 | Recovery | run/action JSON 摘要 | 基于 event logs 和必要业务状态生成解释型 recovery context，不自动 replay | `plans/modules/RECOVERY_PLAN.md` |
@@ -646,8 +665,8 @@ plans/
 - LangChain adapter。
 - Planner。
 - Executor。
-- Task State。
-- Task vs Plan。
+- Plan / Execution State。
+- PlanRun vs Domain Facts。
 - Context Engine。
 - Memory。
 - Recovery。
@@ -666,8 +685,8 @@ plans/
 初版内部 domain 选择：
 
 ```text
-Tasks
-Wellbeing
+Research / Personal Knowledge
+Travel
 ```
 
 外部 integration：
@@ -687,21 +706,22 @@ Calendar MCP 只读
 - 是否能进入 eval。
 - 是否有真实生活价值。
 
-Tasks 适合：
+Research / Personal Knowledge 适合：
 
-- 长期状态。
-- PlanRun -> TaskSteps 边界。
-- Write safety。
-- Recovery。
-- DAG 节点。
-- Eval。
+- 长期积累 Topic / Source / Note / Brief 和 provenance。
+- Hugging Face Papers / Blog 真实外部只读来源。
+- 大 Context、progressive reference、检索和 summarization 测试。
+- Domain fact、临时 Context、LLM synthesis 与长期 Memory 的边界。
+- fetch -> parse -> dedupe -> rank -> brief -> confirm save 的 Plan-and-Execute / DAG 场景。
+- source failure、内容变化和引用完整性的 Recovery / Eval 场景。
 
-Wellbeing 适合：
+Travel 适合：
 
-- 用户状态上下文。
-- 写入授权。
-- Planning constraint。
-- Memory / Context 边界解释。
+- 多约束、候选比较和 itinerary 的复杂 planning。
+- Calendar / weather / transport / lodging / place 的 fixture-backed external Port。
+- 外部 READ、业务 WRITE、confirmation、过期数据和副作用真实性。
+- 并行查询、部分失败、DAG、Recovery 和长期历史 Trip Context。
+- 阶段 8 Calendar MCP 通过 adapter 替换 fixture，不修改 Travel Domain。
 
 Calendar MCP 适合：
 
@@ -861,20 +881,23 @@ docs/RUNTIME_CONCEPTS.md
 
 目标：
 
-- 建立 Skill System、工具系统和两个内部 domain。
+- 建立 Skill System、工具系统和 Research / Personal Knowledge、Travel 两个内部 domain。
 - Skill System 先明确 skill discovery、routing、prompt assembly、progressive reference loading、skill-scoped capabilities 和多轮 skill state 的边界。
-- Tool System 再处理 tool definition、tool execution、tool result 和 domain tool 的运行时边界。
+- Skill routing 支持一次选择多个 Skill；selected capabilities 合并后再与 registry、Policy、scope 和 confirmation 求交集。
+- Tool System 再处理 tool definition、capability intersection、pre/post Guardrails、Tool Gateway、execution evidence 和 domain tool 的运行时边界。
+- Skill 文件兼容 Agent Skills / Deep Agents 的 `SKILL.md` 与 progressive disclosure 约定，LifeOps 保留 routing/capability 安全边界；Tool 使用 LifeOps 原生安全核心和可选 LangChain adapter。
+- 两个 Domain 必须为阶段 6-9 的 Context、Memory、Recovery、Planner、Executor、Calendar MCP、Inspector、Eval 和 DAG 提供稳定 Port / read model / evidence 接口，但不提前实现这些模块。
 
 交付：
 
 - `plans/modules/SKILL_SYSTEM_PLAN.md`。
 - `plans/modules/TOOL_SYSTEM_PLAN.md`。
-- `plans/modules/TASKS_DOMAIN_PLAN.md`。
-- `plans/modules/WELLBEING_DOMAIN_PLAN.md`。
+- `plans/modules/RESEARCH_KNOWLEDGE_DOMAIN_PLAN.md`。
+- `plans/modules/TRAVEL_DOMAIN_PLAN.md`。
 - skill loader / router / prompt assembly / reference loader。
-- tool registry / capability / executor。
-- Tasks repository / service / tools。
-- Wellbeing repository / service / tools。
+- tool registry / capability / Guardrails / gateway / LangChain adapter。
+- Research repository / service / tools / Hugging Face briefing。
+- Travel repository / service / tools / fixture-backed external Ports。
 
 ### 阶段 6：Context / Memory / Recovery
 
@@ -895,16 +918,18 @@ docs/RUNTIME_CONCEPTS.md
 
 目标：
 
-- 实现 Plan and Execute 当前 runtime 边界。
+- 实现跨 Domain Plan and Execute 当前 runtime 边界：简单单工具请求走 Direct Executor，复杂、多步骤或有依赖请求进入 Planner。
 
 交付：
 
 - `plans/modules/PLANNER_PLAN.md`。
 - `plans/modules/EXECUTOR_PLAN.md`。
-- transient PlanRun。
+- 可持久化但不作为业务事实的 PlanRun / PlanStep。
 - 单步 Executor。
 - ExecutionFeedback。
 - final answer 校验。
+- capability-bound step、跨 Domain tool 调用、逐 WRITE step confirmation 和 bounded replan。
+- LangGraph checkpoint / persistence 作为暂停、恢复、fault tolerance 的候选实现；不承担外部副作用回滚。
 
 ### 阶段 8：Calendar MCP
 
@@ -959,9 +984,10 @@ docs/RUNTIME_CONCEPTS.md
 - SQLite 作为 Runtime facts / evidence store 可用。
 - Intent / Policy 能阻止 plan 关键词误路由 和未授权写入。
 - LangGraph 编排真实接入。
-- Tasks + Wellbeing 可 read/write。
+- Research / Personal Knowledge + Travel 可 read/write。
 - Calendar fixture 读取可用于 planning context。
-- Task / Plan 边界有测试。
+- Domain fact / PlanRun / Context / Memory 边界有测试。
+- 一个 PlanRun 可交叉调用 Research 与 Travel tools，并在部分成功后从失败步骤恢复或 replan。
 - Executor 返回 结构化反馈。
 - Recovery 可解释上次停点，但不 replay。
 - Inspector 能解释一次 run。

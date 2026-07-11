@@ -38,8 +38,8 @@
 - LangChain Adapter
 - Planner
 - Executor
-- Task State
-- Task vs Plan
+- Plan / Execution State
+- PlanRun vs Domain Facts
 - Context Engine
 - Memory
 - Recovery
@@ -51,12 +51,107 @@
 - Observability
 - SQLite Local Persistence
 
+## 阶段 5 设计术语表
+
+本节记录阶段 5 已确认、正在用于模块计划的术语。它们是设计边界，不表示对应代码已经实现。
+
+- `SkillDefinition`：Skill 的轻量声明，包含 ID、说明、routing metadata 和声明式资源索引；不是可执行工具。
+- `PromptContribution`：selected Skill 提供给未来 Context/prompt assembly 的一段有来源、可预算的说明；不是完整 prompt，也不是业务事实。
+- `SkillCapabilityHints`：Skill 建议当前请求可能需要哪些能力；最终可用工具仍需经过 registry、Policy、scope 和 confirmation 求交集。
+- `ToolDefinition`：工具名称、schema、effect、risk、required scopes 等静态契约。
+- `ToolGateway`：所有工具通道统一经过的单次执行入口，负责 pre/post Guardrails、handler 调用和 evidence 输出。
+- `GuardrailDecision`：工具执行前或执行后的结构化安全判断；不能扩大 `PolicyDecision` 已授予的权限。
+- `ExecutionEvidence`：证明工具真实执行结果的结构化证据。assistant 文本、Planner 输出或 LLM summary 不是 evidence。
+- `External Port`：Domain 声明的外部能力接口，例如天气或交通查询；fixture、MCP 和 HTTP adapter 可以分别实现它。
+- `ExternalObservation`：某个 provider 在某时刻返回的临时观察，带 provenance 和有效期；它不是长期业务事实。
+- `DomainContextProvider`：未来 Context Engine 获取 Domain 候选信息的窄接口；Domain 不负责决定最终 prompt。
+- `PlanningReadModel`：为 Planner 准备的只读、稳定、领域化快照；Planner 不读取 repository internals。
+- `MemoryCandidateProvider`：向未来 Memory 模块提供候选的只读接口；候选不会自动成为长期 Memory。
+- `ResearchBriefDraft`：基于临时 source observation 生成的简报草案；只有用户确认保存后才成为 `ResearchBrief` 业务事实。
+- `ItineraryDraft`：基于 Travel constraints 和外部 observation 生成的行程草案；只有用户确认并成功 WRITE 后才成为持久化 Itinerary。
+- `Fixture Adapter`：使用固定测试数据实现 External Port 的 adapter，用于离线开发和 deterministic Eval；不是简单返回任意假值的无契约 mock。
+- `PlanRun`：Planner 针对一个用户目标生成的跨 Domain 通用执行策略；可以持久化以支持恢复，但不是业务事实。
+- `PlanStep`：以 objective、dependencies、required capabilities、candidate tools、effect 和 status 描述的通用执行步骤；不继承具体 Domain 类型。
+- `Domain`：从业务角度划分 models、service、repository 和 tools 的逻辑边界；不是独立 Agent，也不拥有自己的通用 Planner / Executor。
+
+阶段 5 的核心分离：
+
+```text
+Skill instructions       != Tool execution
+Capability hints         != Permission
+External observation     != Domain fact
+Domain fact              != Context selection
+Context selection        != Memory
+Plan / draft             != confirmed WRITE
+Framework adapter        != LifeOps safety boundary
+Persisted PlanRun         != Domain fact
+Checkpoint restore        != side-effect rollback
+```
+
 ## 当前 runtime 项目参考
 
 - `plans/RUNTIME_REFACTOR_PLAN.md`
 - `docs/ARCHITECTURE.md`
 - `docs/MIGRATION_INDEX.md`
 - `docs/AGENT_LEARNING_LINKS.md`
+
+## Skill System / Skill Routing
+
+### 解决什么问题
+
+Skill System 让 runtime 在不把所有领域说明永久塞进 prompt 的前提下，为当前请求选择并按需加载相关工作说明。Skill 是“如何处理某类任务”的上下文，不是工具、权限或业务事实。
+
+### 核心概念
+
+- Skill discovery：启动期只读取所有 `SKILL.md` 的 `name` 和 `description`。
+- Skill routing：LLM 基于用户请求和全量 metadata 选择零到多个 Skill，LifeOps 再校验结构、重复 ID 和未知 ID。
+- progressive loading：选中后才加载 Skill body；reference 只有被 manifest ID 明确请求时才加载。
+- `PromptContribution`：已加载 Skill 对未来 prompt/context assembly 的输入，不是完整 system prompt。
+- capability hints：Skill 对可能需要能力的声明式提示，不代表工具存在或已获授权。
+
+### 当前 runtime 实现
+
+当前实现位于 `app/skills/`，并通过 LangGraph 的 `prepare_skills` node 接入 Policy allow 路径：
+
+```text
+Policy allow
+-> LLM selects from all Skill metadata
+-> LifeOps validates selected IDs
+-> load selected SKILL.md body
+-> build PromptContribution list
+-> stub execution
+```
+
+`SkillService` 长期持有 `SkillRegistry` 和 `SkillSelectionClient`，像 Intent/Policy service 一样在 graph 构建时注入；每个 run 不同的 `TraceSink` 才通过 `OrchestrationContext` 传入。selection、loaded IDs 和 contributions 是当前 run 的 `GraphState` 数据。当前默认 runtime 未配置真实 `SkillService`，因此安全地产生空选择。
+
+### 输入 / 输出 / 不负责什么
+
+输入是 `RuntimeRequest`、全量 `SkillDefinition` metadata 和注入的 selection client。输出是 `SkillSelection`、loaded Skill IDs 与 `PromptContribution`。
+
+Skill System 不执行工具、不授权写入、不决定 Context budget、不保存 Memory，也不把 LLM reason 或正文写入 event payload。
+
+### 常见失败模式
+
+- LLM 返回未知、重复或格式错误的 Skill ID。
+- selected `SKILL.md` 缺失、为空或超过大小限制。
+- reference ID 未声明、路径越界或正文超限。
+- selection/load 失败后仍继续 Executor，造成缺少必要约束的执行。
+
+当前实现把最后一种情况映射为 `runtime.skill_failed`，在 `stub_execute` 前终止 graph。
+
+### 如何测试和观察
+
+聚焦测试覆盖 metadata discovery、多 Skill 选择顺序、空选择、selection 结构校验、body/reference lazy loading、manifest 白名单、trace 脱敏、allow 接入、失败阻断以及 confirmation/deny 分支隔离。
+
+### 面试解释
+
+可以这样讲：LifeOps 兼容 Agent Skills 的文件与 progressive disclosure 思路，但 routing、结构校验和安全边界由自己实现。LangGraph 只编排 `prepare_skills` 的位置；Skill 提供 instructions，Tool System 才负责 capability、Policy、Guardrail 和真实执行。
+
+### 相关项目文件
+
+- `app/skills/`
+- `app/orchestration/`
+- `plans/modules/SKILL_SYSTEM_PLAN.md`
 
 ## Runtime Core
 

@@ -150,7 +150,7 @@ SQLite 初版不存：
 
 SQLite 可继续存：
 
-- Tasks / TaskSteps；
+- Research / Travel 业务事实与未来 PlanRun / PlanStep 执行状态；
 - Wellbeing entries；
 - semantic memory；
 - tool call 结果，如果后续需要关系查询和事实追溯；

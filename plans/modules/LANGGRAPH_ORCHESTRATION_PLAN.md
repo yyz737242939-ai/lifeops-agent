@@ -131,7 +131,7 @@ Orchestration 初版输出：
 - 不写业务 repository。
 - 不读写 Memory。
 - 不组装 Context。
-- 不创建或持久化 Task / TaskStep。
+- 不创建或持久化 Domain 业务事实或未来 PlanRun / PlanStep；阶段 4 只保留扩展点。
 - 不把 graph state、checkpoint、assistant 文本或 planner 输出升级为事实。
 - 不吞掉 `IntentService` / `PolicyService` 的职责。
 
@@ -173,7 +173,7 @@ Orchestration 初版输出：
 
 - 长期 conversation memory。
 - semantic memory。
-- Task / TaskStep 业务事实。
+- Research / Travel 等 Domain 业务事实，以及未来 PlanRun / PlanStep 执行状态。
 - tool result 事实。
 - 原始 LLM request / response。
 - 未压缩的用户隐私数据副本。
@@ -356,7 +356,7 @@ RuntimeOrchestrator.handle(request, append_trace=None) -> RuntimeResult
   - 记录官方学习链接和本项目实现解释。
 - `docs/ARCHITECTURE.md`
   - 如阶段 4 的实现改变架构边界，应更新当前架构快照。
-  - 当前目录中尚未看到该 ADR 文件，施工前应先确认是否需要新增。
+  - 本仓库不再新增 decisions / ADR 文档；相关边界维护在当前架构与模块计划中。
 
 本阶段不更新 `CHANGELOG.md`，除非用户明确要求。
 

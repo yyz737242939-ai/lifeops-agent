@@ -12,6 +12,8 @@ from app.orchestration.state import GraphState, append_graph_path
 from app.policy.models import PolicyDecision
 from app.policy.service import PolicyService
 from app.runtime.models import RuntimeResult, RuntimeStatus
+from app.skills.models import SkillSelection
+from app.skills.service import SkillService
 
 
 def classify_intent(
@@ -100,6 +102,46 @@ def decide_policy(
     if trace is not None:
         trace.append("policy.decided", _policy_summary(policy))
         trace.append("orchestration.route.selected", {"route": route.value})
+    return updated
+
+
+def prepare_skills(
+    state: GraphState,
+    *,
+    skill_service: SkillService | None,
+    trace: TraceSink | None = None,
+) -> GraphState:
+    """Select and load request-local Skills without executing tools."""
+
+    updated = _append_node(state, "prepare_skills")
+    if skill_service is None:
+        updated["skill_selection"] = SkillSelection(
+            reason="Skill selection is not configured for this runtime."
+        )
+        updated["loaded_skill_ids"] = []
+        updated["prompt_contributions"] = []
+        return updated
+
+    request = updated["request"]
+    try:
+        preparation = skill_service.prepare(request, trace=trace)
+        updated["skill_selection"] = preparation.selection
+        updated["loaded_skill_ids"] = list(preparation.loaded_skill_ids)
+        updated["prompt_contributions"] = list(preparation.prompt_contributions)
+    except Exception as exc:
+        updated["error_code"] = "runtime.skill_failed"
+        updated["error_stage"] = "skill"
+        updated["trace_summary"] = [_safe_error_summary(exc)]
+        updated["result"] = RuntimeResult(
+            run_id=request.run_id,
+            session_id=request.session_id,
+            status=RuntimeStatus.ERROR,
+            message="Skill preparation failed.",
+            intent=_intent_summary(updated["intent"]),
+            policy=_policy_summary(updated["policy"]),
+            error_code=updated["error_code"],
+            trace_summary=updated["trace_summary"],
+        )
     return updated
 
 

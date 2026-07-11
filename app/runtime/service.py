@@ -21,6 +21,7 @@ from app.policy.service import PolicyService
 from app.runtime.models import RuntimeRequest, RuntimeResult
 from app.runtime.run_store import finish_run_record, insert_run_record
 from app.storage.unit_of_work import SqliteUnitOfWork
+from app.skills.service import SkillService
 
 
 class RuntimeService:
@@ -33,12 +34,14 @@ class RuntimeService:
         conn: sqlite3.Connection | None = None,
         event_log: EventLogWriter | None = None,
         log_root: str | Path | None = None,
+        skill_service: SkillService | None = None,
     ) -> None:
         self._intent_service = intent_service or IntentService()
         self._policy_service = policy_service or PolicyService()
         self._orchestrator = RuntimeOrchestrator(
             intent_service=self._intent_service,
             policy_service=self._policy_service,
+            skill_service=skill_service,
         )
         self._conn = conn
         self._event_log = event_log

@@ -53,7 +53,13 @@ class OrchestrationGraphTest(unittest.TestCase):
 
         self.assertEqual(
             state["graph_path"],
-            ["classify_intent", "decide_policy", "stub_execute", "finalize"],
+            [
+                "classify_intent",
+                "decide_policy",
+                "prepare_skills",
+                "stub_execute",
+                "finalize",
+            ],
         )
         self.assertEqual(state["result"].status, RuntimeStatus.OK)
         self.assertEqual(
