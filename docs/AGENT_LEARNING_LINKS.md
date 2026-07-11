@@ -52,14 +52,6 @@
 - [OpenAI Agents SDK - Tracing](https://openai.github.io/openai-agents-python/tracing/)  
   学习重点：trace 和 span 如何解释 agent workflow。对照本项目的 `events.jsonl`：记录 run 经过了哪些 runtime 决策，但 event log 本身不新增授权事实。
 
-- [OpenTelemetry - Traces](https://opentelemetry.io/docs/concepts/signals/traces/)  
-  学习重点：trace、span、event 和上下文传播的通用观测模型。对照本项目后续如何把 `runtime.run.started`、`intent.classification.completed`、`policy.evaluation.completed` 等事件讲清楚。
-
-### SQLite / Local Persistence
-
-- [Python sqlite3 documentation](https://docs.python.org/3/library/sqlite3.html)  
-  学习重点：Python 标准库 SQLite API、transaction、row factory、connection lifecycle。对照当前项目为什么 SQLite 主要放业务事实和适合关系查询的数据，而 event / LLM / normal 程序日志走文件。
-
 ## 阶段 4：LangGraph Orchestration
 
 ### 必读：LangGraph orchestration / StateGraph / nodes / edges / graph state
@@ -75,6 +67,9 @@
 3. [StateGraph API reference](https://reference.langchain.com/python/langgraph/graphs/#langgraph.graph.state.StateGraph)  
    学习重点：施工时查具体 API。重点看 `StateGraph`、`add_node`、`add_edge`、`add_conditional_edges`、`compile`、`invoke`。
 
+4. [LangGraph Graph API overview](https://docs.langchain.com/oss/python/langgraph/graph-api)
+   学习重点：理解 `state_schema` 与 `context_schema` 的区别，以及节点如何通过 `Runtime` 获得 request-local 依赖。对照本项目的 `GraphState` 与 `OrchestrationContext(trace=...)`。
+
 本阶段只需要掌握：
 
 - `StateGraph`
@@ -83,6 +78,7 @@
 - conditional edge / route
 - graph state
 - compiled graph invocation
+- runtime context / `context_schema`
 
 项目对照：
 

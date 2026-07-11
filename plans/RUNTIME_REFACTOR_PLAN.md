@@ -19,7 +19,8 @@
 - 阶段 2：Storage / SQLite 基础设施已完成，详见 `plans/modules/STORAGE_SQLITE_PLAN.md`。
 - 阶段 3：Runtime Core / Intent / Policy 初版已完成，详见 `plans/modules/RUNTIME_CORE_PLAN.md` 和 `plans/modules/INTENT_POLICY_PLAN.md`。
 - 阶段 3.5：Observability 文件日志校正已完成，详见 `plans/modules/OBSERVABILITY_LOGGING_PLAN.md`。
-- 下一阶段：阶段 4 LangGraph Orchestration 骨架，应先创建 `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md`。
+- 阶段 4：LangGraph Orchestration 骨架已完成，详见 `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md`。
+- 下一阶段：阶段 5 Skill System / Tool System 与 Domains；施工前应先创建或确认对应模块计划。
 
 核心执行链路：
 
@@ -840,6 +841,8 @@ docs/RUNTIME_CONCEPTS.md
 - 聚焦测试验证日志文件格式、顺序、脱敏和 debug 可用性。
 
 ### 阶段 4：LangGraph Orchestration 骨架
+
+状态：已完成（2026-07-10）。
 
 目标：
 

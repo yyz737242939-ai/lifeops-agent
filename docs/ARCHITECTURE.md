@@ -52,8 +52,8 @@ legacy_v0/app/
 ```text
 main
 -> runtime
--> intent / policy
 -> orchestration
+-> intent / policy
 -> context / planning / execution / inspector
 -> tools / domains / memory / recovery / integrations
 -> storage / observability / common
@@ -86,14 +86,49 @@ Runtime Core 是当前单轮 request lifecycle 的入口层，当前实现位于
 
 ```text
 RuntimeRequest
--> IntentService
--> PolicyService
+-> RuntimeOrchestrator
+-> StateGraph
+-> classify_intent
+-> decide_policy
+-> policy conditional route
+-> stub_execute / requires_confirmation / deny
+-> finalize
 -> RuntimeResult
 ```
 
 传入 SQLite connection 时，Runtime Core 可以写入 `run_records`。传入 event log 或配置 `log_root` 时，Runtime Core 会把 runtime event 写入 `events.jsonl`。未传入 connection 时，它仍可通过文件 event log 记录运行路径，也可以保持 request-local 纯内存运行，便于聚焦测试。
 
-当前 orchestration / tool execution 仍是 stub。`runtime.orchestration.stubbed` 表示本阶段没有执行真实工具或业务写入。
+当前 tool execution 仍是 stub。`runtime.orchestration.stubbed` 表示阶段 4 graph 已完成编排，但没有执行真实工具或业务写入。
+
+## LangGraph Orchestration
+
+LangGraph Orchestration 当前实现位于：
+
+- `app/orchestration/state.py`
+- `app/orchestration/routes.py`
+- `app/orchestration/nodes/`
+- `app/orchestration/graph.py`
+
+`RuntimeService` 仍是唯一外部入口，负责 SQLite transaction、run record、request event writer 和最终 `RuntimeResult`。`RuntimeOrchestrator` 只负责把现有 Intent / Policy / stub result lifecycle 映射到 compiled `StateGraph`。
+
+当前 graph 路径是：
+
+```text
+START
+-> classify_intent
+-> decide_policy
+-> allow -----------------> stub_execute -----------\
+-> requires_confirmation -> requires_confirmation --+-> finalize -> END
+-> deny ------------------> deny -------------------/
+```
+
+Intent 或 Policy 失败时，graph 在对应节点后直接进入 `END`，不执行后续 Policy 或结果节点。
+
+`GraphState` 只保存当前 request 的编排数据：request、intent、policy、route、result、error、graph path 和紧凑 trace summary。它不保存长期 Memory、Task 事实、工具执行事实或授权替代来源。
+
+`OrchestrationContext` 是 request-local 运行依赖，目前只携带应用拥有的 `TraceSink`。它通过 LangGraph `context_schema` / `Runtime` 提供给节点，不进入 `GraphState` 或 checkpoint。Intent / Policy node 在真实 service 返回后分别写 `intent.classified` / `policy.decided`，失败时写对应 failed event；Policy 分支确定后写 `orchestration.route.selected`。机械化的 graph/node started/completed 不进入稳定事件契约。
+
+LangGraph 不负责 Policy 决策、业务事实、工具安全、真实执行或持久化；这些边界仍由 LifeOps 自研 runtime 拥有。
 
 ## Intent / Policy
 
@@ -163,13 +198,15 @@ Runtime 的事实来源是：
 
 ## Observability
 
-当前 observability 分成两类日志：
+当前 observability 分成三类日志：
 
 - `events.jsonl`：结构化 runtime event，只保存少量必要字段和紧凑 payload，用于解释 runtime 路径和失败层级。
 - `llm.jsonl`：原始 LLM / agent request-response 记录，用于人工排查最原始对话，不作为业务事实或写入授权来源。
 - `application.log`：普通程序日志，用于测试和 debug。
 
 三类日志默认写入 `logs/sessions/session_<timestamp>_<session_id>/`。SQLite 不再默认承载 runtime event log 或 LLM log。
+
+`TraceSink` 是应用拥有的 request-local event 接口。Graph 内 node 通过 `OrchestrationContext` 使用同一个 sink；Graph 外未来的 Executor、Tool Safety、repository 或 integration 关键阶段也可以直接写同一个 sink，不需要为了可观察性变成 LangGraph node。Event 在真实逻辑边界实时追加，不根据最终 state 事后补写。
 
 ## Runtime 不变量
 
@@ -180,6 +217,7 @@ Runtime 的事实来源是：
 - Skill、Tool、Capability、Context、Runtime State、业务数据和长期 Memory 必须保持分离。
 - Conversation Summary 不是 Long-term Memory。Context compaction 结果不能自动升级为长期记忆。
 - LangGraph checkpoint state、Planner 输出和 Recovery Context 不是业务事实来源，也不是写入授权来源。
+- `TraceSink` 是运行依赖，不进入 `GraphState`；event payload 不写完整 GraphState 或原始用户输入。
 - 修改 Runtime 行为、Context 处理、Memory、写入安全或工具执行时，需要聚焦的回归测试。
 
 ## Task vs Plan

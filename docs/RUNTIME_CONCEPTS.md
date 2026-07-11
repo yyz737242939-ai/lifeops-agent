@@ -114,7 +114,7 @@ Runtime Core 不负责自然语言深度理解，不授权写入，不执行业�
 
 - `tests/test_runtime_service.py`
 
-可以通过 `events.jsonl` 观察一次 run 的开始、intent、policy、stub orchestration 和完成事件。需要关系查询时，`run_records` 仍可记录 run 状态。
+可以通过 `events.jsonl` 观察一次 run 的开始、Intent 分类、Policy 决策、route 和带最终 graph path 的完成或失败事件。需要关系查询时，`run_records` 仍可记录 run 状态。
 
 ### 面试解释
 
@@ -283,6 +283,128 @@ Write Safety 不等于自然语言理解，不等于完整权限平台，也不�
 - 本项目：`docs/ARCHITECTURE.md`
 - 本项目：`app/policy/`
 
+## LangGraph Orchestrator
+
+### 解决什么问题
+
+LangGraph Orchestrator 把手写在 `RuntimeService` 中的 request lifecycle 变成显式 node、edge 和 conditional route，使执行路径可以测试、观察和逐步扩展，同时不让框架接管 Policy、事实来源或真实工具执行。
+
+### 核心概念
+
+- `StateGraph`：声明状态类型、节点和边，再编译成可执行 graph。
+- node：一个 runtime 阶段，例如 Intent、Policy 或 stub result 构造。
+- edge：固定的阶段顺序。
+- conditional edge：根据当前 state 选择下一条路径。
+- `GraphState`：本轮不断演进的 request-local 编排数据。
+- runtime context：本轮节点共享、但不应进入 GraphState 的运行依赖。
+- compiled graph：完成 wiring 后由 `invoke(...)` 启动的一次 graph execution。
+
+### 当前 runtime 实现
+
+当前实现位于：
+
+- `app/orchestration/state.py`
+- `app/orchestration/routes.py`
+- `app/orchestration/nodes/`
+- `app/orchestration/graph.py`
+
+当前 graph 执行：
+
+```text
+START
+-> classify_intent
+-> decide_policy
+-> allow / requires_confirmation / deny
+-> 对应结果节点
+-> finalize
+-> END
+```
+
+`RuntimeOrchestrator.invoke(...)` 使用 compiled graph 的 `invoke(...)`。`GraphState` 在节点之间传递 intent、policy、route、result、error 和 graph path；节点返回更新，LangGraph 把逻辑上的最新状态提供给后续节点。
+
+`OrchestrationContext` 是本项目定义的 dataclass，LangGraph 官方的 `context_schema` / `Runtime` 机制负责把它提供给节点。当前 context 只携带 `TraceSink`。`_with_runtime_trace(...)` 给普通 node 函数包一层，从 `runtime.context` 取出本轮 sink 并传入节点；它本身不写 event。
+
+### 输入 / 输出 / 不负责什么
+
+输入是 `RuntimeRequest`、Intent / Policy service 和可选的 request-local `TraceSink`。
+
+输出是最终 `GraphState` 或其中的 `RuntimeResult`，以及实时追加的 Intent / Policy / route 语义事件和最终 graph path。
+
+Orchestrator 不负责产生授权、不调用真实 tool、不写业务 repository、不保存长期 Memory，也不把 graph checkpoint 当作事实来源。
+
+### 常见失败模式
+
+- 把 `GraphState` 做成包含长期 Memory、业务事实和 writer 的大状态容器。
+- 把 Policy route 误解为新的授权判断；route 只能翻译已有 `PolicyDecision`。
+- `allow` 节点声称业务写入成功，而实际仍是 stub execution。
+- Intent 失败后仍进入 Policy，或 Policy 失败后仍进入执行节点。
+- 为了打 event，把所有非 Graph 关键阶段强行改造成 LangGraph node。
+
+### 如何测试和观察
+
+当前测试包括：
+
+- `tests/test_orchestration_state.py`
+- `tests/test_orchestration_nodes.py`
+- `tests/test_orchestration_graph.py`
+- `tests/test_runtime_service.py`
+
+测试断言 allow、requires confirmation、deny 和失败路径的 graph path；同时证明 `intent.classified` / `policy.decided` 紧跟真实 Service 调用、失败事件不继续后续业务阶段，并验证 event payload 不包含原始用户输入或完整 GraphState。
+
+### 面试解释
+
+可以这样讲：项目先自建 Runtime、Intent、Policy、Storage 和 Observability 边界，再用 LangGraph 把这些阶段映射成 StateGraph，而不是用框架重写整个 runtime。GraphState 只表达本轮控制流，Policy 仍是授权事实源，应用自己的 TraceSink 可以同时覆盖 Graph 内外关键阶段。
+
+### 相关项目文件
+
+- 本项目：`app/orchestration/`
+- 本项目：`app/runtime/service.py`
+- 本项目：`plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md`
+
+## LangGraph vs LangChain
+
+### 解决什么问题
+
+这一边界用于避免把两个框架的职责混在一起，或者为了“用了框架”而提前引入 chain、agent 和 tool abstraction。
+
+### 核心概念
+
+- LangGraph 偏向 orchestration runtime：state、node、edge、route、persistence、interrupt 和运行控制。
+- LangChain 偏向模型、prompt、tool calling、structured output 和更高层 agent integration。
+- LifeOps 自研 runtime 继续拥有 Policy、Context、Memory、Tool Safety、Executor、Trace 和业务事实来源。
+
+### 当前 runtime 实现
+
+阶段 4 只正式使用 LangGraph 的 `StateGraph`、node、edge、conditional edge、runtime context、compile 和 invoke。
+
+当前没有引入 LangChain chain、agent 或 tool abstraction。LangChain 留给后续 Planner、Executor 和 Tool System 阶段按需要作为 adapter 使用。
+
+### 输入 / 输出 / 不负责什么
+
+LangGraph 当前输入 LifeOps 自己定义的 request、state 和 service，输出仍是 LifeOps 的 `RuntimeResult`。LangGraph 不重新定义业务模型。
+
+LangChain 后续即使进入模型或工具层，也不能绕过 LifeOps Policy、授权 scope、Tool Safety 和成功执行证据。
+
+### 常见失败模式
+
+- 把 LangGraph 当成完整业务 runtime，让框架 state 变成事实数据库。
+- 看到 LangGraph 依赖 `langchain-core`，就误以为项目已经采用 LangChain agent abstraction。
+- 用 Planner、模型文本或 framework checkpoint 扩大写入权限。
+
+### 如何测试和观察
+
+当前依赖只显式声明 `langgraph`；测试从 LifeOps 的 `RuntimeService` 入口验证 graph 路径和原有 Policy 语义。后续引入 LangChain adapter 时，应继续用聚焦测试证明它没有改变授权和事实来源边界。
+
+### 面试解释
+
+可以这样讲：LangGraph 在本项目中是控制流映射层，LangChain 未来可能是模型和工具适配层。真正重要的不是框架名称，而是能解释框架 primitive 与自研 runtime 边界如何对应，以及哪些安全和事实职责不能外包给框架。
+
+### 相关项目文件
+
+- 本项目：`pyproject.toml`
+- 本项目：`app/orchestration/`
+- 本项目：`docs/ARCHITECTURE.md`
+
 ## Observability
 
 ### 解决什么问题
@@ -303,8 +425,12 @@ Observability 让 runtime 行为可以被解释和复盘。它回答“这次 ru
 - `app/observability/events.py`
 - `app/observability/file_logs.py`
 - `app/observability/logger.py`
+- `app/orchestration/graph.py`
+- `app/orchestration/nodes/`
 
 `LogTraceEvent` 写入 `events.jsonl`。`LogLlmInteraction` 写入 `llm.jsonl`。Python 标准 `logging` 写入 `application.log`。三类日志默认在同一个 session log directory 下，但不混成一个文件。
+
+`TraceSink` 是应用拥有的 request-local event 接口。RuntimeService 写 run 边界和最终 graph path；Intent / Policy node 写业务决策或失败事件；route 确定后写 `orchestration.route.selected`。Graph 外关键阶段未来可直接使用同一个 sink，不需要成为 LangGraph node。稳定事件契约不记录每个轻量 node 的 started/completed。
 
 ### 输入 / 输出 / 不负责什么
 
@@ -320,14 +446,18 @@ Observability 不负责授权写入，不负责改变业务状态，也不把 as
 - session log directory 不可写。
 - application logger 重复添加 handler，导致重复日志。
 - 原始 LLM log 过大或包含敏感字段，后续接入真实外部凭证前需要脱敏策略。
+- 根据最终 state 事后补写“看似实时”的事件，导致时间语义不真实。
+- 把完整 GraphState、原始用户输入或未来 tool args 写进 event payload。
 
 ### 如何测试和观察
 
 当前测试包括：
 
 - `tests/test_observability_file_logs.py`
+- `tests/test_orchestration_graph.py`
+- `tests/test_runtime_service.py`
 
-它验证 metadata、`events.jsonl`、`llm.jsonl`、`application.log` 和 logging 幂等性。
+它们验证 metadata、`events.jsonl`、`llm.jsonl`、`application.log`、logging 幂等性、语义事件顺序、route、最终 graph path 和 payload 脱敏。
 
 ### 面试解释
 

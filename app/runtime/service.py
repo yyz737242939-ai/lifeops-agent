@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import sqlite3
 import logging
+import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from app.intent.models import IntentDecision
 from app.intent.service import IntentService
 from app.observability.events import LogTraceEvent
 from app.observability.file_logs import EventLogWriter, SessionLogWriter
@@ -17,9 +16,9 @@ from app.observability.logger import (
     configure_application_logging,
     ensure_application_logger,
 )
-from app.policy.models import PolicyAction, PolicyDecision
+from app.orchestration.graph import RuntimeOrchestrator
 from app.policy.service import PolicyService
-from app.runtime.models import RuntimeRequest, RuntimeResult, RuntimeStatus
+from app.runtime.models import RuntimeRequest, RuntimeResult
 from app.runtime.run_store import finish_run_record, insert_run_record
 from app.storage.unit_of_work import SqliteUnitOfWork
 
@@ -37,6 +36,10 @@ class RuntimeService:
     ) -> None:
         self._intent_service = intent_service or IntentService()
         self._policy_service = policy_service or PolicyService()
+        self._orchestrator = RuntimeOrchestrator(
+            intent_service=self._intent_service,
+            policy_service=self._policy_service,
+        )
         self._conn = conn
         self._event_log = event_log
         self._log_root = Path(log_root) if log_root is not None else None
@@ -75,62 +78,49 @@ class RuntimeService:
         trace: OptionalLogAppender,
     ) -> RuntimeResult:
         try:
-            trace.append("runtime.intent.started")
-            intent = self._intent_service.classify(request)
-            trace.append("runtime.intent.completed", _intent_summary(intent))
+            final_state = self._orchestrator.invoke(request, trace=trace)
         except Exception as exc:
-            result = RuntimeResult(
-                run_id=request.run_id,
-                session_id=request.session_id,
-                status=RuntimeStatus.ERROR,
-                message="Intent classification failed.",
-                error_code="runtime.intent_failed",
-                trace_summary=[_safe_error_summary(exc)],
-            )
             trace.append(
                 "runtime.run.failed",
-                {"error_code": result.error_code, "stage": "intent"},
+                {
+                    "error_code": "runtime.orchestration_failed",
+                    "stage": "orchestration",
+                    "error_type": exc.__class__.__name__,
+                },
             )
-            self._logger.exception("runtime run failed run_id=%s stage=intent", request.run_id)
-            return result
+            self._logger.exception(
+                "runtime run failed run_id=%s stage=orchestration",
+                request.run_id,
+            )
+            raise
 
-        try:
-            trace.append("runtime.policy.started")
-            policy = self._policy_service.evaluate(request, intent)
-            trace.append("runtime.policy.completed", _policy_summary(policy))
-        except Exception as exc:
-            result = RuntimeResult(
-                run_id=request.run_id,
-                session_id=request.session_id,
-                status=RuntimeStatus.ERROR,
-                message="Policy evaluation failed.",
-                intent=_intent_summary(intent),
-                error_code="runtime.policy_failed",
-                trace_summary=[_safe_error_summary(exc)],
-            )
+        result = final_state["result"]
+        if result is None:
+            raise RuntimeError("runtime graph completed without a result.")
+
+        if result.error_code is not None:
             trace.append(
                 "runtime.run.failed",
-                {"error_code": result.error_code, "stage": "policy"},
+                {
+                    "error_code": result.error_code,
+                    "stage": final_state["error_stage"],
+                    "graph_path": list(final_state["graph_path"]),
+                },
             )
-            self._logger.exception("runtime run failed run_id=%s stage=policy", request.run_id)
+            self._logger.error(
+                "runtime run failed run_id=%s stage=%s error_code=%s",
+                request.run_id,
+                final_state["error_stage"],
+                result.error_code,
+            )
             return result
 
-        result = RuntimeResult(
-            run_id=request.run_id,
-            session_id=request.session_id,
-            status=_status_from_policy(policy),
-            message=_message_from_policy(policy),
-            intent=_intent_summary(intent),
-            policy=_policy_summary(policy),
-            trace_summary=["runtime.orchestration.stubbed"],
-        )
-        trace.append(
-            "runtime.orchestration.stubbed",
-            {"status": result.status.value},
-        )
         trace.append(
             "runtime.run.completed",
-            {"status": result.status.value},
+            {
+                "status": result.status.value,
+                "graph_path": list(final_state["graph_path"]),
+            },
         )
         self._logger.info(
             "runtime run completed run_id=%s status=%s",
@@ -193,53 +183,3 @@ class RuntimeService:
         )
         configure_application_logging(self._session_log.session_dir)
         return self._session_log
-
-
-def _status_from_policy(policy: PolicyDecision) -> RuntimeStatus:
-    if policy.action == PolicyAction.ALLOW:
-        return RuntimeStatus.OK
-    if policy.action == PolicyAction.REQUIRES_CONFIRMATION:
-        return RuntimeStatus.REQUIRES_CONFIRMATION
-    return RuntimeStatus.UNSUPPORTED
-
-
-def _message_from_policy(policy: PolicyDecision) -> str:
-    if policy.action == PolicyAction.ALLOW:
-        return "Request passed intent and policy checks; execution is not implemented yet."
-    if policy.action == PolicyAction.REQUIRES_CONFIRMATION:
-        return "Request requires confirmation before execution."
-    return "Request is not allowed by policy."
-
-
-def _intent_summary(intent: IntentDecision) -> dict[str, Any]:
-    return {
-        "intent_type": intent.intent_type.value,
-        "confidence": intent.confidence,
-        "needs_clarification": intent.needs_clarification,
-        "write_candidate": intent.write_candidate,
-        "classifier_results": [
-            {
-                "classifier_name": result.classifier_name,
-                "status": result.status,
-                "intent_type": result.intent_type.value,
-                "confidence": result.confidence,
-            }
-            for result in intent.classifier_results
-        ],
-    }
-
-
-def _policy_summary(policy: PolicyDecision) -> dict[str, Any]:
-    return {
-        "action": policy.action.value,
-        "authorized_write_scopes": [
-            scope.value for scope in policy.authorized_write_scopes
-        ],
-        "allowed_tools": policy.allowed_tools,
-        "requires_confirmation": policy.requires_confirmation,
-        "denied_reason": policy.denied_reason,
-    }
-
-
-def _safe_error_summary(exc: Exception) -> str:
-    return f"{exc.__class__.__name__}: {exc}"

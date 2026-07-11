@@ -19,13 +19,16 @@
 
 项目已完成阶段 3：Runtime Core / Intent / Policy 初版。
 
-项目已完成阶段 3.5：Observability 文件日志校正，当前准备进入阶段 4：LangGraph Orchestration 骨架。
+项目已完成阶段 3.5：Observability 文件日志校正。
+
+项目已完成阶段 4：LangGraph Orchestration 骨架，当前准备进入阶段 5：Skill System / Tool System 与 Domains。
 
 当前状态：
 
 - 当前基础设施代码已经完成阶段 2 初版。
 - Runtime Core / Intent / Policy 已完成阶段 3 初版。
 - Observability 文件日志已完成阶段 3.5 初版。
+- LangGraph Orchestration 已完成阶段 4 初版。
 - 旧 runtime 已归档到 `legacy_v0/app/`。
 - 当前代码放在 `app/`。
 - 当前计划放在 `plans/`。
@@ -40,6 +43,8 @@
 - `app/runtime/`：`RuntimeRequest`、`RuntimeSession`、`RuntimeResult`、`RuntimeService`、run record 写入 helper 和启动 bootstrap。
 - `app/intent/`：intent models、规则 classifier、LLM classifier 空实现和 `IntentService`。
 - `app/policy/`：policy models、permission scope 和 `PolicyService`。
+- `app/orchestration/`：`GraphState`、policy route、普通 node 函数、compiled `StateGraph`、`RuntimeOrchestrator` 和 Intent / Policy / route 语义事件。
+- `app/observability/logger.py`：应用拥有的 request-local `TraceSink` 接口；Graph 外关键阶段可继续使用同一事件边界。
 - `config/default.json`：声明默认数据库路径 `data/lifeops.sqlite3` 和默认日志根目录 `logs/sessions`。
 - `main.py`：当前 CLI 骨架入口，负责 config、SQLite、migration、文件日志 bootstrap 和单轮输入输出。
 - `tests/`：基础设施、Intent、Policy 和 Runtime Core 聚焦测试，以及测试数据库 helper。
@@ -60,35 +65,40 @@
 uv run python main.py
 ```
 
-`main.py` 已存在，但仍是阶段 3 runtime skeleton，不是完整产品 CLI。
+`main.py` 已存在，但仍是阶段 4 runtime skeleton，不是完整产品 CLI。
 
-当前 `main.py` 已接入 `config/default.json`、SQLite migration 和 `RuntimeService`。`RuntimeService` 当前只执行：
+当前 `main.py` 已接入 `config/default.json`、SQLite migration 和 `RuntimeService`。`RuntimeService` 当前执行：
 
 ```text
 RuntimeRequest
--> IntentService
--> PolicyService
+-> RuntimeOrchestrator
+-> classify_intent
+-> decide_policy
+-> policy conditional route
+-> stub_execute / requires_confirmation / deny
+-> finalize
 -> RuntimeResult
 ```
 
-阶段 3 仍是 stub execution：policy `allow` 只表示当前请求通过授权判断，不代表已经执行真实 tool 或业务写入。测试中使用 `:memory:` SQLite 和 migration helper，不读写真实 `data/lifeops.sqlite3`。
+阶段 4 仍是 stub execution：policy `allow` 只表示当前请求通过授权判断，不代表已经执行真实 tool 或业务写入。`RuntimeService` 仍是外部入口并负责 transaction、run record 和 event writer；LangGraph 只接管 request-local orchestration。测试中使用 `:memory:` SQLite 和 migration helper，不读写真实 `data/lifeops.sqlite3`。
 
-进入下一阶段前的状态：
+阶段 4 完成后的状态：
 
 - 阶段 2 Storage / SQLite 已完成初版。
 - 阶段 3 Runtime Core / Intent / Policy 已完成初版。
 - 阶段 3.5 Observability 文件日志校正已完成初版。
-- `docs/ARCHITECTURE.md` 已记录 Runtime Core、Intent / Policy、文件日志和 stub execution 边界。
-- `docs/RUNTIME_CONCEPTS.md` 已记录 Runtime Core、Intent Layer、Policy / Permission Layer、Write Safety、Observability 和 SQLite Local Persistence 学习章节。
-- `plans/modules/STORAGE_SQLITE_PLAN.md`、`plans/modules/RUNTIME_CORE_PLAN.md`、`plans/modules/INTENT_POLICY_PLAN.md` 和 `plans/modules/OBSERVABILITY_LOGGING_PLAN.md` 已记录完成状态。
-- 下一阶段应创建并施工 `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md`，开始阶段 4：LangGraph Orchestration 骨架。
+- 阶段 4 LangGraph Orchestration 已完成初版。
+- `docs/ARCHITECTURE.md` 已记录 Runtime Core、Intent / Policy、LangGraph Orchestration、文件日志和 stub execution 边界。
+- `docs/RUNTIME_CONCEPTS.md` 已记录 Runtime Core、Intent Layer、Policy / Permission Layer、Write Safety、LangGraph Orchestrator、LangGraph vs LangChain、Observability 和 SQLite Local Persistence 学习章节。
+- `plans/modules/STORAGE_SQLITE_PLAN.md`、`plans/modules/RUNTIME_CORE_PLAN.md`、`plans/modules/INTENT_POLICY_PLAN.md`、`plans/modules/OBSERVABILITY_LOGGING_PLAN.md` 和 `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md` 已记录完成状态。
+- 下一阶段是阶段 5：Skill System / Tool System 与 Domains；施工前应先创建或确认对应模块计划。
 
 当前有效测试命令：
 
 ```powershell
 $env:UV_CACHE_DIR='D:\lifeops-agent\.tmp\uv-cache'; uv run python -m unittest discover -s tests -v
 $env:UV_CACHE_DIR='D:\lifeops-agent\.tmp\uv-cache'; uv run python -m compileall app tests
-$env:UV_CACHE_DIR='D:\lifeops-agent\.tmp\uv-cache'; uv run python -m unittest tests.test_intent_service tests.test_policy_service tests.test_runtime_service -v
+$env:UV_CACHE_DIR='D:\lifeops-agent\.tmp\uv-cache'; uv run python -m unittest tests.test_orchestration_state tests.test_orchestration_nodes tests.test_orchestration_graph tests.test_intent_service tests.test_policy_service tests.test_runtime_service -v
 ```
 
 ## 目标架构

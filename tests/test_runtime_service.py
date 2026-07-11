@@ -49,13 +49,18 @@ class RuntimeServiceTest(unittest.TestCase):
                     [
                         "runtime.run.started",
                         "runtime.request.created",
-                        "runtime.intent.started",
-                        "runtime.intent.completed",
-                        "runtime.policy.started",
-                        "runtime.policy.completed",
-                        "runtime.orchestration.stubbed",
+                        "intent.classified",
+                        "policy.decided",
+                        "orchestration.route.selected",
                         "runtime.run.completed",
                     ],
+                )
+                self.assertEqual(events[2]["payload"]["intent_type"], "write_request")
+                self.assertEqual(events[3]["payload"]["action"], "allow")
+                self.assertEqual(events[4]["payload"]["route"], "allow")
+                self.assertEqual(
+                    events[5]["payload"]["graph_path"],
+                    ["classify_intent", "decide_policy", "stub_execute", "finalize"],
                 )
                 self.assertEqual(events[0]["run_id"], request.run_id)
                 self.assertEqual(events[0]["session_id"], request.session_id)

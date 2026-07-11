@@ -5,7 +5,16 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
+
+
+class TraceSink(Protocol):
+    """Application-owned sink for ordered request-local events."""
+
+    def append(self, event_type: str, payload: dict[str, Any] | None = None) -> None:
+        """Append one event at the point where it occurs."""
+
+        ...
 
 
 class OptionalLogAppender:

@@ -1,8 +1,10 @@
 {
-    "files.exclude": {
-      "**/__pycache__": true,
-      "**/__init__.py": true,
-      "**/*.pyc": true,
-      "**/.venv": true
-    }
+  "files.exclude": {
+    "**/**pycache**": true,
+    "**/*.pyc": true,
+    "**/.venv": true,
+
+    "app/__init__.py": true,
+    "app/orchestration/__init__.py": true
   }
+}

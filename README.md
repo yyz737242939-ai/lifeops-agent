@@ -4,7 +4,7 @@ LifeOps Agent 是一个本地 Python 项目，用来学习和构建 Agent Runtim
 
 当前仓库处于 Runtime 重构。V0 代码、数据、日志、测试、旧计划和旧入口统一保存在 `legacy_v0/`，作为历史对照。当前工作使用清爽的 `app/`、`docs/` 和 `plans/` 结构。
 
-当前进度：阶段 0-3.5 已完成；下一阶段是阶段 4 LangGraph Orchestration 骨架。
+当前进度：阶段 0-4 已完成；下一阶段是阶段 5 Skill System / Tool System 与 Domains。
 
 ## 项目目标
 

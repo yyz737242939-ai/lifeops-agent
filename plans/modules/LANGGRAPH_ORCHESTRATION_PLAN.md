@@ -53,12 +53,11 @@ LangGraph 在本阶段只负责 orchestration runtime：组织 nodes、routes、
   - `allow` -> `stub_execute` -> `finalize`
   - `requires_confirmation` -> `requires_confirmation` -> `finalize`
   - `deny` -> `deny` -> `finalize`
-- 在 trace 中记录 graph path，例如：
-  - `orchestration.graph.started`
-  - `orchestration.node.started`
-  - `orchestration.node.completed`
+- 在 trace 中记录有业务语义的关键决策和最终 graph path，例如：
+  - `intent.classified` / `intent.failed`
+  - `policy.decided` / `policy.failed`
   - `orchestration.route.selected`
-  - `orchestration.graph.completed`
+  - `runtime.run.completed` / `runtime.run.failed` 中的 `graph_path`
 - 保留阶段 3 的 stub execution 语义：policy allow 仍只表示通过授权判断，不执行真实 tool 或业务写入。
 - 保持 `RuntimeResult` 的用户可见行为与阶段 3 等价，避免本阶段改变产品语义。
 - 添加聚焦测试，验证 graph path、policy route、stub execution 和原有 intent/policy 失败行为。
@@ -67,7 +66,7 @@ LangGraph 在本阶段只负责 orchestration runtime：组织 nodes、routes、
 
 本阶段必须保持以下兼容点：
 
-- 继续复用现有 runtime id / run context，不新增 graph 专用持久化表；graph path event 后续写入 `events.jsonl`。
+- 继续复用现有 runtime id / run context，不新增 graph 专用持久化表；最终 graph path 写入 run completed / failed event。
 - 继续由 `RuntimeService` 管理 SQLite transaction、run record 写入和 trace callback。
 - 继续复用阶段 3 的 `RuntimeRequest`、`RuntimeResult`、`IntentDecision` 和 `PolicyDecision`。
 - 继续保持 `IntentService` 只做语义判断，`PolicyService` 只做授权判断。
@@ -97,7 +96,7 @@ LangGraph 在本阶段只负责 orchestration runtime：组织 nodes、routes、
 - Tool System 阶段可把 `PolicyDecision.allowed_tools` 接入 executor，但仍由自研 policy 决定权限。
 - Recovery 阶段可对照 LangGraph checkpoint、本项目 event log 和必要业务事实的边界。
 - Human-in-the-loop 阶段可研究 LangGraph interrupt，但授权仍必须由 LifeOps Policy / Interaction State 产出。
-- Eval / Inspector 阶段可直接使用 `graph_path` 和 `orchestration.*` trace events 断言 runtime path。
+- Eval / Inspector 阶段可直接使用最终 `graph_path` 和 Intent / Policy / route 语义事件断言 runtime path。
 - DAG Scheduler 阶段保持独立，不让阶段 4 的主 graph 提前承担并行 DAG 或任务调度职责。
 
 扩展原则是“可插拔，但不预铺大平台”：每个未来模块只通过明确 node 或 route 接入主 graph，不让 `GraphState` 变成大而全的应用状态容器。
@@ -297,7 +296,7 @@ RuntimeOrchestrator.handle(request, append_trace=None) -> RuntimeResult
 
 约束：
 
-- trace payload 只写 node name、route、status、intent summary、policy summary 和 error stage。
+- trace payload 只写 intent summary、policy summary、route、status、error stage 和最终 graph path。
 - 不写完整 graph state。
 
 ## 8. 测试和 Eval
@@ -323,7 +322,7 @@ RuntimeOrchestrator.handle(request, append_trace=None) -> RuntimeResult
 更新现有 runtime 测试，断言：
 
 - `RuntimeService.handle(...)` 仍产出 run/session 关联信息；是否写入 `run_records` 取决于后续是否需要关系查询。
-- `events.jsonl` 包含 graph started / node / route / completed 事件。
+- `events.jsonl` 包含 Intent / Policy / route 语义事件，以及附带 graph path 的 run completed / failed event。
 - 阶段 3 的外部返回语义不变：allow 仍是 stub execution。
 
 ### 8.3 Eval
@@ -367,45 +366,68 @@ RuntimeOrchestrator.handle(request, append_trace=None) -> RuntimeResult
 
 ### Step 4.0 依赖和安装边界确认
 
+- 状态：已完成（2026-07-10）。
 - 检查项目依赖文件中是否已有 LangGraph。
 - 若没有，单独做依赖切片：加入最小 LangGraph 依赖并运行 import smoke test。
 - 不引入 LangChain agent / chain / tool 抽象。
 
+验证：已加入 `langgraph>=1.2.9`，`langgraph` / `StateGraph` import smoke test 和 `uv lock --check` 均通过。
+
 ### Step 4.1 GraphState 和 route 类型
 
+- 状态：已完成（2026-07-10）。
 - 创建 `app/orchestration/`。
 - 定义最小 `GraphState` / `GraphRoute`。
 - 写纯函数测试，确认 graph path append 和 route 值稳定。
 
+验证：`tests.test_orchestration_state` 通过；Intent / Policy / Runtime Service 相邻回归通过，当前仍未接入 nodes、`StateGraph` 或 `RuntimeService`。
+
 ### Step 4.2 节点函数先不接 LangGraph
 
+- 状态：已完成（2026-07-10）。
 - 把现有 `_handle_core(...)` 的 intent / policy / result 逻辑拆成 node 级纯函数或小函数。
 - 先用普通函数测试保持行为等价。
 
+验证：已新增普通 Python 节点函数和 policy route 纯函数；allow / requires confirmation / deny、intent 失败和 policy 失败均有聚焦测试，并已逐字段对照当前 `RuntimeService` 的 `RuntimeResult` 语义。当前节点尚未接入 LangGraph 或 `RuntimeService`。
+
 ### Step 4.3 接入 StateGraph
 
+- 状态：已完成（2026-07-10）。
 - 用 `StateGraph(GraphState)` 连接 nodes 和 conditional route。
 - `build_runtime_graph(...)` 返回 compiled graph。
 - `RuntimeOrchestrator.handle(...)` 调用 graph 并产出 `RuntimeResult`。
 
+验证：compiled graph 已覆盖 allow / requires confirmation / deny 三条 policy route，以及 intent / policy 失败的提前结束路径；`RuntimeOrchestrator.invoke(...)` 可返回最终 `GraphState`，`handle(...)` 可返回等价的 `RuntimeResult`。当前尚未由 `RuntimeService` 调用，也尚未增加 `orchestration.*` trace events。
+
 ### Step 4.4 RuntimeService 调用 Orchestrator
 
+- 状态：已完成（2026-07-10）。
 - `RuntimeService` 继续负责 SQLite transaction 和 trace callback。
 - `_handle_core(...)` 改为委托 `RuntimeOrchestrator`。
 - 保持 `RuntimeService` 构造参数可注入 `IntentService` / `PolicyService`，方便现有失败测试。
 
+验证：`RuntimeService` 已构建并调用注入相同 Intent / Policy service 的 `RuntimeOrchestrator`；SQLite transaction、run record 和用户可见 `RuntimeResult` 保持兼容。Step 4.5 已用真实执行边界事件取代临时事后 compatibility trace。
+
 ### Step 4.5 Graph path trace
 
-- 增加 graph / node / route trace events。
+- 状态：已完成（2026-07-10）。
+- 增加 Intent / Policy / route 语义事件，并在 run 完成或失败时记录 graph path。
 - 保持 payload 紧凑，不写完整 graph state。
 - 更新 runtime service trace 测试。
 
+实现结论：继续使用 compiled graph 的 `invoke(...)`。LifeOps 应用拥有统一 `TraceSink`；Intent / Policy node 在真实 service 返回后立即写语义事件，Policy route 确定后写 route event，RuntimeService 在 run 完成或失败时附带最终 graph path。TraceSink 通过 request-local `OrchestrationContext` 注入，不进入 `GraphState`。Graph 外关键阶段可直接写同一个 sink，不要求所有可观察阶段都成为 LangGraph node。
+
+验证：测试证明 `intent.classified` / `policy.decided` 紧跟真实 service 调用，失败分别记录 `intent.failed` / `policy.failed`；allow / requires confirmation / deny route 和最终 graph path 可观察；原始用户输入和完整 `GraphState` 不进入 payload；机械化 graph/node started/completed event 已删除。
+
 ### Step 4.6 文档同步
 
+- 状态：已完成（2026-07-10）。
 - 更新 `docs/PROGRESS_LOG.md` 阶段状态。
 - 更新 `docs/ARCHITECTURE.md` 的 orchestration 边界。
 - 更新 `docs/RUNTIME_CONCEPTS.md` 的 LangGraph 学习章节；官方链接只维护在 `docs/AGENT_LEARNING_LINKS.md`。
 - 必要时更新 `docs/ARCHITECTURE.md` 的当前架构快照。
+
+验证：README、总计划、推进日志、当前架构、概念手册和学习链接已同步；阶段 4 标记为完成，下一阶段指向阶段 5 Skill System / Tool System 与 Domains。
 
 ## 11. LangGraph / LangChain 学习边界
 
