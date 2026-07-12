@@ -20,7 +20,6 @@ class SkillModelsTest(unittest.TestCase):
             skill_id="research",
             description="Research and compare sources.",
             root_path=Path("app/skills/research"),
-            capability_hints=("research.sources.read",),
             references=(reference,),
         )
 
@@ -42,10 +41,6 @@ class SkillModelsTest(unittest.TestCase):
     def test_selection_rejects_duplicate_ids(self) -> None:
         with self.assertRaises(ValueError):
             SkillSelection(("research", "research"))
-
-    def test_prompt_contribution_validates_capability_hints(self) -> None:
-        with self.assertRaises(ValueError):
-            PromptContribution("research", "Use trusted sources.", ("source.read", "source.read"))
 
     def test_skill_preparation_requires_contributions_to_match_loaded_ids(self) -> None:
         with self.assertRaises(ValueError):

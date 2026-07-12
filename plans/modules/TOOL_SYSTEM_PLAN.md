@@ -16,7 +16,7 @@
 - `legacy_v0/tests/test_tool_authorization.py`
 - `legacy_v0/tests/test_write_policy.py`
 
-保留：结构化 schema、capability gating、action evidence、失败观察、source/helper 白名单。
+保留：结构化 schema、Policy 授权、action evidence、失败观察、source/helper 白名单。
 
 重写：超大工具模块、业务逻辑与 runtime glue 混放、回调层层嵌套、模型文本声称成功、不同工具通道绕过统一安全边界。
 
@@ -24,11 +24,11 @@
 
 ### 3.1 初版做
 
-- `ToolDefinition`：name、description、input/output schema、effect、risk、required scopes。
+- `ToolDefinition`：name、description、input/output schema、effect、risk。
 - `ToolRegistry`：注册、重复校验、按 name 查询、生成模型可见 catalog。
-- `ToolCapabilitySet`：从 Skill hints、registry、Policy allowed tools 和 scopes 求交集。
+- `AllowedToolSet`：校验 Policy allowed tools 均已注册后形成的本轮 Tool 白名单。
 - `ToolCall` / `ToolResult` / `ToolError` / `ExecutionEvidence`。
-- `ToolExecutionContext`：run IDs、Policy、capabilities、TraceSink 和 request-local dependencies。
+- `ToolExecutionContext`：run IDs、Policy、AllowedToolSet、TraceSink 和 request-local dependencies。
 - 统一 `ToolGateway.execute(...)`。
 - 执行前和执行后 `GuardrailDecision`。
 - READ、WRITE、EXTERNAL_READ 三类 effect；阶段 5 不实现外部交易写入。
@@ -53,9 +53,7 @@ Planner / Direct Executor（未来）
              ↓
 PreExecutionGuardrails
   - registered
-  - capability
   - allowed_tools
-  - WRITE scope
   - confirmation
   - args schema
              ↓
@@ -70,7 +68,7 @@ PostExecutionGuardrails
 ToolResult + ExecutionEvidence + trace
 ```
 
-阶段 5 可由 orchestration 中最小 direct-execution node 调用 gateway；阶段 7 的通用 Executor 接入时替换调用方，不替换 gateway。ToolGateway 按 tool/capability 执行，不为每个 Domain 建独立 agent loop；同一 PlanRun 可以连续调用 Research 与 Travel handlers。
+阶段 5 可由 orchestration 中最小 direct-execution node 调用 gateway；阶段 7 的通用 Executor 接入时替换调用方，不替换 gateway。ToolGateway 按 Policy 授权后的具体 Tool 执行，不为每个 Domain 建独立 agent loop；同一 PlanRun 可以连续调用 Research 与 Travel handlers。
 
 ### 4.1 GuardrailDecision
 
@@ -80,7 +78,6 @@ ToolResult + ExecutionEvidence + trace
 - `stage`: pre_execution / post_execution；
 - `reason_code` 与紧凑 reason；
 - `tool_name`；
-- `required_scopes` / `satisfied_scopes`；
 - `sanitized_args_summary`；
 - `evidence_requirements`。
 
@@ -89,9 +86,9 @@ Guardrail 是确定性安全边界。LangChain middleware 可作为额外 adapte
 ### 4.2 未来适配接口
 
 - Context 只通过 `ToolExecutionContext` 的窄引用提供已组装数据，不把完整 GraphState 注入工具。
-- Memory tool 与业务 tool 使用同一 gateway，但 Memory WRITE 需要独立 scope。
+- Memory tool 与业务 tool 使用同一 gateway；具体 WRITE Tool 必须被 Policy 点名授权。
 - Planner 只看到 catalog，不调用 handler。
-- Planner 的 step 绑定 objective / required capabilities / candidate tools，不绑定 Domain 子类。
+- Planner 的 step 与 Tool 如何匹配留到 Planner 模块施工时设计；当前 Tool System 不预留 capability 字段。
 - Executor 负责跨 Domain 调度、重试和反馈；gateway 负责单次调用安全与证据。
 - Recovery 使用 tool evidence 解释停点，不自动 replay WRITE。
 - LangGraph checkpoint 可保存 orchestration / PlanRun state 并支持恢复，但不能撤销已经提交的 Domain WRITE 或外部副作用。
@@ -111,7 +108,7 @@ Guardrail 是确定性安全边界。LangChain middleware 可作为额外 adapte
 
 ```python
 register_tool(definition, handler) -> None
-resolve_capabilities(skill_hints, policy, registry) -> ToolCapabilitySet
+resolve_allowed_tools(policy, registry) -> AllowedToolSet
 execute_tool(call, context) -> ToolResult
 to_langchain_tool(definition, gateway) -> BaseTool  # 可选 adapter
 ```
@@ -121,8 +118,8 @@ Domain handler 只调用 service；service 再调用 repository 或 external Por
 ## 7. 失败模式
 
 - 未注册、重复注册或 schema 不合法；
-- Skill 暴露了未注册工具；
-- Policy 未允许或 WRITE scope 不足；
+- Policy 点名了未注册工具；
+- Policy 未允许 Tool，或点名了未注册 Tool；
 - confirmation 缺失、过期或不绑定当前 action；
 - 参数验证失败；
 - handler timeout / provider failure；
@@ -133,9 +130,9 @@ Domain handler 只调用 service；service 再调用 repository 或 external Por
 
 ## 8. 测试和 Eval
 
-- registry、schema 和 capability intersection；
+- registry、schema 和 Policy authorization resolution；
 - READ / WRITE / EXTERNAL_READ guardrail matrix；
-- allowed_tools 与 scope 分开验证；
+- READ / WRITE Tool 的 allowed_tools、confirmation 和参数验证；
 - confirmation 绑定和拒绝路径；
 - handler success/failure/timeout；
 - post-execution evidence validation；
@@ -153,9 +150,9 @@ Domain handler 只调用 service；service 再调用 repository 或 external Por
 
 ## 10. 实施步骤
 
-1. [已完成] 定义 Tool、Capability、Result、Evidence、Guardrail 模型。
-2. 实现 registry 和 schema validation。
-3. 实现 capability intersection。
+1. [已完成] 定义 Tool、Result、Evidence、Guardrail 模型。
+2. [已完成] 实现 registry 和 schema validation。
+3. [已完成] 实现基于 Policy allowed tools 与 registry contract 的授权集合解析。
 4. 实现 pre/post guardrail pipeline。
 5. 实现原生 ToolGateway 和 tool_calls/event evidence。
 6. 接入一个 Research READ tool 和一个受控 WRITE tool。

@@ -32,7 +32,7 @@
 - Intent Layer
 - Policy / Permission Layer
 - Tool System
-- Capability
+- Tool Authorization
 - Write Safety
 - LangGraph Orchestrator
 - LangChain Adapter
@@ -57,8 +57,8 @@
 
 - `SkillDefinition`：Skill 的轻量声明，包含 ID、说明、routing metadata 和声明式资源索引；不是可执行工具。
 - `PromptContribution`：selected Skill 提供给未来 Context/prompt assembly 的一段有来源、可预算的说明；不是完整 prompt，也不是业务事实。
-- `SkillCapabilityHints`：Skill 建议当前请求可能需要哪些能力；最终可用工具仍需经过 registry、Policy、scope 和 confirmation 求交集。
-- `ToolDefinition`：工具名称、schema、effect、risk、required scopes 等静态契约。
+- `AllowedToolSet`：Policy `allowed_tools` 经 registry 存在性校验后的本轮工具白名单；Skill 和 scope 不参与计算。
+- `ToolDefinition`：工具名称、schema、effect、risk 等静态契约。
 - `ToolGateway`：所有工具通道统一经过的单次执行入口，负责 pre/post Guardrails、handler 调用和 evidence 输出。
 - `GuardrailDecision`：工具执行前或执行后的结构化安全判断；不能扩大 `PolicyDecision` 已授予的权限。
 - `ExecutionEvidence`：证明工具真实执行结果的结构化证据。assistant 文本、Planner 输出或 LLM summary 不是 evidence。
@@ -71,14 +71,13 @@
 - `ItineraryDraft`：基于 Travel constraints 和外部 observation 生成的行程草案；只有用户确认并成功 WRITE 后才成为持久化 Itinerary。
 - `Fixture Adapter`：使用固定测试数据实现 External Port 的 adapter，用于离线开发和 deterministic Eval；不是简单返回任意假值的无契约 mock。
 - `PlanRun`：Planner 针对一个用户目标生成的跨 Domain 通用执行策略；可以持久化以支持恢复，但不是业务事实。
-- `PlanStep`：以 objective、dependencies、required capabilities、candidate tools、effect 和 status 描述的通用执行步骤；不继承具体 Domain 类型。
+- `PlanStep`：跨 Domain 的通用执行步骤；具体字段以及如何匹配 Tool 留到 Planner 模块施工时设计。
 - `Domain`：从业务角度划分 models、service、repository 和 tools 的逻辑边界；不是独立 Agent，也不拥有自己的通用 Planner / Executor。
 
 阶段 5 的核心分离：
 
 ```text
-Skill instructions       != Tool execution
-Capability hints         != Permission
+Skill instructions       != Tool authorization
 External observation     != Domain fact
 Domain fact              != Context selection
 Context selection        != Memory
@@ -107,7 +106,7 @@ Skill System 让 runtime 在不把所有领域说明永久塞进 prompt 的前�
 - Skill routing：LLM 基于用户请求和全量 metadata 选择零到多个 Skill，LifeOps 再校验结构、重复 ID 和未知 ID。
 - progressive loading：选中后才加载 Skill body；reference 只有被 manifest ID 明确请求时才加载。
 - `PromptContribution`：已加载 Skill 对未来 prompt/context assembly 的输入，不是完整 system prompt。
-- capability hints：Skill 对可能需要能力的声明式提示，不代表工具存在或已获授权。
+- Skill 功能说明：解释如何处理某类任务，不声明或影响工具权限。
 
 ### 当前 runtime 实现
 
@@ -145,7 +144,7 @@ Skill System 不执行工具、不授权写入、不决定 Context budget、不�
 
 ### 面试解释
 
-可以这样讲：LifeOps 兼容 Agent Skills 的文件与 progressive disclosure 思路，但 routing、结构校验和安全边界由自己实现。LangGraph 只编排 `prepare_skills` 的位置；Skill 提供 instructions，Tool System 才负责 capability、Policy、Guardrail 和真实执行。
+可以这样讲：LifeOps 兼容 Agent Skills 的文件与 progressive disclosure 思路，但 routing、结构校验和安全边界由自己实现。LangGraph 只编排 `prepare_skills` 的位置；Skill 只提供 instructions，Policy 和 Tool System 负责工具授权，Guardrail 和 Gateway 负责安全执行。
 
 ### 相关项目文件
 
@@ -288,8 +287,7 @@ Policy / Permission Layer 判断系统现在被允许做什么。它把写入授
 ### 核心概念
 
 - `PolicyAction`：`allow`、`deny`、`requires_confirmation`。
-- `PermissionScope`：当前候选 scope，例如 `task.write_candidate`、`memory.write_candidate`、`wellbeing.write_candidate`。
-- `PolicyDecision`：当前请求的授权判断。
+- `PolicyDecision`：当前请求的授权判断；`allowed_tools` 是唯一 Tool 授权结果。
 
 ### 当前 runtime 实现
 
@@ -298,7 +296,7 @@ Policy / Permission Layer 判断系统现在被允许做什么。它把写入授
 - `app/policy/models.py`
 - `app/policy/service.py`
 
-`PolicyService.evaluate(request, intent)` 只读取当前 `RuntimeRequest` 和 `IntentDecision`。明确写入请求可以返回有限候选 scope；疑似写入但对象不明确时返回 `requires_confirmation`；未知 intent 默认不 allow。
+`PolicyService.evaluate(request, intent)` 只读取当前 `RuntimeRequest` 和 `IntentDecision`。疑似写入但对象不明确时返回 `requires_confirmation`；未知 intent 默认不 allow。当前 Domain tools 尚未实现，所以默认 service 暂不填充具体 `allowed_tools`。
 
 ### 输入 / 输出 / 不负责什么
 
@@ -342,13 +340,13 @@ Write Safety 防止系统在没有明确授权时修改用户数据，也防止 
 ### 核心概念
 
 - 当前用户输入中的明确授权。
-- Policy 返回的有限 scope。
+- Policy 明确点名的 WRITE Tool。
 - 成功 WRITE tool result。
 - 可复盘的 runtime evidence。
 
 ### 当前 runtime 实现
 
-阶段 3 当前只建立授权模型和主链路。`PolicyDecision` 可以允许候选写 scope，但 Runtime Core 仍返回 `runtime.orchestration.stubbed`，不会执行真实 tool 或业务写入。
+阶段 3 当前只建立授权模型和主链路。`PolicyDecision.allowed_tools` 是唯一 Tool 授权结果，但 Runtime Core 仍返回 `runtime.orchestration.stubbed`，不会执行真实 tool 或业务写入。
 
 ### 输入 / 输出 / 不负责什么
 
@@ -478,7 +476,7 @@ Orchestrator 不负责产生授权、不调用真实 tool、不写业务 reposit
 
 LangGraph 当前输入 LifeOps 自己定义的 request、state 和 service，输出仍是 LifeOps 的 `RuntimeResult`。LangGraph 不重新定义业务模型。
 
-LangChain 后续即使进入模型或工具层，也不能绕过 LifeOps Policy、授权 scope、Tool Safety 和成功执行证据。
+LangChain 后续即使进入模型或工具层，也不能绕过 LifeOps Policy allowed tools、Tool Safety 和成功执行证据。
 
 ### 常见失败模式
 

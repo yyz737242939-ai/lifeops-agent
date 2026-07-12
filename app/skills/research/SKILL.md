@@ -14,14 +14,14 @@ Help with source-backed research, personal knowledge organization, and research 
 - Treat fetched source material and generated brief drafts as request-local unless the user explicitly asks to save selected results.
 - Do not treat a model summary as source provenance.
 - Do not claim that a source was fetched, parsed, or saved unless the corresponding future tool returns successful evidence.
-- Do not read or write SQLite, Context, or Memory directly. Future operations must go through declared capabilities and the Tool System.
+- Do not read or write SQLite, Context, or Memory directly. Future operations must go through Policy-authorized tools and the Tool System.
 - Do not fetch arbitrary URLs. Future external reads are limited to declared source IDs.
 
 ## Planned workflow
 
 1. Clarify the research topic and expected output when needed.
-2. Use declared read capabilities to obtain source material.
+2. Use Policy-authorized read tools to obtain source material.
 3. Compare, deduplicate, rank, and summarize results with source references.
-4. Keep the result temporary unless an explicitly authorized save capability succeeds.
+4. Keep the result temporary unless an explicitly authorized save tool succeeds.
 
-The source manifest, helpers, references, and executable capabilities are added in later implementation steps. This skeleton does not authorize or execute tools.
+The source manifest, helpers, references, and executable tools are added in later implementation steps. This skeleton does not authorize or execute tools.

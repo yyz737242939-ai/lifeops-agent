@@ -39,7 +39,6 @@ def build_prompt_contributions(
         PromptContribution(
             skill_id=skill.definition.skill_id,
             instructions=skill.body,
-            capability_hints=skill.definition.capability_hints,
         )
         for skill in loaded_skills
     ]

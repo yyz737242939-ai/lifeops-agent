@@ -27,7 +27,7 @@
 
 - Skill System 已完成核心模型、错误、metadata registry 和原生 discovery / validation；当前严格支持 `name`、`description` frontmatter 子集，不引入 Deep Agents / LangChain loader 或 middleware。
 - discovery 只扫描根目录的直接 Skill 子目录，只读取 `SKILL.md` metadata；完整 body 和附属资源仍保持未加载。
-- `app/skills/research/SKILL.md` 和 `app/skills/travel/SKILL.md` skeleton 已建立，记录各自适用场景、事实边界和 planned workflow；尚未实现的工具与 capability 不伪装成可用能力。
+- `app/skills/research/SKILL.md` 和 `app/skills/travel/SKILL.md` skeleton 已建立，记录各自适用场景、事实边界和 planned workflow；Skill 只说明功能，不声明工具权限。
 - Skill selector 已通过 `SkillSelectionClient` 薄接口接收 `RuntimeRequest + 全量 Skill metadata`，支持零到多个 Skill；LifeOps 校验严格输出字段、非空 reason、重复 ID 和未知 ID，不依赖框架 selector。
 - selected Skill body 已支持按需加载；reference 只能通过 `references/manifest.json` 中的稳定 ID 读取相对 Skill root 的 Markdown 文件，并校验 traversal、文件类型、空正文和大小限制。
 - Skill trace 只记录 selection、body load、reference load 的成功或失败语义事件；不记录机械文件 lifecycle，不泄漏用户原文、LLM selection reason、Skill body 或 reference 正文。
@@ -41,13 +41,15 @@
 - `tests/fixtures/skills/` 已建立 schema version 1 的长期 Eval case 形状，覆盖 Research、Travel、跨 Domain、零 Skill，以及未知 ID、重复 ID、空 reason 等结构失败。
 - Agent Skills specification 和 Deep Agents Skills 仅作为格式、命名约束与 progressive disclosure 的实现参考；框架 adapter 保留为未来边界。
 - Tool System 采用 LifeOps 原生安全核心与可选 LangChain adapter；所有工具经过统一 Tool Gateway 和 pre/post Guardrails。
-- Tool System 第一步已完成框架无关的核心模型：Tool definition 与 handler 分离，并定义 capability、call/result/error、execution evidence 和结构化 pre/post guardrail decision；registry、capability intersection 与 gateway 尚未实现。
+- Tool System 第一步已完成框架无关的核心模型：Tool definition 与 handler 分离，并定义 call/result/error、execution evidence 和结构化 pre/post guardrail decision。
+- Tool System 第二步已完成原生 `ToolRegistry` 与 V1 JSON Schema 子集递归校验：definition/handler 在 registry 绑定，重复和未知工具返回 typed error，模型 catalog 不暴露 handler 或授权信息。
+- Tool System 第三步已调整为 request-local authorization resolution：Policy `allowed_tools` 是唯一 Tool 授权结果，Registry 以 fail-closed 方式验证被点名工具均已注册后生成 `AllowedToolSet`；Skill 和 scope 不参与权限计算，filtered model catalog 只暴露集合内工具，Guardrail 与 gateway 仍未实现。
 - 两个内部 Domain 从原路线图的 Tasks + Wellbeing 调整为 Research / Personal Knowledge + Travel。
 - Research 首个外部只读场景是 Hugging Face Daily Papers / Blog briefing；临时结果不自动保存为知识或 Memory。
 - Travel 先定义 typed external Ports 并使用 fixture adapters；真实 Calendar MCP 仍在阶段 8 接入。
 - 阶段 5 模块计划已记录 Context、Memory、Planner、Executor、Recovery、MCP、DAG、Inspector、Eval 的未来接入边界。
 - Domain 已明确为业务 models/service/repository/tools 的逻辑分组，不是独立 Agent 或执行边界；同一通用 PlanRun 可以交叉调用 Research 与 Travel tools。
-- 简单单工具请求未来走 Direct Executor；复杂、多步骤或有依赖请求走 Planner → Executor。PlanStep 绑定 objective/capability/candidate tools，WRITE 默认逐 step 授权。
+- 简单单工具请求未来走 Direct Executor；复杂、多步骤或有依赖请求走 Planner → Executor。PlanStep 的字段和 Tool 匹配方式留到 Planner 模块施工时设计，WRITE 默认逐 step 授权。
 - PlanRun / PlanStep 可为跨进程恢复而持久化，但不是业务事实；跨 Domain 部分成功时不做全局回滚，保留成功 evidence，从失败 step 恢复或 bounded replan。
 - LangGraph checkpoint 是未来保存 graph/thread state、interrupt、fault tolerance 和 time travel 的候选机制，不负责撤销已经提交的 Domain WRITE 或外部副作用。
 
@@ -70,7 +72,7 @@
 - `app/observability/`：event JSONL、LLM JSONL、application log 的文件日志模型和 writer。
 - `app/runtime/`：`RuntimeRequest`、`RuntimeSession`、`RuntimeResult`、`RuntimeService`、run record 写入 helper 和启动 bootstrap。
 - `app/intent/`：intent models、规则 classifier、LLM classifier 空实现和 `IntentService`。
-- `app/policy/`：policy models、permission scope 和 `PolicyService`。
+- `app/policy/`：policy models 和 `PolicyService`；`allowed_tools` 是唯一 Tool 授权结果。
 - `app/orchestration/`：`GraphState`、policy route、普通 node 函数、compiled `StateGraph`、`RuntimeOrchestrator` 和 Intent / Policy / route 语义事件。
 - `app/observability/logger.py`：应用拥有的 request-local `TraceSink` 接口；Graph 外关键阶段可继续使用同一事件边界。
 - `config/default.json`：声明默认数据库路径 `data/lifeops.sqlite3` 和默认日志根目录 `logs/sessions`。

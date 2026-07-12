@@ -17,7 +17,7 @@
 阶段 5 的模块计划把学习范围扩展到：
 
 - 原生 Skill discovery / routing / progressive reference 与 framework adapter 的边界。
-- LifeOps 原生 Tool Gateway、capability intersection、pre/post Guardrails 和 execution evidence。
+- LifeOps 原生 Tool Gateway、Policy authorization resolution、pre/post Guardrails 和 execution evidence。
 - LangChain tool schema / ToolNode / middleware 作为可选 adapter，不替代 Policy、Guardrail 或业务事实来源。
 - Hugging Face 白名单外部来源、provenance、临时 observation 与用户确认保存边界。
 - Travel typed Port + fixture adapter；真实 Calendar MCP 仍留在阶段 8。
@@ -168,7 +168,7 @@ LifeOps 自研 runtime
   学习重点：Deep Agents 如何读取 `SKILL.md` frontmatter、按描述匹配、延迟读取正文和附属资源，以及 skills 与 Memory 的区别。LifeOps 只参考其 progressive disclosure 和失败模式，不复用 `SkillsMiddleware` 或 Deep Agents harness；现有 Intent、Policy、Tool Gateway 和业务事实来源继续由 LifeOps 拥有。
 
 - [LangChain Skills pattern](https://docs.langchain.com/oss/python/langchain/multi-agent/skills)
-  学习重点：LangChain Core 中 Skill 更接近 prompt-driven specialization / progressive disclosure 架构模式；真正的 built-in Skill 支持位于 Deep Agents。对照本项目为什么仍需要自己的 deterministic routing reason 和 capability intersection。
+  学习重点：LangChain Core 中 Skill 更接近 prompt-driven specialization / progressive disclosure 架构模式；真正的 built-in Skill 支持位于 Deep Agents。对照本项目为什么让 Skill 只负责 instructions，并由 Policy 与 Tool System 独立完成授权。
 
 - [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
   学习重点：理解 provider 侧 schema 约束与应用侧结构校验的差别。LifeOps 当前通过 OpenAI-compatible Chat Completions 请求 JSON，并用 Pydantic 解析 `selected_skill_ids` 与 `reason`，再在本地校验未知 ID、重复 ID 和业务边界；OpenAI SDK 不接管 Registry、Skill loading 或 orchestration。
@@ -176,7 +176,7 @@ LifeOps 自研 runtime
 ### LangChain Tools 与 LifeOps Tool Adapter
 
 - [LangChain Tools](https://docs.langchain.com/oss/python/langchain/tools)
-  学习重点：tool schema、结构化输入输出、`ToolRuntime` 和 `ToolNode`。项目只把这些作为 adapter 候选；LifeOps `ToolGateway` 仍负责 capability、Policy、Guardrail 和 execution evidence。尤其要避免让工具通过 framework store 直接保存业务事实或 Memory。
+  学习重点：tool schema、结构化输入输出、`ToolRuntime` 和 `ToolNode`。项目只把这些作为 adapter 候选；LifeOps `ToolGateway` 仍负责 Policy authorization、Guardrail 和 execution evidence。尤其要避免让工具通过 framework store 直接保存业务事实或 Memory。
 
 - [Python typing.Protocol](https://docs.python.org/3/library/typing.html#typing.Protocol)
   学习重点：用 structural subtyping 定义小而稳定的 external Port。Travel 的 Calendar、Weather、Transport、Lodging、Place adapters 应能用 fixture 和未来真实实现共享 contract，而不让 Domain 依赖具体 provider。

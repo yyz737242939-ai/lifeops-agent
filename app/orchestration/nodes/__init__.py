@@ -230,9 +230,6 @@ def _intent_summary(intent: IntentDecision) -> dict[str, Any]:
 def _policy_summary(policy: PolicyDecision) -> dict[str, Any]:
     return {
         "action": policy.action.value,
-        "authorized_write_scopes": [
-            scope.value for scope in policy.authorized_write_scopes
-        ],
         "allowed_tools": policy.allowed_tools,
         "requires_confirmation": policy.requires_confirmation,
         "denied_reason": policy.denied_reason,

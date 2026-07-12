@@ -13,12 +13,10 @@ class SkillPromptAssemblerTest(unittest.TestCase):
         travel = self._loaded_skill(
             "travel",
             "Travel instructions.",
-            ("travel.options.read",),
         )
         research = self._loaded_skill(
             "research",
             "Research instructions.",
-            ("research.sources.read", "research.brief.build"),
         )
 
         contributions = build_prompt_contributions([travel, research])
@@ -28,10 +26,7 @@ class SkillPromptAssemblerTest(unittest.TestCase):
             ("travel", "research"),
         )
         self.assertEqual(contributions[0].instructions, "Travel instructions.")
-        self.assertEqual(
-            contributions[1].capability_hints,
-            ("research.sources.read", "research.brief.build"),
-        )
+        self.assertEqual(contributions[1].instructions, "Research instructions.")
 
     def test_empty_loaded_skills_produces_no_contributions(self) -> None:
         self.assertEqual(build_prompt_contributions([]), [])
@@ -63,13 +58,11 @@ class SkillPromptAssemblerTest(unittest.TestCase):
     def _loaded_skill(
         skill_id: str,
         body: str,
-        capability_hints: tuple[str, ...] = (),
     ) -> LoadedSkill:
         definition = SkillDefinition(
             skill_id=skill_id,
             description=f"{skill_id} description",
             root_path=Path("app/skills") / skill_id,
-            capability_hints=capability_hints,
         )
         return LoadedSkill(definition=definition, body=body)
 

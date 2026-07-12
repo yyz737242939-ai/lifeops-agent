@@ -23,7 +23,7 @@
 |---|---|---|---|
 | `legacy_v0/entrypoints/main_legacy.py` | `main.py` | archive/rewrite | 当前 runtime 会创建新的 CLI。 |
 | `legacy_v0/app/agents/agent.py` | `app/runtime`, `app/orchestration`, `app/execution` | rewrite | 旧 Agent 聚合了太多 runtime 职责。 |
-| `legacy_v0/app/tools/*` | `app/tools/*` | migrate/rewrite | 保留概念，拆分 definition、registry、capability、executor、result。 |
+| `legacy_v0/app/tools/*` | `app/tools/*` | migrate/rewrite | 拆分 definition、registry、authorization、gateway、result；不迁移旧 capability gating。 |
 | `legacy_v0/app/context/*` | `app/context/*` | defer/rewrite | 初版保留简化 request context；完整 ref/index/compaction 延后。 |
 | `legacy_v0/app/memory/*` | `app/memory/*` | rewrite | Semantic memory 迁移到 SQLite，profile 保持 markdown。 |
 | `legacy_v0/app/tasks/*` | 无直接当前替代 | archive/defer | 不迁移通用 Task 业务 Domain。阶段 7 使用跨 Domain `PlanRun` / `PlanStep` 保存执行状态；长期业务事实由 Research / Travel 在授权 WRITE 成功后各自保存。 |

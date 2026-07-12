@@ -69,7 +69,7 @@ Domain 不依赖 LangGraph、Planner、Context Engine 或 Memory implementation�
 - Memory 通过 `MemoryCandidateProvider` 获取用户明确内容的候选，不能自动写 Memory。
 - Planner 通过 `ResearchPlanningReadModel` 获取 Topic、资料覆盖、最近 brief 和未解决 research question。
 - Executor 只能经 ToolGateway 调 Research tools。
-- Research 不定义 `ResearchPlanRun` / `ResearchExecutor`；通用 PlanStep 通过 capability 选择本 Domain tools。
+- Research 不定义 `ResearchPlanRun` / `ResearchExecutor`；通用 Planner 与 Tool 的匹配方式留到 Planner 模块施工时设计。
 - Recovery 读取成功 tool evidence 与已保存事实，不从临时 LLM 文本恢复写入。
 - DAG 可表达 fetch → parse → dedupe → rank → brief，但 persistence 仍需独立授权步骤。
 - Eval 使用 fixture/source snapshot，不依赖当天真实热点。
@@ -122,7 +122,7 @@ Tool 方向：
 - `create_research_note`
 - `search_research_knowledge`
 
-前四个是 READ/临时处理；保存和创建是 WRITE，必须有明确 scope 和 evidence。
+前四个是 READ/临时处理；保存和创建是 WRITE，必须被 Policy 明确点名允许并产生 evidence。
 
 ## 7. 失败模式
 
@@ -145,7 +145,7 @@ Tool 方向：
 - 中文 briefing 包含来源、链接和“基于列表页可见信息”边界；
 - 不抓取成功时不声称已获取热点；
 - 临时结果不自动保存；
-- WRITE scope / confirmation / transaction / evidence；
+- WRITE allowed tool / confirmation / transaction / evidence；
 - URL 去重、revision 和引用完整性；
 - 100-500 条 seed 下的分页、预算和 context candidate 稳定性；
 - Planner/Context/Memory 未来 contract tests 使用 fake consumer，而不实现后续模块。

@@ -9,7 +9,7 @@
 - `app/intent/` 已包含 intent models、classifier 接口、规则 classifier、LLM classifier 空实现和 `IntentService`。
 - Intent pipeline 已同时调用规则 classifier 和 LLM classifier 接口。
 - LLM classifier 初版保持 `abstain` / `not_available`，不调用真实模型。
-- `app/policy/` 已包含 `PolicyDecision`、`PolicyAction`、`PermissionScope` 和 `PolicyService`。
+- `app/policy/` 已包含 `PolicyDecision`、`PolicyAction` 和 `PolicyService`。
 - Policy 已覆盖 `allow`、`deny`、`requires_confirmation`。
 - 不明确写入默认要求确认，非写入 intent 不产生 write authorization。
 - LLM classifier result、metadata 和 planner/checkpoint 模拟字段不能绕过 Policy。
@@ -21,7 +21,7 @@
 
 - 真实 LLM structured output classifier。
 - 多轮 pending confirmation / Interaction Safety State。
-- Tool System capability / allowed tools 对齐。
+- Tool System `allowed_tools` 对齐。
 - LangGraph interrupt / human-in-the-loop 映射。
 
 阶段 3 收口验证：
@@ -41,7 +41,7 @@
 阶段 3 初版结束时，项目应具备：
 
 - `app/intent/`：统一 classifier 接口、规则 classifier、LLM classifier 空实现和 intent service。
-- `app/policy/`：policy decision、permission scope 和 policy service。
+- `app/policy/`：policy decision 和 policy service。
 - Intent pipeline 同时调用规则 classifier 和 LLM classifier 接口。
 - LLM classifier 初版不调用真实模型，只返回 abstain / not_available，作为后续真实产品形态的扩展点。
 - Policy 对不明确写入默认要求确认，不执行写入。
@@ -78,7 +78,7 @@ V0 的主要问题预计是：
 - 实现 `LlmIntentClassifier` 空实现，初版只返回 `abstain` / `not_available`。
 - 实现 `IntentService`，统一调用规则 classifier 和 LLM classifier，并合成最终 decision。
 - 创建 `app/policy/` 包。
-- 定义 `PolicyDecision`、`PolicyAction`、`PermissionScope` 等最小模型。
+- 定义 `PolicyDecision`、`PolicyAction` 等最小模型。
 - 实现 `PolicyService`，根据 `RuntimeRequest` 和 `IntentDecision` 产出授权判断。
 - 对不明确写入返回 `requires_confirmation`。
 - 记录 Intent / Policy 的结构化 trace payload。
@@ -99,8 +99,8 @@ V0 的主要问题预计是：
 - 将 `LlmIntentClassifier` 接入真实 LLM structured output。
 - 增加 classifier confidence arbitration、fallback 和 eval cases。
 - 增加 multi-turn confirmation state。
-- 增加风险等级和 operation scope，例如 read / write / external_side_effect / destructive。
-- 和 Tool System 的 capability / allowed tools 对齐。
+- 只有真实需求出现时才增加风险分类，不预留 operation scope。
+- 和 Tool System 的 `allowed_tools` 对齐。
 - 和 LangGraph interrupts / human-in-the-loop 对齐，但不让它们成为授权事实源。
 
 ## 4. Runtime 边界
@@ -125,7 +125,6 @@ Policy 输出：
 
 - `PolicyDecision`。
 - `allowed` / `denied` / `requires_confirmation`。
-- `authorized_write_scopes`。
 - `allowed_tools` 初版可为空。
 - reason。
 - trace-safe payload。
@@ -174,7 +173,7 @@ Intent 和 Policy 的完整中间状态保持 request-local。
 - classifier status，例如 `matched`、`abstained`、`not_available`。
 - confidence bucket。
 - policy action。
-- authorized scope 名称。
+- allowed tool 名称。
 - requires confirmation reason。
 - denied reason。
 
@@ -205,7 +204,6 @@ ClassifierResult
 
 PolicyDecision
 - action
-- authorized_write_scopes
 - allowed_tools
 - requires_confirmation
 - denied_reason
@@ -231,17 +229,6 @@ deny
 requires_confirmation
 ```
 
-初版 permission scope：
-
-```text
-task.write_candidate
-memory.write_candidate
-wellbeing.write_candidate
-runtime.read
-```
-
-这些 scope 初版只是授权模型占位，不代表对应 domain 已实现。
-
 ## 6. 对外接口
 
 计划暴露的最小接口：
@@ -263,7 +250,6 @@ app/intent/service.py
 
 app/policy/models.py
 - PolicyAction
-- PermissionScope
 - PolicyDecision
 
 app/policy/service.py
@@ -297,9 +283,9 @@ IntentService 合成原则：
 PolicyService 原则：
 
 - 只基于当前用户输入和 IntentDecision 判断授权。
-- 明确写入请求可以返回有限 scope。
+- Policy 只通过具体 `allowed_tools` 表达 Tool 授权；当前工具尚未接入时该列表为空。
 - 疑似写入但不明确时返回 `requires_confirmation`。
-- 非写入 intent 不产生 write scope。
+- 未确认、拒绝或不明确请求不产生 allowed tools。
 - 永远不从 LLM classifier、Planner、assistant 文本或 checkpoint 获得授权。
 
 ## 7. 失败模式
@@ -314,7 +300,7 @@ PolicyService 原则：
 - IntentService 无法合成 decision。
 - PolicyService 遇到未知 intent type。
 - 疑似写入但缺少对象或动作。
-- 权限 scope 与后续 tool/domain 不匹配。
+- Policy 点名了未注册 Tool，或漏掉应授权的 Tool。
 
 处理原则：
 
@@ -354,7 +340,7 @@ Intent 最小测试：
 Policy 最小测试：
 
 - `chat` / `read` / `plan_request` 不产生 write authorization。
-- 明确 `write_request` 可以返回受限 `authorized_write_scopes`。
+- 明确 `write_request` 可以通过 Policy，但当前工具尚未接入时 `allowed_tools` 为空。
 - 疑似写入但对象不明确返回 `requires_confirmation`。
 - 未知 intent 默认不 allow。
 - LLM classifier 的结果不能直接授权写入。
@@ -405,7 +391,7 @@ $env:UV_CACHE_DIR='D:\lifeops-agent\.tmp\uv-cache'; uv run python -m compileall 
 4. [x] 实现 `RuleBasedIntentClassifier`，覆盖最小误触发样例。
 5. [x] 实现 `LlmIntentClassifier` 空实现，返回 abstain / not_available。
 6. [x] 实现 `IntentService`，确保规则和 LLM classifier 都被调用。
-7. [x] 定义 policy models：`PolicyAction`、`PermissionScope`、`PolicyDecision`。
+7. [x] 定义 policy models：`PolicyAction`、`PolicyDecision`。
 8. [x] 实现 `PolicyService`，覆盖 allow / deny / requires_confirmation。
 9. [x] 将 IntentService 和 PolicyService 接入 Runtime Core。
 10. [x] 添加 intent、policy 和 runtime integration 聚焦测试。

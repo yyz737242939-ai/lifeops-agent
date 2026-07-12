@@ -56,7 +56,6 @@ class SkillDefinition:
     skill_id: str
     description: str
     root_path: Path
-    capability_hints: tuple[str, ...] = field(default_factory=tuple)
     references: tuple[SkillReferenceDefinition, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
@@ -71,7 +70,6 @@ class SkillDefinition:
             raise ValueError("description must be at most 1024 characters.")
         if not isinstance(self.root_path, Path):
             raise ValueError("root_path must be a Path.")
-        require_unique_non_empty_strings(self.capability_hints, "capability_hints")
         if not isinstance(self.references, tuple):
             raise ValueError("references must be a tuple.")
         if any(not isinstance(item, SkillReferenceDefinition) for item in self.references):
@@ -113,12 +111,9 @@ class PromptContribution:
 
     skill_id: str
     instructions: str
-    capability_hints: tuple[str, ...] = field(default_factory=tuple)
-
     def __post_init__(self) -> None:
         require_non_empty_string(self.skill_id, "skill_id")
         require_non_empty_string(self.instructions, "instructions")
-        require_unique_non_empty_strings(self.capability_hints, "capability_hints")
 
 
 @dataclass(frozen=True)

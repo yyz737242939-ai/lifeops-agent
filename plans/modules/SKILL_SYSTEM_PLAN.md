@@ -65,7 +65,7 @@ Skill 的职责是提供当前请求需要的领域说明、prompt contribution 
 - 只加载 selected skill body；未选中的 Skill 只暴露轻量 metadata。
 - reference/source/helper 通过 manifest ID 访问，拒绝任意路径和任意 URL。
 - Research Skill 声明 Hugging Face Daily Papers / Blog 来源及 parse / rank / dedupe helpers。
-- Travel Skill 声明 Travel domain tools 和 fixture-backed external read capabilities。
+- Travel Skill 说明 Travel domain 工作流和 fixture-backed external read 功能边界，不声明工具权限。
 - prompt assembly 只组合 core rules、selected Skill contribution 和必要的工具描述。
 - 记录 `skill.selected`、`skill.loaded`、`skill.reference.loaded` 及失败事件。
 
@@ -104,8 +104,8 @@ Skill 选择只决定向 LLM 加载哪些任务说明和知识，不承担授权
 
 - Context 阶段可把 selected Skill 的 `PromptContribution` 当作一种 context source，但 Context Engine 决定预算和最终顺序。
 - Memory 和 Context 阶段未来可为 LLM 提供请求上下文，但不负责预筛选 Skill metadata。
-- Planner 只消费 Skill instructions 和 capability catalog，不直接加载文件。
-- Executor 只接收已解析的 Tool capability，不依赖 Skill loader。
+- Planner 只消费 Skill instructions，不直接加载文件；未来如何匹配 Tool 留到 Planner 模块设计。
+- Executor 不依赖 Skill loader，Tool 权限完全消费 Policy 与 Tool System 的授权结果。
 - Recovery 可记录上一 run 的 selected Skill 作为解释材料，但重跑时由 LLM 重新选择。
 - Inspector / Eval 读取 selection reason 与 loaded IDs，不读取隐藏的完整 Skill body。
 
@@ -150,7 +150,7 @@ read_skill_reference(skill_id, ref_id) -> SkillReference
 build_prompt_contributions(loaded_skills) -> list[PromptContribution]
 ```
 
-Skill System 输出 LifeOps 类型，同时保持 `SKILL.md` 资源格式与 Agent Skills 约定兼容。若后续 Deep Agents / LangChain agent 或 middleware 需要动态 prompt，由独立 adapter 转换，不让核心 Policy、Capability 或 Domain 模型继承框架类型。
+Skill System 输出 LifeOps 类型，同时保持 `SKILL.md` 资源格式与 Agent Skills 约定兼容。若后续 Deep Agents / LangChain agent 或 middleware 需要动态 prompt，由独立 adapter 转换，不让核心 Policy、Tool 或 Domain 模型继承框架类型。
 
 ## 7. 失败模式
 
@@ -185,7 +185,7 @@ Skill System 输出 LifeOps 类型，同时保持 `SKILL.md` 资源格式与 Age
 ## 9. 文档更新
 
 - 完成实现后更新 `docs/PROGRESS_LOG.md` 和 `docs/ARCHITECTURE.md`。
-- 在 `docs/RUNTIME_CONCEPTS.md` 完善 Skill、Skill Routing、Progressive Reference Loading、Capability 章节。
+- 在 `docs/RUNTIME_CONCEPTS.md` 完善 Skill、Skill Routing 和 Progressive Reference Loading 章节。
 - 阶段 5 学习链接维护在 `docs/AGENT_LEARNING_LINKS.md`，模块计划不散落 URL。
 - 框架和 Domain 边界维护在本模块计划与 `plans/RUNTIME_REFACTOR_PLAN.md`，不新增 decisions / ADR 文档。
 
@@ -197,7 +197,7 @@ Skill System 输出 LifeOps 类型，同时保持 `SKILL.md` 资源格式与 Age
 4. [已完成] 建立 Research / Travel Skill skeleton；当前只包含可发现 metadata、领域说明、边界和 planned workflow，不提前声明或执行尚未实现的工具。
 5. [已完成] 实现基于全部 Skill metadata 的 LLM selection、LifeOps 结构校验和关键语义 trace；`SkillSelectionClient` 初始化时从 `.env` 读取模型与 OpenAI-compatible provider 配置，通过 Chat Completions 请求 JSON，并在本地使用 Pydantic 解析，不引入 Agent 框架。
 6. [已完成] 实现 body / reference lazy loading、大小限制、manifest ID 白名单和 traversal 防护。
-7. [已完成] 实现 framework-independent prompt contribution assembler；只把 selected-and-loaded Skill body 与 capability hints 转为 `PromptContribution`，保留选择顺序并拒绝重复 ID，不负责 core rules、工具描述、Context budget 或最终 prompt 排序。
+7. [已完成] 实现 framework-independent prompt contribution assembler；只把 selected-and-loaded Skill body 转为 `PromptContribution`，保留选择顺序并拒绝重复 ID，不负责 core rules、工具描述、Context budget 或最终 prompt 排序。
 8. [已完成] 接入 orchestration 和生产 bootstrap：Skill 永久启用，启动时总是 discover `app/skills/` 并构建 Registry / `SkillService`。request-local `prepare_skills` 仅在 allow 路径执行 selection/load/contribution；`SkillService` 是 Runtime 必需依赖，只有 `TraceSink` 通过 `OrchestrationContext` 传入。失败以 `runtime.skill_failed` 在 stub execution 前终止。
 9. [已完成] 补聚焦测试和版本化长期 Eval fixture 形状；固定覆盖 Research、Travel、跨 Domain、零选择、未知 ID、重复 ID 和空 reason。
 10. [已完成] 更新当前架构、概念、学习链接和推进事实，并完成全量回归与离线 bootstrap smoke 验证。

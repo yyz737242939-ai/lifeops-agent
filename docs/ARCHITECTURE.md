@@ -136,13 +136,13 @@ Skill System 当前实现位于 `app/skills/`。`SkillDefinition`、`LoadedSkill
 
 `discover_skills(root)` 使用 LifeOps 原生薄实现扫描根目录的直接子目录。当前只读取每个 `SKILL.md` frontmatter 中的 `name` 和 `description`，校验 Agent Skills 命名约束、父目录同名、必填项和未知字段；不读取 Markdown body、reference、script 或 asset。Deep Agents / LangChain Skills 只作为文件约定和 progressive disclosure 参考，不是 runtime 依赖。
 
-当前内置 Skill skeleton 是 `research` 和 `travel`。它们的 `SKILL.md` body 只描述领域用途、临时结果与持久化事实边界以及 planned workflow；尚未实现的 source、helper、Travel Port、tool 和 capability 不作为可用能力暴露。
+当前内置 Skill skeleton 是 `research` 和 `travel`。它们的 `SKILL.md` body 只描述领域用途、临时结果与持久化事实边界以及 planned workflow；尚未实现的 source、helper、Travel Port 和 tool 不作为可用功能暴露。
 
 `select_skills(request, skill_metadata, llm)` 把 `RuntimeRequest` 和全量 Skill metadata 交给 `SkillSelectionClient`。该 client 在初始化时从 `.env` 读取 `OPENROUTER_API_KEY`、`OPENROUTER_BASE_URL` 和 `MODEL`，通过 OpenAI-compatible Chat Completions 请求 JSON 结果；请求只包含用户请求以及全部 Skill ID/description。provider 返回值先经过 Pydantic 结构解析，随后由 LifeOps 校验只能包含 `selected_skill_ids` 和非空 `reason`，并拒绝重复或未知 ID。该接口不预先按 Intent、关键词或 Domain 缩小候选集，也不依赖 Agent 框架。
 
 `load_skill(definition)` 只在选中后读取对应 `SKILL.md` body。`read_skill_reference(definition, reference_id)` 只接受 `references/manifest.json` 白名单中的稳定 ID，并限制为 Skill root 内的 Markdown 相对路径。body/reference 均有空内容和字符数上限校验；正文不进入 trace payload。
 
-`build_prompt_contributions(loaded_skills)` 按 selection/load 顺序把 `LoadedSkill.body` 和声明式 capability hints 转换为独立 `PromptContribution`。它只消费实际已加载的 Skill，拒绝重复 Skill ID；不拼接 core rules、工具描述或最终 system prompt，也不决定 Context budget 和最终排列顺序。
+`build_prompt_contributions(loaded_skills)` 按 selection/load 顺序把 `LoadedSkill.body` 转换为独立 `PromptContribution`。它只消费实际已加载的 Skill，拒绝重复 Skill ID；不拼接 core rules、工具描述或最终 system prompt，也不决定 Context budget 和最终排列顺序。
 
 当前 request-local Skill 链路是：
 
@@ -158,13 +158,15 @@ Skill root
 -> existing stub execution
 ```
 
-生产 bootstrap 根据 `config/default.json` 的 `skills.root` 总是执行 discovery，并直接构造 `SkillSelectionClient()`、Registry 与必需的 `SkillService`；模型和 provider 地址不再通过 bootstrap 或 JSON 配置逐层传参。不存在 Skill 开关或空 service 分支。`prepare_skills` 只位于 Policy allow 路径。稳定事件只包含 `skill.selected`、`skill.loaded`、`skill.reference.loaded` 及其失败事件，不记录机械化文件读取 lifecycle。LLM selection reason 保留在 request-local `SkillSelection` 中，不写 event payload，避免间接复述用户原文。原始 provider interaction 等统一 LLM Gateway 出现后再集中进入 `llm.jsonl`。最终完整 prompt assembly 仍未实现。Skill metadata 不提供工具授权；未来 capability、Policy 和 Guardrail 仍由 Tool System 统一求交与执行。
+生产 bootstrap 根据 `config/default.json` 的 `skills.root` 总是执行 discovery，并直接构造 `SkillSelectionClient()`、Registry 与必需的 `SkillService`；模型和 provider 地址不再通过 bootstrap 或 JSON 配置逐层传参。不存在 Skill 开关或空 service 分支。`prepare_skills` 只位于 Policy allow 路径。稳定事件只包含 `skill.selected`、`skill.loaded`、`skill.reference.loaded` 及其失败事件，不记录机械化文件读取 lifecycle。LLM selection reason 保留在 request-local `SkillSelection` 中，不写 event payload，避免间接复述用户原文。原始 provider interaction 等统一 LLM Gateway 出现后再集中进入 `llm.jsonl`。最终完整 prompt assembly 仍未实现。Skill metadata 不提供也不参与工具授权；工具权限由 Policy、Tool contract 和 Guardrail 统一处理。
 
 ## Tool System
 
-Tool System 当前只完成第一步模型层，位于 `app/tools/models.py`。`ToolDefinition` 是代码配置的不可变契约，只描述 input/output schema、effect、risk、required scopes 和 required capabilities，不直接持有 handler；handler 绑定、重复注册与完整 schema validation 属于下一步 registry。
+Tool System 当前完成模型层和 registry/schema validation，位于 `app/tools/`。`ToolDefinition` 是代码配置的不可变契约，只描述 input/output schema、effect 和 risk，不直接持有 handler。`ToolRegistry` 在启动配置阶段递归校验 V1 支持的 JSON Schema 子集，再把 definition 与 callable handler 绑定；重复注册、未知工具、非法 handler 和非法 schema 使用 typed Tool errors。
 
-当前模型层还定义了 request-local `ToolCapabilitySet`、`ToolCall`、结构化 `ToolResult` / `ToolError`、`ExecutionEvidence`，以及 pre/post 两阶段的 `GuardrailDecision`。它们不依赖 LangChain 或 LangGraph。当前 orchestration 仍使用 `stub_execute`，尚不存在真实 Tool Gateway，也尚未写入 `tool_calls` 或 tool events。
+`resolve_allowed_tools(policy, registry)` 生成 request-local `AllowedToolSet`。Policy `allowed_tools` 是唯一 Tool 授权结果；resolver 只验证 Policy 为 allow 且每个被点名的 Tool 已注册。空 `allowed_tools`、Policy deny 或 requires-confirmation 都产生空集合。Policy 点名未注册工具属于 contract mismatch，返回 typed authorization error，而不是静默忽略。Skill 和额外 scope 都不参与这项计算。
+
+模型可见 catalog 只包含稳定排序的 name、description 和 input schema，并返回 schema 深拷贝，不暴露 handler 或 risk 等执行信息；传入 `AllowedToolSet.tool_names` 后只返回当前集合内工具。当前模型层还定义了 `ToolCall`、结构化 `ToolResult` / `ToolError`、`ExecutionEvidence`，以及 pre/post 两阶段的 `GuardrailDecision`。Pre-execution Guardrail 复核注册状态、Policy allowed tools、confirmation 和参数 schema，不读取 Skill 功能元数据，也不做第二套 scope 授权。它们不依赖 LangChain 或 LangGraph。当前 orchestration 继续使用 `stub_execute`，尚不存在真实 Tool Gateway、`tool_calls` 写入或 tool events。
 
 ## Intent / Policy
 
@@ -183,15 +185,7 @@ Policy / Permission Layer 当前实现位于：
 
 Policy 判断系统现在被允许做什么。它只基于当前 `RuntimeRequest` 和 `IntentDecision` 产出 `PolicyDecision`，不能从 Planner、assistant 文本、LLM classifier、Recovery Context 或 LangGraph checkpoint 获得写入授权。
 
-当前允许的写入 scope 只是候选授权模型：
-
-```text
-task.write_candidate
-memory.write_candidate
-wellbeing.write_candidate
-```
-
-这些 scope 不代表对应 domain 已经实现，也不代表真实工具已经执行。
+`PolicyDecision.allowed_tools` 是唯一 Tool 授权结果。当前 Domain tools 尚未实现，因此默认 `PolicyService` 暂不填充具体 Tool；Policy allow 仍不代表真实工具已经执行。
 
 ## 基础设施层
 
@@ -250,7 +244,7 @@ Runtime 的事实来源是：
 - Intent 只提供语义信号，不授权写入。
 - Policy 是当前写入授权事实源；Executor 未来只能执行 Policy 允许的操作。
 - 不能只凭 assistant 文本判断成功。Runtime 状态和成功的 WRITE action 才是“已保存”或“已更新”的事实来源。
-- Skill、Tool、Capability、Context、Runtime State、业务数据和长期 Memory 必须保持分离。
+- Skill、Tool authorization、Context、Runtime State、业务数据和长期 Memory 必须保持分离。
 - Conversation Summary 不是 Long-term Memory。Context compaction 结果不能自动升级为长期记忆。
 - LangGraph checkpoint state、Planner 输出和 Recovery Context 不是业务事实来源，也不是写入授权来源。
 - `TraceSink` 是运行依赖，不进入 `GraphState`；event payload 不写完整 GraphState 或原始用户输入。

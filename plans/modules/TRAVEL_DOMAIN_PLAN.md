@@ -49,7 +49,7 @@ Fixture Adapter（阶段 5）
 ExternalObservation（临时、带 fetched_at/expires_at/provenance）
     ↓
 Candidate / ItineraryDraft（临时）
-    ↓ 用户确认 + WRITE scope
+    ↓ 用户确认 + Policy allowed tool
 Trip / Itinerary / Decision（业务事实）
 ```
 
@@ -73,7 +73,7 @@ PlaceSearchPort
 - Memory 通过 `TravelPreferenceCandidateProvider` 获取候选偏好；只有阶段 6 明确授权后才能成为 Memory。
 - Planner 通过 `TravelPlanningReadModel` 获取规划所需事实，不读取 repository internals。
 - Executor 通过 ToolGateway 调外部 READ 或 Domain WRITE tools。
-- Travel 不定义 `TravelPlanRun` / `TravelExecutor`；通用 PlanStep 通过 capability 选择本 Domain tools。
+- Travel 不定义 `TravelPlanRun` / `TravelExecutor`；通用 Planner 与 Tool 的匹配方式留到 Planner 模块施工时设计。
 - Recovery 使用 event/evidence 解释做到哪一步，不自动重放搜索或保存。
 - Calendar MCP 只替换 fixture adapter，不改变 service。
 - DAG 可表达 calendar/weather/transport/lodging 并行读取与后续比较；阶段 5 不实现 scheduler。
@@ -155,7 +155,7 @@ Tools：
 - Trip/constraint/itinerary 状态与 version；
 - 每个 Port 的 fixture contract test；
 - 正常、无结果、timeout、rate-limit、过期和部分失败；
-- READ/WRITE capability、scope 和 confirmation；
+- READ/WRITE allowed tools 和 confirmation；
 - itinerary draft 与保存事实分离；
 - 幂等保存和 transaction rollback；
 - 历史 Trip/KnowledgeReference 查询；

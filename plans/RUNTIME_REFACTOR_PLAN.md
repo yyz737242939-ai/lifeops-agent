@@ -56,7 +56,7 @@ User Input
 
 - Agent Loop。
 - Tool System。
-- Capability。
+- Tool authorization resolution。
 - Write Safety。
 - Skill / Skill References。
 - Context Engine。
@@ -293,7 +293,7 @@ app/
     gateway.py
     guardrails.py
     results.py
-    capability.py
+    authorization.py
     adapters/
       langchain.py
 
@@ -392,12 +392,12 @@ main.py
 
 - `domains/*` 不直接读写 SQLite connection，只通过 repository / service。
 - `domains/*` 不依赖具体 LangChain、MCP 或 HTTP provider 类型；外部能力通过稳定 Port 和 adapter 接入。
-- Skill 只提供 prompt contribution、reference/source 声明和 capability hints，不执行工具或授权写入。
+- Skill 只提供 prompt contribution、reference/source 声明和功能工作流说明，不执行工具或参与工具授权。
 - 所有工具通道必须经过同一个 Tool Gateway 和 pre/post Guardrails。
 - `policy` 不调用工具，不写业务数据。
 - `planning` 不调用工具，不授权 WRITE。
 - `execution` 可以调用 tools，但必须使用 PolicyDecision 和 allowed tools。
-- Planner / Executor 面向 capability 和 Tool contract，不按 Domain 建立独立执行循环；同一个 PlanRun 可以包含多个 Domain 的步骤。
+- Planner / Executor 面向 Tool contract，不按 Domain 建立独立执行循环；Planner 与 Tool 的匹配模型留到 Planner 模块施工时设计，同一个 PlanRun 可以包含多个 Domain 的步骤。
 - `orchestration` 只做 graph wiring 和 route，不放业务逻辑。
 - `inspector` 只读 event log、LLM log、application log 和必要业务事实，不修改状态。
 - `evals` 使用 fixture 和测试数据库，不复用真实用户数据。
@@ -491,14 +491,14 @@ SQLite 存储：
 | 模块 | V0 状态 | 当前 runtime 轻量升级方向 | 模块计划 |
 |---|---|---|---|
 | Agent Loop | 旧 `Agent` 聚合过多职责 | 拆成 runtime / orchestration / execution | `plans/modules/RUNTIME_CORE_PLAN.md` |
-| Skill System | 已有 skill routing / reference loader 经验，当前重构计划缺少独立位置 | 兼容 Agent Skills / Deep Agents 文件约定；LifeOps 保留 routing / prompt contribution / progressive references / capability hints 边界 | `plans/modules/SKILL_SYSTEM_PLAN.md` |
-| Tool System | registry 和 business tool 偏大 | LifeOps 原生 definition / registry / capability / Guardrail / gateway / result；LangChain 只做可选 adapter | `plans/modules/TOOL_SYSTEM_PLAN.md` |
+| Skill System | 已有 skill routing / reference loader 经验，当前重构计划缺少独立位置 | 兼容 Agent Skills / Deep Agents 文件约定；LifeOps 保留 routing / prompt contribution / progressive references，Skill 不参与工具授权 | `plans/modules/SKILL_SYSTEM_PLAN.md` |
+| Tool System | registry 和 business tool 偏大 | LifeOps 原生 definition / registry / Policy authorization / Guardrail / gateway / result；LangChain 只做可选 adapter | `plans/modules/TOOL_SYSTEM_PLAN.md` |
 | Policy / Safety | write policy、interaction policy 分散 | 统一 PolicyDecision 和 confirmation model | `plans/modules/INTENT_POLICY_PLAN.md` |
 | Context | 功能强但复杂 | 初版精简 request context，后续版本迁移压缩/ref/index | `plans/modules/CONTEXT_PLAN.md` |
 | Memory | JSON store + 简单检索 | SQLite semantic memory + profile markdown + request-local injection | `plans/modules/MEMORY_PLAN.md` |
 | Research / Personal Knowledge | V0 Hugging Face News Skill + 临时 source/helper loop | SQLite knowledge facts + provenance + Hugging Face 外部只读 briefing + future Context/Memory ports | `plans/modules/RESEARCH_KNOWLEDGE_DOMAIN_PLAN.md` |
 | Travel | 无完整 V0 domain | SQLite Trip / Itinerary facts + fixture-backed external ports + planning-only confirmation boundary | `plans/modules/TRAVEL_DOMAIN_PLAN.md` |
-| Planner | V0 transient plan | 保留跨 Domain PlanRun / PlanStep；step 绑定 objective / capability / candidate tools，不授权、不执行、不自动写 Domain facts | `plans/modules/PLANNER_PLAN.md` |
+| Planner | V0 transient plan | 保留跨 Domain PlanRun / PlanStep；step 如何匹配候选 tools 留到 Planner 模块设计，Planner 不授权、不执行、不自动写 Domain facts | `plans/modules/PLANNER_PLAN.md` |
 | Executor | 包装旧 agent loop | 单步执行 + 结构化反馈 + tool evidence | `plans/modules/EXECUTOR_PLAN.md` |
 | Observability Logging | V0 已有三通道文件日志经验，当前重构阶段误放进 SQLite | event JSONL / LLM JSONL / application.log 三通道文件日志 | `plans/modules/OBSERVABILITY_LOGGING_PLAN.md` |
 | Recovery | run/action JSON 摘要 | 基于 event logs 和必要业务状态生成解释型 recovery context，不自动 replay | `plans/modules/RECOVERY_PLAN.md` |
@@ -659,7 +659,7 @@ plans/
 - Intent Layer。
 - Policy / Permission Layer。
 - Tool System。
-- Capability。
+- Tool authorization resolution。
 - Write Safety。
 - LangGraph Orchestrator。
 - LangChain adapter。
@@ -882,10 +882,10 @@ docs/RUNTIME_CONCEPTS.md
 目标：
 
 - 建立 Skill System、工具系统和 Research / Personal Knowledge、Travel 两个内部 domain。
-- Skill System 先明确 skill discovery、routing、prompt assembly、progressive reference loading、skill-scoped capabilities 和多轮 skill state 的边界。
-- Skill routing 支持一次选择多个 Skill；selected capabilities 合并后再与 registry、Policy、scope 和 confirmation 求交集。
-- Tool System 再处理 tool definition、capability intersection、pre/post Guardrails、Tool Gateway、execution evidence 和 domain tool 的运行时边界。
-- Skill 文件兼容 Agent Skills / Deep Agents 的 `SKILL.md` 与 progressive disclosure 约定，LifeOps 保留 routing/capability 安全边界；Tool 使用 LifeOps 原生安全核心和可选 LangChain adapter。
+- Skill System 先明确 skill discovery、routing、prompt assembly、progressive reference loading 和多轮 skill state 的边界；Skill 只说明功能和工作流，不参与工具授权。
+- Skill routing 支持一次选择多个 Skill；工具授权完全由 Policy 的 allowed tools 决定，registry 校验工具存在，Guardrail 检查 confirmation 和具体调用。
+- Tool System 再处理 tool definition、Policy authorization resolution、pre/post Guardrails、Tool Gateway、execution evidence 和 domain tool 的运行时边界。
+- Skill 文件兼容 Agent Skills / Deep Agents 的 `SKILL.md` 与 progressive disclosure 约定；Tool 使用 LifeOps 原生安全核心和可选 LangChain adapter。
 - 两个 Domain 必须为阶段 6-9 的 Context、Memory、Recovery、Planner、Executor、Calendar MCP、Inspector、Eval 和 DAG 提供稳定 Port / read model / evidence 接口，但不提前实现这些模块。
 
 交付：
@@ -895,7 +895,7 @@ docs/RUNTIME_CONCEPTS.md
 - `plans/modules/RESEARCH_KNOWLEDGE_DOMAIN_PLAN.md`。
 - `plans/modules/TRAVEL_DOMAIN_PLAN.md`。
 - skill loader / router / prompt assembly / reference loader。
-- tool registry / capability / Guardrails / gateway / LangChain adapter。
+- tool registry / Policy authorization / Guardrails / gateway / LangChain adapter。
 - Research repository / service / tools / Hugging Face briefing。
 - Travel repository / service / tools / fixture-backed external Ports。
 
@@ -928,7 +928,7 @@ docs/RUNTIME_CONCEPTS.md
 - 单步 Executor。
 - ExecutionFeedback。
 - final answer 校验。
-- capability-bound step、跨 Domain tool 调用、逐 WRITE step confirmation 和 bounded replan。
+- 跨 Domain tool 调用、逐 WRITE step confirmation 和 bounded replan；PlanStep 与 Tool 的匹配模型在 Planner 阶段单独设计。
 - LangGraph checkpoint / persistence 作为暂停、恢复、fault tolerance 的候选实现；不承担外部副作用回滚。
 
 ### 阶段 8：Calendar MCP

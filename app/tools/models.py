@@ -14,7 +14,6 @@ from app.common.validation import (
 
 
 _TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$")
-_CAPABILITY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
 
 
 def _require_object_schema(schema: dict[str, Any], field_name: str) -> None:
@@ -81,8 +80,6 @@ class ToolDefinition:
     output_schema: dict[str, Any]
     effect: ToolEffect
     risk: ToolRisk
-    required_scopes: tuple[str, ...] = field(default_factory=tuple)
-    required_capabilities: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         require_non_empty_string(self.name, "name")
@@ -98,38 +95,15 @@ class ToolDefinition:
             raise ValueError("effect must be a ToolEffect.")
         if not isinstance(self.risk, ToolRisk):
             raise ValueError("risk must be a ToolRisk.")
-        require_unique_non_empty_strings(self.required_scopes, "required_scopes")
-        require_unique_non_empty_strings(
-            self.required_capabilities, "required_capabilities"
-        )
 
 
 @dataclass(frozen=True)
-class ToolCapability:
-    """One stable capability that tools may require and callers may hold."""
+class AllowedToolSet:
+    """Request-local Tool names authorized by Policy and registered contracts."""
 
-    name: str
-    description: str = ""
-
-    def __post_init__(self) -> None:
-        require_non_empty_string(self.name, "name")
-        if not _CAPABILITY_PATTERN.fullmatch(self.name):
-            raise ValueError(
-                "name must use at least two lowercase dot-separated segments."
-            )
-        if not isinstance(self.description, str):
-            raise ValueError("description must be a string.")
-
-
-@dataclass(frozen=True)
-class ToolCapabilitySet:
-    """Request-local capabilities and visible tool names after intersection."""
-
-    capabilities: tuple[str, ...] = field(default_factory=tuple)
     tool_names: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
-        require_unique_non_empty_strings(self.capabilities, "capabilities")
         require_unique_non_empty_strings(self.tool_names, "tool_names")
 
 
@@ -216,8 +190,6 @@ class GuardrailDecision:
     reason_code: str
     reason: str
     tool_name: str
-    required_scopes: tuple[str, ...] = field(default_factory=tuple)
-    satisfied_scopes: tuple[str, ...] = field(default_factory=tuple)
     sanitized_args_summary: dict[str, Any] = field(default_factory=dict)
     evidence_requirements: tuple[str, ...] = field(default_factory=tuple)
 
@@ -229,10 +201,6 @@ class GuardrailDecision:
         require_non_empty_string(self.reason_code, "reason_code")
         require_non_empty_string(self.reason, "reason")
         require_non_empty_string(self.tool_name, "tool_name")
-        require_unique_non_empty_strings(self.required_scopes, "required_scopes")
-        require_unique_non_empty_strings(self.satisfied_scopes, "satisfied_scopes")
-        if not set(self.satisfied_scopes).issubset(self.required_scopes):
-            raise ValueError("satisfied_scopes must be a subset of required_scopes.")
         if not isinstance(self.sanitized_args_summary, dict):
             raise ValueError("sanitized_args_summary must be a dict.")
         require_unique_non_empty_strings(

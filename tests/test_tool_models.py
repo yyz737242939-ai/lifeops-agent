@@ -28,8 +28,6 @@ class ToolModelsTest(unittest.TestCase):
             output_schema=_EMPTY_OBJECT_SCHEMA,
             effect=ToolEffect.EXTERNAL_READ,
             risk=ToolRisk.LOW,
-            required_scopes=("runtime.read",),
-            required_capabilities=("research.sources.read",),
         )
 
         self.assertEqual(definition.effect, ToolEffect.EXTERNAL_READ)
@@ -81,18 +79,6 @@ class ToolModelsTest(unittest.TestCase):
         )
         self.assertEqual(result.evidence, (evidence,))
 
-    def test_guardrail_satisfied_scopes_must_be_required(self) -> None:
-        with self.assertRaises(ValueError):
-            GuardrailDecision(
-                action=GuardrailAction.DENY,
-                stage=GuardrailStage.PRE_EXECUTION,
-                reason_code="scope_missing",
-                reason="Required write scope is missing.",
-                tool_name="travel.itinerary_write",
-                required_scopes=("travel.write",),
-                satisfied_scopes=("runtime.read",),
-            )
-
     def test_guardrail_summary_does_not_store_raw_arguments(self) -> None:
         decision = GuardrailDecision(
             action=GuardrailAction.ALLOW,
@@ -100,8 +86,6 @@ class ToolModelsTest(unittest.TestCase):
             reason_code="allowed",
             reason="All deterministic checks passed.",
             tool_name="research.sources_read",
-            required_scopes=("runtime.read",),
-            satisfied_scopes=("runtime.read",),
             sanitized_args_summary={"source_id": "daily-papers"},
             evidence_requirements=("source_response",),
         )

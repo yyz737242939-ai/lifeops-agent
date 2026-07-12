@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from app.intent.models import ClassifierResult, IntentDecision, IntentType
-from app.policy.models import PermissionScope, PolicyAction
+from app.policy.models import PolicyAction
 from app.policy.service import PolicyService
 from app.runtime.models import RuntimeRequest
 
@@ -20,9 +20,8 @@ class PolicyServiceTest(unittest.TestCase):
                 )
 
                 self.assertEqual(decision.action, PolicyAction.ALLOW)
-                self.assertEqual(decision.authorized_write_scopes, [])
 
-    def test_explicit_write_request_returns_limited_scope(self) -> None:
+    def test_explicit_write_request_for_supported_target_is_allowed(self) -> None:
         decision = PolicyService().evaluate(
             _request("把明天跑步加入任务"),
             IntentDecision(
@@ -33,10 +32,7 @@ class PolicyServiceTest(unittest.TestCase):
         )
 
         self.assertEqual(decision.action, PolicyAction.ALLOW)
-        self.assertEqual(
-            decision.authorized_write_scopes,
-            [PermissionScope.TASK_WRITE_CANDIDATE],
-        )
+        self.assertEqual(decision.allowed_tools, [])
 
     def test_write_request_without_supported_object_requires_confirmation(self) -> None:
         decision = PolicyService().evaluate(
@@ -50,7 +46,6 @@ class PolicyServiceTest(unittest.TestCase):
 
         self.assertEqual(decision.action, PolicyAction.REQUIRES_CONFIRMATION)
         self.assertTrue(decision.requires_confirmation)
-        self.assertEqual(decision.authorized_write_scopes, [])
 
     def test_unknown_intent_does_not_allow(self) -> None:
         decision = PolicyService().evaluate(
@@ -59,7 +54,6 @@ class PolicyServiceTest(unittest.TestCase):
         )
 
         self.assertEqual(decision.action, PolicyAction.DENY)
-        self.assertEqual(decision.authorized_write_scopes, [])
 
     def test_llm_classifier_result_cannot_authorize_write(self) -> None:
         decision = PolicyService().evaluate(
@@ -79,7 +73,6 @@ class PolicyServiceTest(unittest.TestCase):
         )
 
         self.assertEqual(decision.action, PolicyAction.REQUIRES_CONFIRMATION)
-        self.assertEqual(decision.authorized_write_scopes, [])
 
     def test_metadata_cannot_bypass_policy(self) -> None:
         request = RuntimeRequest(
@@ -94,7 +87,6 @@ class PolicyServiceTest(unittest.TestCase):
         )
 
         self.assertEqual(decision.action, PolicyAction.ALLOW)
-        self.assertEqual(decision.authorized_write_scopes, [])
 
 
 def _request(user_input: str) -> RuntimeRequest:
