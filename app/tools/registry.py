@@ -9,11 +9,11 @@ from typing import Any
 
 from app.common.validation import require_non_empty_string
 from app.tools.errors import ToolNotFoundError, ToolRegistryError
-from app.tools.models import ToolDefinition, ToolResult
+from app.tools.models import ToolCall, ToolDefinition, ToolResult
 from app.tools.schema import validate_tool_schema
 
 
-ToolHandler = Callable[[dict[str, Any]], ToolResult]
+ToolHandler = Callable[[ToolCall], ToolResult]
 
 
 @dataclass(frozen=True)

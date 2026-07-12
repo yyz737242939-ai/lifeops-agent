@@ -21,3 +21,7 @@ class ToolSchemaError(ToolRegistryError):
 
 class ToolAuthorizationError(ToolSystemError):
     """Raised when request-local allowed Tools cannot be resolved safely."""
+
+
+class ToolGatewayError(ToolSystemError):
+    """Raised when the Tool Gateway receives an invalid execution contract."""

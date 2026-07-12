@@ -35,12 +35,11 @@ class OrchestrationSkillStageTest(unittest.TestCase):
                 "classify_intent",
                 "decide_policy",
                 "prepare_skills",
-                "stub_execute",
+                "execute_tool",
                 "finalize",
             ],
         )
         self.assertEqual(state["skill_selection"].selected_skill_ids, ("travel", "research"))
-        self.assertEqual(state["loaded_skill_ids"], ["travel", "research"])
         self.assertEqual(
             [item.skill_id for item in state["prompt_contributions"]],
             ["travel", "research"],
@@ -55,10 +54,11 @@ class OrchestrationSkillStageTest(unittest.TestCase):
                 "skill.selected",
                 "skill.loaded",
                 "skill.loaded",
+                "tool.catalog.resolved",
             ],
         )
 
-    def test_skill_selection_failure_stops_before_stub_execution(self) -> None:
+    def test_skill_selection_failure_stops_before_tool_execution(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             trace = RecordingTraceSink()
             orchestrator = RuntimeOrchestrator(
@@ -79,7 +79,7 @@ class OrchestrationSkillStageTest(unittest.TestCase):
         self.assertEqual(state["result"].status, RuntimeStatus.ERROR)
         self.assertEqual(state["result"].error_code, "runtime.skill_failed")
         self.assertEqual(state["error_stage"], "skill")
-        self.assertNotIn("stub_execute", state["graph_path"])
+        self.assertNotIn("execute_tool", state["graph_path"])
         self.assertEqual(trace.events[-1][0], "skill.selection.failed")
 
     def test_confirmation_and_deny_routes_do_not_call_skill_selector(self) -> None:

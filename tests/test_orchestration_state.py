@@ -33,7 +33,6 @@ class OrchestrationStateTest(unittest.TestCase):
             "policy": None,
             "route": None,
             "skill_selection": None,
-            "loaded_skill_ids": [],
             "prompt_contributions": [],
             "result": None,
             "error_code": None,

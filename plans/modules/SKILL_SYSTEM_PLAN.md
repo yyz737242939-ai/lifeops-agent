@@ -74,7 +74,7 @@ Skill 的职责是提供当前请求需要的领域说明、prompt contribution 
 - 不实现 Tool execution。
 - 不实现规则、关键词、Intent、embedding 或 rerank 等前置 Skill 筛选。
 - 不支持用户显式声明、指定或强制启用某个 Skill。
-- Skill 层不实现 Guardrail、权限判断或工具授权；这些约束统一由 Tool System 保证。
+- Skill 层不实现 Guardrail、权限判断或工具授权；selected Skill IDs 只供 Tool System 缩小业务候选 Tool，空 Skill 绑定的通用 Tool 不受此筛选影响。
 - 不接 MCP 或任意插件市场。
 - 不让 Skill 直接读 SQLite、Context Store 或 Memory Store。
 - 不实现自动 Skill 学习、自动改写 SKILL.md 或用户自定义 Skill UI。
@@ -98,7 +98,7 @@ PromptContribution
 Planner / Executor / Tool System
 ```
 
-Skill 选择只决定向 LLM 加载哪些任务说明和知识，不承担授权或 Guardrail。工具是否存在、是否允许调用以及调用前后的安全检查，统一由 Tool System 负责。
+Skill 选择决定向 LLM 加载哪些任务说明和知识，并为 Tool System 提供业务候选维度，但不承担授权或 Guardrail。Policy effect 决定动作权限，Tool 是否最终暴露以及调用前后的安全检查由 Tool System 负责。
 
 ### 4.1 未来适配接口
 
@@ -180,7 +180,7 @@ Skill System 输出 LifeOps 类型，同时保持 `SKILL.md` 资源格式与 Age
 - Hugging Face source 失败不产生虚构 briefing；
 - selection/load event 不泄漏原始用户输入或完整 reference。
 
-阶段 9 Eval 复用固定 fixture，断言 selected skills、reason、loaded skill IDs 和 trace evidence。
+阶段 11 Eval 复用固定 fixture，断言 selected skills、reason、loaded skill IDs 和 trace evidence。
 
 ## 9. 文档更新
 
@@ -198,6 +198,6 @@ Skill System 输出 LifeOps 类型，同时保持 `SKILL.md` 资源格式与 Age
 5. [已完成] 实现基于全部 Skill metadata 的 LLM selection、LifeOps 结构校验和关键语义 trace；`SkillSelectionClient` 初始化时从 `.env` 读取模型与 OpenAI-compatible provider 配置，通过 Chat Completions 请求 JSON，并在本地使用 Pydantic 解析，不引入 Agent 框架。
 6. [已完成] 实现 body / reference lazy loading、大小限制、manifest ID 白名单和 traversal 防护。
 7. [已完成] 实现 framework-independent prompt contribution assembler；只把 selected-and-loaded Skill body 转为 `PromptContribution`，保留选择顺序并拒绝重复 ID，不负责 core rules、工具描述、Context budget 或最终 prompt 排序。
-8. [已完成] 接入 orchestration 和生产 bootstrap：Skill 永久启用，启动时总是 discover `app/skills/` 并构建 Registry / `SkillService`。request-local `prepare_skills` 仅在 allow 路径执行 selection/load/contribution；`SkillService` 是 Runtime 必需依赖，只有 `TraceSink` 通过 `OrchestrationContext` 传入。失败以 `runtime.skill_failed` 在 stub execution 前终止。
+8. [已完成] 接入 orchestration 和生产 bootstrap：Skill 永久启用，启动时总是 discover `app/skills/` 并构建 Registry / `SkillService`。request-local `prepare_skills` 仅在 allow 路径执行 selection/load/contribution；`SkillService` 是 Runtime 必需依赖，只有 `TraceSink` 通过 `OrchestrationContext` 传入。失败以 `runtime.skill_failed` 在 `execute_tool` 前终止。
 9. [已完成] 补聚焦测试和版本化长期 Eval fixture 形状；固定覆盖 Research、Travel、跨 Domain、零选择、未知 ID、重复 ID 和空 reason。
 10. [已完成] 更新当前架构、概念、学习链接和推进事实，并完成全量回归与离线 bootstrap smoke 验证。

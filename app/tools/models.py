@@ -80,6 +80,7 @@ class ToolDefinition:
     output_schema: dict[str, Any]
     effect: ToolEffect
     risk: ToolRisk
+    skill_ids: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         require_non_empty_string(self.name, "name")
@@ -95,6 +96,7 @@ class ToolDefinition:
             raise ValueError("effect must be a ToolEffect.")
         if not isinstance(self.risk, ToolRisk):
             raise ValueError("risk must be a ToolRisk.")
+        require_unique_non_empty_strings(self.skill_ids, "skill_ids")
 
 
 @dataclass(frozen=True)

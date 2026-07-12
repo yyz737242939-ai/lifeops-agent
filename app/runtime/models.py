@@ -72,6 +72,7 @@ class RuntimeResult:
     message: str
     intent: dict[str, Any] | None = None
     policy: dict[str, Any] | None = None
+    tool_result: dict[str, Any] | None = None
     error_code: str | None = None
     trace_summary: list[str] = field(default_factory=list)
 
@@ -86,6 +87,8 @@ class RuntimeResult:
             raise ValueError("intent must be a dict when provided.")
         if self.policy is not None and not isinstance(self.policy, dict):
             raise ValueError("policy must be a dict when provided.")
+        if self.tool_result is not None and not isinstance(self.tool_result, dict):
+            raise ValueError("tool_result must be a dict when provided.")
         if self.error_code is not None and not self.error_code.strip():
             raise ValueError("error_code must be non-empty when provided.")
         if not isinstance(self.trace_summary, list):

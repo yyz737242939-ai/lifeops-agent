@@ -20,6 +20,12 @@ class PolicyServiceTest(unittest.TestCase):
                 )
 
                 self.assertEqual(decision.action, PolicyAction.ALLOW)
+                expected_effects = (
+                    ["read", "external_read"]
+                    if intent_type == IntentType.READ
+                    else []
+                )
+                self.assertEqual(decision.allowed_effects, expected_effects)
 
     def test_explicit_write_request_for_supported_target_is_allowed(self) -> None:
         decision = PolicyService().evaluate(
@@ -32,7 +38,7 @@ class PolicyServiceTest(unittest.TestCase):
         )
 
         self.assertEqual(decision.action, PolicyAction.ALLOW)
-        self.assertEqual(decision.allowed_tools, [])
+        self.assertEqual(decision.allowed_effects, ["write"])
 
     def test_write_request_without_supported_object_requires_confirmation(self) -> None:
         decision = PolicyService().evaluate(

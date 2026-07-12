@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from app.intent.models import IntentDecision
@@ -13,6 +14,10 @@ from app.policy.models import PolicyDecision
 from app.policy.service import PolicyService
 from app.runtime.models import RuntimeResult, RuntimeStatus
 from app.skills.service import SkillService
+from app.tools.authorization import resolve_allowed_tools
+from app.tools.calling import ToolCallSelectionClient
+from app.tools.models import ToolCallStatus, ToolResult
+from app.tools.runtime import ToolRuntime
 
 
 def classify_intent(
@@ -117,7 +122,6 @@ def prepare_skills(
     try:
         preparation = skill_service.prepare(request, trace=trace)
         updated["skill_selection"] = preparation.selection
-        updated["loaded_skill_ids"] = list(preparation.loaded_skill_ids)
         updated["prompt_contributions"] = list(preparation.prompt_contributions)
     except Exception as exc:
         updated["error_code"] = "runtime.skill_failed"
@@ -136,15 +140,95 @@ def prepare_skills(
     return updated
 
 
-def stub_execute(state: GraphState) -> GraphState:
-    """Build the existing allow result without performing real execution."""
+def execute_tool(
+    state: GraphState,
+    *,
+    tool_runtime_factory: Callable[[], ToolRuntime],
+    selection_client: ToolCallSelectionClient,
+    trace: TraceSink | None = None,
+) -> GraphState:
+    """Expose the authorized catalog, select one call, and execute it via Gateway."""
 
-    return _build_policy_result(
-        state,
-        node_name="stub_execute",
-        expected_status=RuntimeStatus.OK,
-        message="Request passed intent and policy checks; execution is not implemented yet.",
-    )
+    updated = _append_node(state, "execute_tool")
+    request = updated["request"]
+    intent = updated["intent"]
+    policy = updated["policy"]
+    selection = updated["skill_selection"]
+    if intent is None or policy is None or selection is None:
+        raise ValueError("intent, policy, and Skill selection must precede execution.")
+
+    try:
+        tool_runtime = tool_runtime_factory()
+        allowed_tools = resolve_allowed_tools(
+            selection.selected_skill_ids,
+            policy,
+            tool_runtime.registry,
+        )
+        catalog = tool_runtime.registry.model_catalog(allowed_tools.tool_names)
+        if trace is not None:
+            trace.append(
+                "tool.catalog.resolved",
+                {
+                    "tool_names": list(allowed_tools.tool_names),
+                    "tool_count": len(allowed_tools.tool_names),
+                },
+            )
+        if not catalog:
+            updated["trace_summary"] = ["runtime.tool_catalog.empty"]
+            updated["result"] = RuntimeResult(
+                run_id=request.run_id,
+                session_id=request.session_id,
+                status=RuntimeStatus.OK,
+                message="No authorized Tool is available for this request.",
+                intent=_intent_summary(intent),
+                policy=_policy_summary(policy),
+                trace_summary=updated["trace_summary"],
+            )
+            return updated
+
+        call = selection_client.select(
+            request,
+            tuple(updated["prompt_contributions"]),
+            catalog,
+        )
+        if call is None:
+            updated["trace_summary"] = ["runtime.tool_call.not_selected"]
+            updated["result"] = RuntimeResult(
+                run_id=request.run_id,
+                session_id=request.session_id,
+                status=RuntimeStatus.OK,
+                message="No Tool call was selected for this request.",
+                intent=_intent_summary(intent),
+                policy=_policy_summary(policy),
+                trace_summary=updated["trace_summary"],
+            )
+            return updated
+
+        result = tool_runtime.gateway.execute(call, allowed_tools, trace=trace)
+        updated["trace_summary"] = [f"runtime.tool_call.{result.status.value}"]
+        updated["result"] = _runtime_result_from_tool(
+            request.run_id,
+            request.session_id,
+            intent,
+            policy,
+            result,
+            updated["trace_summary"],
+        )
+    except Exception as exc:
+        updated["error_code"] = getattr(exc, "code", None) or "runtime.tool_failed"
+        updated["error_stage"] = "tool"
+        updated["trace_summary"] = [_safe_error_summary(exc)]
+        updated["result"] = RuntimeResult(
+            run_id=request.run_id,
+            session_id=request.session_id,
+            status=RuntimeStatus.ERROR,
+            message="Tool execution failed.",
+            intent=_intent_summary(intent),
+            policy=_policy_summary(policy),
+            error_code=updated["error_code"],
+            trace_summary=updated["trace_summary"],
+        )
+    return updated
 
 
 def require_confirmation(state: GraphState) -> GraphState:
@@ -190,7 +274,7 @@ def _build_policy_result(
         raise ValueError("intent and policy must be available before result construction.")
 
     updated = _append_node(state, node_name)
-    updated["trace_summary"] = ["runtime.orchestration.stubbed"]
+    updated["trace_summary"] = [f"runtime.policy_result.{expected_status.value}"]
     updated["result"] = RuntimeResult(
         run_id=updated["request"].run_id,
         session_id=updated["request"].session_id,
@@ -201,6 +285,57 @@ def _build_policy_result(
         trace_summary=updated["trace_summary"],
     )
     return updated
+
+
+def _runtime_result_from_tool(
+    run_id: str,
+    session_id: str,
+    intent: IntentDecision,
+    policy: PolicyDecision,
+    result: ToolResult,
+    trace_summary: list[str],
+) -> RuntimeResult:
+    status = {
+        ToolCallStatus.SUCCEEDED: RuntimeStatus.OK,
+        ToolCallStatus.REQUIRES_CONFIRMATION: RuntimeStatus.REQUIRES_CONFIRMATION,
+        ToolCallStatus.DENIED: RuntimeStatus.UNSUPPORTED,
+        ToolCallStatus.FAILED: RuntimeStatus.ERROR,
+    }[result.status]
+    error_code = result.error.code if result.error is not None else None
+    return RuntimeResult(
+        run_id=run_id,
+        session_id=session_id,
+        status=status,
+        message=f"Tool call {result.status.value}: {result.tool_name}.",
+        intent=_intent_summary(intent),
+        policy=_policy_summary(policy),
+        tool_result={
+            "call_id": result.call_id,
+            "tool_name": result.tool_name,
+            "status": result.status.value,
+            "output": result.output,
+            "evidence": [
+                {
+                    "evidence_type": item.evidence_type,
+                    "summary": item.summary,
+                    "reference": item.reference,
+                    "attributes": item.attributes,
+                }
+                for item in result.evidence
+            ],
+            "error": (
+                {
+                    "code": result.error.code,
+                    "message": result.error.message,
+                    "retryable": result.error.retryable,
+                }
+                if result.error is not None
+                else None
+            ),
+        },
+        error_code=error_code if status == RuntimeStatus.ERROR else None,
+        trace_summary=trace_summary,
+    )
 
 
 def _append_node(state: GraphState, node_name: str) -> GraphState:
@@ -230,7 +365,7 @@ def _intent_summary(intent: IntentDecision) -> dict[str, Any]:
 def _policy_summary(policy: PolicyDecision) -> dict[str, Any]:
     return {
         "action": policy.action.value,
-        "allowed_tools": policy.allowed_tools,
+        "allowed_effects": policy.allowed_effects,
         "requires_confirmation": policy.requires_confirmation,
         "denied_reason": policy.denied_reason,
     }

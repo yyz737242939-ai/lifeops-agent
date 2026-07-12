@@ -18,6 +18,7 @@ class PolicyService:
             if _identifies_supported_write_target(request.user_input):
                 return PolicyDecision(
                     action=PolicyAction.ALLOW,
+                    allowed_effects=["write"],
                     reason="Explicit write request identifies a supported target.",
                 )
             return PolicyDecision(
@@ -34,6 +35,7 @@ class PolicyService:
         if intent.intent_type == IntentType.READ:
             return PolicyDecision(
                 action=PolicyAction.ALLOW,
+                allowed_effects=["read", "external_read"],
                 reason="Read intent is allowed without write authorization.",
             )
         if intent.intent_type in {IntentType.CHAT, IntentType.PLAN_REQUEST}:

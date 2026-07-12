@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from app.tools.errors import ToolSchemaError
@@ -29,6 +30,76 @@ def validate_tool_schema(schema: dict[str, Any], field_name: str) -> None:
     if schema.get("type") != "object":
         _raise(field_name, 'top-level schema must declare type="object"')
     _validate_node(schema, field_name)
+
+
+def validate_tool_value(value: Any, schema: dict[str, Any], field_name: str) -> None:
+    """Validate one JSON-compatible value against the supported schema subset."""
+
+    _validate_value(value, schema, field_name)
+
+
+def _validate_value(value: Any, schema: dict[str, Any], path: str) -> None:
+    schema_type = schema["type"]
+    if not _matches_type(value, schema_type):
+        _raise(path, f"value must have type {schema_type}")
+    if "enum" in schema and value not in schema["enum"]:
+        _raise(path, "value must be one of the declared enum values")
+
+    if schema_type == "object":
+        properties = schema.get("properties", {})
+        missing = sorted(set(schema.get("required", [])) - set(value))
+        if missing:
+            _raise(path, f"missing required properties: {missing}")
+        if not schema.get("additionalProperties", False):
+            unknown = sorted(set(value) - set(properties))
+            if unknown:
+                _raise(path, f"unknown properties: {unknown}")
+        for name, item in value.items():
+            if name in properties:
+                _validate_value(item, properties[name], f"{path}.{name}")
+    elif schema_type == "array":
+        _validate_length(value, schema, path, "minItems", "maxItems")
+        for index, item in enumerate(value):
+            _validate_value(item, schema["items"], f"{path}[{index}]")
+    elif schema_type == "string":
+        _validate_length(value, schema, path, "minLength", "maxLength")
+        pattern = schema.get("pattern")
+        if pattern is not None and re.search(pattern, value) is None:
+            _raise(path, "value does not match pattern")
+    elif schema_type in {"integer", "number"}:
+        minimum = schema.get("minimum")
+        maximum = schema.get("maximum")
+        if minimum is not None and value < minimum:
+            _raise(path, f"value must be at least {minimum}")
+        if maximum is not None and value > maximum:
+            _raise(path, f"value must be at most {maximum}")
+
+
+def _matches_type(value: Any, schema_type: str) -> bool:
+    return {
+        "object": isinstance(value, dict),
+        "array": isinstance(value, list),
+        "string": isinstance(value, str),
+        "integer": isinstance(value, int) and not isinstance(value, bool),
+        "number": isinstance(value, (int, float)) and not isinstance(value, bool),
+        "boolean": isinstance(value, bool),
+        "null": value is None,
+    }[schema_type]
+
+
+def _validate_length(
+    value: Any,
+    schema: dict[str, Any],
+    path: str,
+    minimum_key: str,
+    maximum_key: str,
+) -> None:
+    minimum = schema.get(minimum_key)
+    maximum = schema.get(maximum_key)
+    if minimum is not None and len(value) < minimum:
+        _raise(path, f"length must be at least {minimum}")
+    if maximum is not None and len(value) > maximum:
+        _raise(path, f"length must be at most {maximum}")
 
 
 def _validate_node(schema: dict[str, Any], path: str) -> None:
@@ -108,6 +179,12 @@ def _validate_string(schema: dict[str, Any], path: str) -> None:
         value = schema.get(keyword)
         if value is not None and (not isinstance(value, str) or not value.strip()):
             _raise(path, f"{keyword} must be a non-empty string")
+    pattern = schema.get("pattern")
+    if pattern is not None:
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            _raise(path, "pattern must be a valid regular expression", cause=exc)
 
 
 def _validate_number(schema: dict[str, Any], path: str) -> None:

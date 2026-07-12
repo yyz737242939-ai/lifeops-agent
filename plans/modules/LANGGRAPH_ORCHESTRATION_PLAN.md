@@ -93,7 +93,7 @@ LangGraph 在本阶段只负责 orchestration runtime：组织 nodes、routes、
 
 - Context / Memory / Recovery 阶段可把 graph state 扩展为 request-local assembly state。
 - Planner / Executor 阶段可把 `stub_execute` 替换为 direct executor 或 planner route。
-- Tool System 阶段可把 `PolicyDecision.allowed_tools` 接入 executor，但仍由自研 policy 决定权限。
+- Tool System 阶段把 selected Skill candidates 与 `PolicyDecision.allowed_effects` 求交后接入 executor；Skill 只提供业务候选，仍由自研 Policy 决定动作权限。
 - Recovery 阶段可对照 LangGraph checkpoint、本项目 event log 和必要业务事实的边界。
 - Human-in-the-loop 阶段可研究 LangGraph interrupt，但授权仍必须由 LifeOps Policy / Interaction State 产出。
 - Eval / Inspector 阶段可直接使用最终 `graph_path` 和 Intent / Policy / route 语义事件断言 runtime path。

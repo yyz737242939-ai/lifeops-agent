@@ -23,25 +23,27 @@ class StorageMigrationsTest(unittest.TestCase):
 
         self.assertEqual(report.previous_version, 0)
         self.assertEqual(report.current_version, CURRENT_SCHEMA_VERSION)
-        self.assertEqual(report.applied_versions, (1,))
+        self.assertEqual(report.applied_versions, (1, 2, 3))
         self.assertEqual(get_schema_version(self.conn), CURRENT_SCHEMA_VERSION)
         self.assert_tables_exist(
             "schema_migrations",
             "run_records",
             "tool_calls",
+            "research_sources",
+            "travel_itineraries",
         )
 
     def test_migrate_is_idempotent(self) -> None:
         first = migrate(self.conn)
         second = migrate(self.conn)
 
-        self.assertEqual(first.applied_versions, (1,))
+        self.assertEqual(first.applied_versions, (1, 2, 3))
         self.assertEqual(second.previous_version, CURRENT_SCHEMA_VERSION)
         self.assertEqual(second.current_version, CURRENT_SCHEMA_VERSION)
         self.assertEqual(second.applied_versions, ())
 
         rows = self.conn.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()
-        self.assertEqual(rows["count"], 1)
+        self.assertEqual(rows["count"], 3)
 
     def test_newer_database_version_is_rejected(self) -> None:
         self.conn.execute(

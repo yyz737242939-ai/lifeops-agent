@@ -54,6 +54,7 @@ class RuntimeServiceTest(unittest.TestCase):
                         "policy.decided",
                         "orchestration.route.selected",
                         "skill.selected",
+                        "tool.catalog.resolved",
                         "runtime.run.completed",
                     ],
                 )
@@ -61,12 +62,12 @@ class RuntimeServiceTest(unittest.TestCase):
                 self.assertEqual(events[3]["payload"]["action"], "allow")
                 self.assertEqual(events[4]["payload"]["route"], "allow")
                 self.assertEqual(
-                    events[6]["payload"]["graph_path"],
+                    events[7]["payload"]["graph_path"],
                     [
                         "classify_intent",
                         "decide_policy",
                         "prepare_skills",
-                        "stub_execute",
+                        "execute_tool",
                         "finalize",
                     ],
                 )
@@ -98,15 +99,15 @@ class RuntimeServiceTest(unittest.TestCase):
         self.assertNotIn("已写入", result.message)
         self.assertNotIn("saved", result.message.lower())
 
-    def test_policy_allow_is_still_stubbed_execution(self) -> None:
+    def test_policy_allow_with_empty_catalog_finishes_without_model_call(self) -> None:
         result = RuntimeService(create_test_skill_service()).handle(
             _request("把明天跑步加入任务")
         )
 
         self.assertEqual(result.status, RuntimeStatus.OK)
         self.assertEqual(result.policy["action"], "allow")
-        self.assertEqual(result.trace_summary, ["runtime.orchestration.stubbed"])
-        self.assertIn("execution is not implemented yet", result.message)
+        self.assertEqual(result.trace_summary, ["runtime.tool_catalog.empty"])
+        self.assertIn("No authorized Tool", result.message)
 
     def test_intent_failure_returns_error_and_skips_policy(self) -> None:
         policy = RecordingPolicyService()

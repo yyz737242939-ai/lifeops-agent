@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from app.policy.models import PolicyAction, PolicyDecision
 from app.tools.errors import ToolAuthorizationError
 from app.tools.models import AllowedToolSet
@@ -9,11 +11,19 @@ from app.tools.registry import ToolRegistry
 
 
 def resolve_allowed_tools(
+    selected_skill_ids: Iterable[str],
     policy: PolicyDecision,
     registry: ToolRegistry,
 ) -> AllowedToolSet:
-    """Resolve Policy-authorized Tool names against the startup registry."""
+    """Intersect Skill business candidates with Policy-allowed Tool effects."""
 
+    if isinstance(selected_skill_ids, (str, bytes)) or not isinstance(
+        selected_skill_ids, Iterable
+    ):
+        raise ToolAuthorizationError(
+            "selected_skill_ids must be an iterable of Skill IDs.",
+            code="tool_authorization_invalid_skill_ids",
+        )
     if not isinstance(policy, PolicyDecision):
         raise ToolAuthorizationError(
             "policy must be a PolicyDecision.",
@@ -24,24 +34,22 @@ def resolve_allowed_tools(
             "registry must be a ToolRegistry.",
             code="tool_authorization_invalid_registry",
         )
+    normalized_skill_ids: set[str] = set()
+    for skill_id in selected_skill_ids:
+        if not isinstance(skill_id, str) or not skill_id.strip():
+            raise ToolAuthorizationError(
+                "selected_skill_ids must contain non-empty strings.",
+                code="tool_authorization_invalid_skill_id",
+            )
+        normalized_skill_ids.add(skill_id)
     if policy.action != PolicyAction.ALLOW:
         return AllowedToolSet()
-
-    allowed_tool_names = set(policy.allowed_tools)
-    unknown_allowed = sorted(
-        name for name in allowed_tool_names if not registry.contains(name)
-    )
-    if unknown_allowed:
-        raise ToolAuthorizationError(
-            "Policy allowed_tools contains unregistered Tool names.",
-            code="tool_authorization_unknown_allowed_tool",
-            details={"tool_names": unknown_allowed},
-        )
 
     selected_tools = tuple(
         definition
         for definition in registry.list_definitions()
-        if definition.name in allowed_tool_names
+        if (not definition.skill_ids or normalized_skill_ids.intersection(definition.skill_ids))
+        and definition.effect.value in policy.allowed_effects
     )
     return AllowedToolSet(
         tool_names=tuple(definition.name for definition in selected_tools),

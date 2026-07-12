@@ -22,6 +22,8 @@ from app.runtime.models import RuntimeRequest, RuntimeResult
 from app.runtime.run_store import finish_run_record, insert_run_record
 from app.storage.unit_of_work import SqliteUnitOfWork
 from app.skills.service import SkillService
+from app.tools.calling import ToolCallSelectionClient
+from app.tools.runtime import ToolRuntime
 
 
 class RuntimeService:
@@ -35,6 +37,8 @@ class RuntimeService:
         conn: sqlite3.Connection | None = None,
         event_log: EventLogWriter | None = None,
         log_root: str | Path | None = None,
+        tool_runtime_factory: Callable[[], ToolRuntime] | None = None,
+        tool_call_selection_client: ToolCallSelectionClient | None = None,
     ) -> None:
         self._intent_service = intent_service or IntentService()
         self._policy_service = policy_service or PolicyService()
@@ -42,6 +46,8 @@ class RuntimeService:
             intent_service=self._intent_service,
             policy_service=self._policy_service,
             skill_service=skill_service,
+            tool_runtime_factory=tool_runtime_factory,
+            tool_call_selection_client=tool_call_selection_client,
         )
         self._conn = conn
         self._event_log = event_log
@@ -51,7 +57,7 @@ class RuntimeService:
         self._logger = logging.getLogger("lifeops.runtime")
 
     def handle(self, request: RuntimeRequest) -> RuntimeResult:
-        """Run one request through Intent and Policy without executing tools yet."""
+        """Run one request through authorization and direct Tool execution."""
 
         trace = OptionalLogAppender(self._build_event_appender(request))
 

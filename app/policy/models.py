@@ -19,17 +19,19 @@ class PolicyDecision:
     """Request-local authorization decision for one runtime request."""
 
     action: PolicyAction
-    allowed_tools: list[str] = field(default_factory=list)
+    allowed_effects: list[str] = field(default_factory=list)
     requires_confirmation: bool = False
     denied_reason: str | None = None
     reason: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.allowed_tools, list):
-            raise ValueError("allowed_tools must be a list.")
-        for tool_name in self.allowed_tools:
-            if not isinstance(tool_name, str) or not tool_name.strip():
-                raise ValueError("allowed_tools must contain non-empty strings.")
+        if not isinstance(self.allowed_effects, list):
+            raise ValueError("allowed_effects must be a list.")
+        supported_effects = {"read", "external_read", "write"}
+        if any(effect not in supported_effects for effect in self.allowed_effects):
+            raise ValueError("allowed_effects contains an unsupported Tool effect.")
+        if len(set(self.allowed_effects)) != len(self.allowed_effects):
+            raise ValueError("allowed_effects must not contain duplicates.")
         if self.denied_reason is not None and not self.denied_reason.strip():
             raise ValueError("denied_reason must be non-empty when provided.")
         if self.reason is not None and not self.reason.strip():

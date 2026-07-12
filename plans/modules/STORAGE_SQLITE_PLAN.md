@@ -15,7 +15,7 @@
 - `app/storage/` 已包含 SQLite connection factory、schema、migration runner、repository helper 和 `SqliteUnitOfWork`。
 - `app/observability/` 已包含 event JSONL、LLM JSONL 和 application log 的文件日志 writer。
 - `config/default.json` 已声明默认数据库路径 `data/lifeops.sqlite3`。
-- SQLite 当前 schema 包含 `schema_migrations`、`run_records` 和 `tool_calls`。
+- SQLite 当前 schema version 3 包含 `schema_migrations`、`run_records`、`tool_calls`、`research_sources` 和 `travel_itineraries`；后两者分别由 Research / Travel Domain migration 管理。
 - 测试数据库 helper 已支持 `:memory:` SQLite 和 migration helper，避免触碰真实 `data/lifeops.sqlite3`。
 - `.gitignore` 已覆盖本地 SQLite、JSON 用户数据、导出目录和 legacy 运行输出。
 - `docs/PROGRESS_LOG.md`、`docs/ARCHITECTURE.md` 和 `docs/RUNTIME_CONCEPTS.md` 已同步阶段 2 边界。
@@ -176,7 +176,7 @@ tool_calls
 
 后续 domain 模块再设计的业务表方向：
 
-以下名称只是后续模块的候选方向，不属于阶段 2 已实现 schema。当前 `V1_INITIAL_STORAGE_SCHEMA` 仍只有 `run_records` 和 `tool_calls`；Research / Travel 或 Memory / Eval 真正施工时，必须各自新增 schema migration 和 repository 测试，不能因为本计划列出名称就视为已经落库。
+以下名称是后续模块的候选方向。`V1_INITIAL_STORAGE_SCHEMA` 仍只有 `run_records` 和 `tool_calls`；Research Source 已通过 version 2 migration 新增 `research_sources`，Travel Itinerary 已通过 version 3 migration 新增 `travel_itineraries`。其余 Research / Travel / Memory / Eval 表必须在对应模块真正施工时各自新增 migration 和 repository 测试，不能因为本计划列出名称就视为已经落库。
 
 ```text
 research_topics
@@ -413,4 +413,4 @@ uv run python -m unittest discover -s tests -v
   - 所有测试通过显式 test DB factory 创建独立数据库；eval 也使用 fixture/test DB，不复用 `data/lifeops.sqlite3`。
 
 - 哪些表现在建，哪些等 domain 计划？
-  - 当前只保留 `schema_migrations`、`run_records`、`tool_calls`。业务语义强的表等 Tasks、Wellbeing、Memory、Eval 模块计划确认后再实现。
+  - 当前保留 `schema_migrations`、`run_records`、`tool_calls`，由 Research version 2 migration 增加 `research_sources`，由 Travel version 3 migration 增加 `travel_itineraries`。其他业务表等对应模块计划确认后再实现。

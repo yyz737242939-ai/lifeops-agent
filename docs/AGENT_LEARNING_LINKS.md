@@ -20,7 +20,7 @@
 - LifeOps 原生 Tool Gateway、Policy authorization resolution、pre/post Guardrails 和 execution evidence。
 - LangChain tool schema / ToolNode / middleware 作为可选 adapter，不替代 Policy、Guardrail 或业务事实来源。
 - Hugging Face 白名单外部来源、provenance、临时 observation 与用户确认保存边界。
-- Travel typed Port + fixture adapter；真实 Calendar MCP 仍留在阶段 8。
+- Travel typed Port + fixture adapter；真实 Calendar MCP 仍留在阶段 10。
 
 ## 选择标准
 
@@ -46,6 +46,9 @@
 
 - [OpenAI API - Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs)  
   学习重点：用 JSON Schema 约束模型输出。阶段 3 的 `LlmIntentClassifier` 仍是空实现，但接口应为未来 structured intent output 留出位置；模型输出只能提供 intent signal，不能直接授权写入。
+
+- [OpenAI API - Function calling](https://developers.openai.com/api/docs/guides/function-calling)
+  学习重点：Responses function tool schema、`function_call` 输出与 `call_id`；LifeOps 只发送授权后的 Tool catalog，并在执行前继续经过本地 Guardrail。
 
 ### Guardrails / Policy / Permission
 
@@ -176,7 +179,7 @@ LifeOps 自研 runtime
 ### LangChain Tools 与 LifeOps Tool Adapter
 
 - [LangChain Tools](https://docs.langchain.com/oss/python/langchain/tools)
-  学习重点：tool schema、结构化输入输出、`ToolRuntime` 和 `ToolNode`。项目只把这些作为 adapter 候选；LifeOps `ToolGateway` 仍负责 Policy authorization、Guardrail 和 execution evidence。尤其要避免让工具通过 framework store 直接保存业务事实或 Memory。
+  学习重点：tool schema、结构化输入输出、`ToolRuntime` 和 `ToolNode`。阶段 5 已评估 `StructuredTool`，当前因为没有真实 LangChain 调用方且不会减少 schema/invocation glue而不实现 adapter；LifeOps `ToolGateway` 仍负责 Policy authorization、Guardrail 和 execution evidence。未来接入时尤其要避免让 framework callable 或 store 绕过 Gateway 保存业务事实或 Memory。
 
 - [Python typing.Protocol](https://docs.python.org/3/library/typing.html#typing.Protocol)
   学习重点：用 structural subtyping 定义小而稳定的 external Port。Travel 的 Calendar、Weather、Transport、Lodging、Place adapters 应能用 fixture 和未来真实实现共享 contract，而不让 Domain 依赖具体 provider。

@@ -21,7 +21,7 @@
 
 - 真实 LLM structured output classifier。
 - 多轮 pending confirmation / Interaction Safety State。
-- Tool System `allowed_tools` 对齐。
+- Tool System `allowed_effects` 对齐。
 - LangGraph interrupt / human-in-the-loop 映射。
 
 阶段 3 收口验证：
@@ -100,7 +100,7 @@ V0 的主要问题预计是：
 - 增加 classifier confidence arbitration、fallback 和 eval cases。
 - 增加 multi-turn confirmation state。
 - 只有真实需求出现时才增加风险分类，不预留 operation scope。
-- 和 Tool System 的 `allowed_tools` 对齐。
+- 和 Tool System 的 `allowed_effects` 对齐。
 - 和 LangGraph interrupts / human-in-the-loop 对齐，但不让它们成为授权事实源。
 
 ## 4. Runtime 边界
@@ -125,7 +125,7 @@ Policy 输出：
 
 - `PolicyDecision`。
 - `allowed` / `denied` / `requires_confirmation`。
-- `allowed_tools` 初版可为空。
+- `allowed_effects`：read / external_read / write。
 - reason。
 - trace-safe payload。
 
@@ -204,7 +204,7 @@ ClassifierResult
 
 PolicyDecision
 - action
-- allowed_tools
+- allowed_effects
 - requires_confirmation
 - denied_reason
 - reason
@@ -283,9 +283,9 @@ IntentService 合成原则：
 PolicyService 原则：
 
 - 只基于当前用户输入和 IntentDecision 判断授权。
-- Policy 只通过具体 `allowed_tools` 表达 Tool 授权；当前工具尚未接入时该列表为空。
+- Policy 只表达本轮允许的 Tool effects，不枚举业务 Tool 名；业务候选来自 selected Skills，通用 Tool 可不绑定 Skill。
 - 疑似写入但不明确时返回 `requires_confirmation`。
-- 未确认、拒绝或不明确请求不产生 allowed tools。
+- 未确认、拒绝或不明确请求不产生 allowed effects。
 - 永远不从 LLM classifier、Planner、assistant 文本或 checkpoint 获得授权。
 
 ## 7. 失败模式
@@ -300,7 +300,7 @@ PolicyService 原则：
 - IntentService 无法合成 decision。
 - PolicyService 遇到未知 intent type。
 - 疑似写入但缺少对象或动作。
-- Policy 点名了未注册 Tool，或漏掉应授权的 Tool。
+- Policy effect 与当前 intent 不一致，或错误允许 WRITE。
 
 处理原则：
 
@@ -340,7 +340,7 @@ Intent 最小测试：
 Policy 最小测试：
 
 - `chat` / `read` / `plan_request` 不产生 write authorization。
-- 明确 `write_request` 可以通过 Policy，但当前工具尚未接入时 `allowed_tools` 为空。
+- 明确 `write_request` 可以通过 Policy 并只产生 `write` effect；具体 Tool 仍由 Skill candidates 与 Registry 决定。
 - 疑似写入但对象不明确返回 `requires_confirmation`。
 - 未知 intent 默认不 allow。
 - LLM classifier 的结果不能直接授权写入。

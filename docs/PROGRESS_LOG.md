@@ -21,9 +21,9 @@
 
 项目已完成阶段 3.5：Observability 文件日志校正。
 
-项目已完成阶段 4：LangGraph Orchestration 骨架，当前准备进入阶段 5：Skill System / Tool System 与 Domains。
+项目已完成阶段 4：LangGraph Orchestration 骨架。
 
-阶段 5 已完成计划收敛，并已开始 Skill System 的分步实现：
+阶段 5 正在进行：Skill System、Tool System 与 Research、Travel 最小纵向切片已经完成；两个 Domain 原计划中的完整初版功能仍未完成，因此阶段 5 尚未关闭。
 
 - Skill System 已完成核心模型、错误、metadata registry 和原生 discovery / validation；当前严格支持 `name`、`description` frontmatter 子集，不引入 Deep Agents / LangChain loader 或 middleware。
 - discovery 只扫描根目录的直接 Skill 子目录，只读取 `SKILL.md` metadata；完整 body 和附属资源仍保持未加载。
@@ -32,9 +32,9 @@
 - selected Skill body 已支持按需加载；reference 只能通过 `references/manifest.json` 中的稳定 ID 读取相对 Skill root 的 Markdown 文件，并校验 traversal、文件类型、空正文和大小限制。
 - Skill trace 只记录 selection、body load、reference load 的成功或失败语义事件；不记录机械文件 lifecycle，不泄漏用户原文、LLM selection reason、Skill body 或 reference 正文。
 - prompt contribution assembler 已实现：只从 selected-and-loaded Skills 生成 `PromptContribution`，保留选择顺序并拒绝重复 Skill ID；core rules、工具描述、Context budget 和最终 prompt 排序仍不属于 Skill System。
-- LangGraph allow 路径已接入 request-local `prepare_skills`：Policy allow 后执行 Skill selection、selected body loading 和 contribution assembly，再进入现有 stub execution；确认与拒绝分支不调用 selector。
-- `SkillService` 已收敛为与 Intent/Policy service 对称的构造依赖：它长期持有 `SkillRegistry` 和 `SkillSelectionClient`，并在 graph 构建时注入；只有每个 run 不同的 `TraceSink` 留在 `OrchestrationContext`。GraphState 只保存当前 run 的 selection、loaded IDs 和 contributions。
-- Skill 阶段失败返回 `runtime.skill_failed`，不会继续 stub execution。
+- LangGraph allow 路径已接入 request-local `prepare_skills` 和 `execute_tool`：Policy allow 后执行 Skill selection、selected body loading、contribution assembly、filtered Tool selection 和 Gateway；确认与拒绝分支不调用 selector。
+- `SkillService` 已收敛为与 Intent/Policy service 对称的构造依赖：它长期持有 `SkillRegistry` 和 `SkillSelectionClient`，并在 graph 构建时注入；只有每个 run 不同的 `TraceSink` 留在 `OrchestrationContext`。GraphState 只保存后续节点需要的 selection 和 contributions；loaded IDs、AllowedToolSet、ToolCall、ToolResult 不重复保存在 GraphState。
+- Skill 阶段失败返回 `runtime.skill_failed`，不会继续 `execute_tool`。
 - 生产 bootstrap 已调用 `discover_skills(config.skill_root)`，构建 `SkillRegistry`、`SkillSelectionClient()` 和 `SkillService` 后注入 Runtime；`config/default.json` 只负责 Skill root，模型与 OpenAI-compatible provider 地址由 client 直接从 `.env` 读取。
 - `SkillSelectionClient` 使用 OpenAI-compatible Chat Completions JSON 输出，只发送用户请求与全量 Skill ID/description，不发送未选中的 body；provider 输出经过 Pydantic 解析和 LifeOps 业务校验。当前只记录关键 Skill event，原始 provider interaction 等统一 LLM Gateway 出现后再集中写入 `llm.jsonl`，不在 `SkillService` 参数中逐层传递日志对象。
 - Skill 永久启用，不再提供 `selection_enabled` 配置或 `SkillService is None` 分支；Runtime、Orchestrator 和 graph 都要求显式注入 `SkillService`。
@@ -43,13 +43,20 @@
 - Tool System 采用 LifeOps 原生安全核心与可选 LangChain adapter；所有工具经过统一 Tool Gateway 和 pre/post Guardrails。
 - Tool System 第一步已完成框架无关的核心模型：Tool definition 与 handler 分离，并定义 call/result/error、execution evidence 和结构化 pre/post guardrail decision。
 - Tool System 第二步已完成原生 `ToolRegistry` 与 V1 JSON Schema 子集递归校验：definition/handler 在 registry 绑定，重复和未知工具返回 typed error，模型 catalog 不暴露 handler 或授权信息。
-- Tool System 第三步已调整为 request-local authorization resolution：Policy `allowed_tools` 是唯一 Tool 授权结果，Registry 以 fail-closed 方式验证被点名工具均已注册后生成 `AllowedToolSet`；Skill 和 scope 不参与权限计算，filtered model catalog 只暴露集合内工具，Guardrail 与 gateway 仍未实现。
+- Tool System 第三步已调整为两维 Tool exposure intersection：selected Skills 选出 `ToolDefinition.skill_ids` 匹配的业务候选，空 `skill_ids` 的通用 Tool 始终作为候选；Policy `allowed_effects` 再按 read / external_read / write 过滤并生成 `AllowedToolSet`。Skill 不授权，Policy 不枚举业务 Tool 名，filtered model catalog 只暴露最终集合。
+- Tool System 第四步已完成 framework-independent pre/post Guardrails：pre 只消费 authorization 生成的 `AllowedToolSet`，检查当前 Tool membership、注册、WRITE Tool 名确认和递归 input schema，不重复读取 Policy，参数摘要不保留原始值；post 检查 result identity、成功状态、递归 output schema 和 WRITE evidence。当前 confirmation 只绑定 Tool 名，参数摘要、过期和跨 run token 留到后续 Interaction Safety State。
+- Tool System 第五步已完成原生 `ToolGateway` 和语义 events：拒绝/确认不触达 handler，handler exception、非法返回和 post 拒绝统一收敛为安全 `ToolResult`；event 不记录原始 arguments、output 或异常文本。当前没有跨 Run 查询消费者，Gateway 不提前写 `tool_calls`；该表仅作为阶段 2 migration 的历史兼容结构保留。
+- Tool System 第六步已完成最小 Research Source 纵向切片：handler contract 接收完整 `ToolCall`；Research tools 绑定 Research Skill，fixture-backed READ 产生 request-local observation 且不落库；受控 WRITE 只按当前 observation ID 保存，不能从参数伪造 provenance，并经过 Policy write effect、Gateway confirmation、SQLite transaction 和 post-Guardrail evidence。
+- Tool System 第七步已完成最小 Travel Itinerary 纵向切片：Travel tools 绑定 Travel Skill，fixture-backed EXTERNAL_READ 产生带 observed/expires/provenance 的 request-local candidate，明确不代表 booking；受控 WRITE 只按当前 option ID 保存 itinerary，并经过同一 Policy write effect、Gateway confirmation、transaction 和 evidence 边界。Tool Runtime 未增加 Travel 特例。
+- Tool System 第八步已完成 LangChain adapter 评估并决定当前不实现：本地 `langchain-core 1.4.9` 的 `StructuredTool` 可以包装 callable 与 args schema，但当前没有 LangChain agent/ToolNode 调用方，LifeOps 已有直接 catalog 和完整 Gateway 语义；adapter 反而需要重复 schema/错误转换并桥接 `AllowedToolSet`、confirmation、trace。未来只有出现真实调用方时再以窄 adapter 和 contract tests 接入。
+- Tool System 第九步已完成 compiled Graph 的最小 Direct Executor：V1 选择零或一个 ToolCall，并始终经过 filtered catalog、pre/post Guardrails 和 Gateway；完整 ReAct loop 留到阶段 6。
+- 阶段 5 E2E 已证明 compiled Graph 可从 START 经过 Skill、Policy、filtered catalog 和两阶段 Guardrail 调用真实 Research handler；恶意返回 catalog 外 WRITE Tool 时 Guardrail 以 `tool_not_allowed` 拒绝，handler 不执行且 SQLite 无写入。
 - 两个内部 Domain 从原路线图的 Tasks + Wellbeing 调整为 Research / Personal Knowledge + Travel。
 - Research 首个外部只读场景是 Hugging Face Daily Papers / Blog briefing；临时结果不自动保存为知识或 Memory。
-- Travel 先定义 typed external Ports 并使用 fixture adapters；真实 Calendar MCP 仍在阶段 8 接入。
-- 阶段 5 模块计划已记录 Context、Memory、Planner、Executor、Recovery、MCP、DAG、Inspector、Eval 的未来接入边界。
+- Travel 先定义 typed external Ports 并使用 fixture adapters；真实 Calendar MCP 仍在阶段 10 接入。
+- 阶段 5 后的施工顺序已调整为：阶段 6 ReAct Executor、阶段 7 Plan-and-Execute Planner、阶段 8 Context / Memory、阶段 9 Recovery / Feedback，再进入 Calendar MCP 与 Inspector / Eval / DAG。Executor / Planner 先建立外层控制框架和窄扩展接口，后续状态模块通过接口接入。
 - Domain 已明确为业务 models/service/repository/tools 的逻辑分组，不是独立 Agent 或执行边界；同一通用 PlanRun 可以交叉调用 Research 与 Travel tools。
-- 简单单工具请求未来走 Direct Executor；复杂、多步骤或有依赖请求走 Planner → Executor。PlanStep 的字段和 Tool 匹配方式留到 Planner 模块施工时设计，WRITE 默认逐 step 授权。
+- 简单请求未来走 ReAct Executor；复杂、多步骤或有依赖请求走 Planner → Executor。PlanStep 的字段和 Tool 匹配方式留到 Planner 模块施工时设计，WRITE 默认逐 action / step 授权。
 - PlanRun / PlanStep 可为跨进程恢复而持久化，但不是业务事实；跨 Domain 部分成功时不做全局回滚，保留成功 evidence，从失败 step 恢复或 bounded replan。
 - LangGraph checkpoint 是未来保存 graph/thread state、interrupt、fault tolerance 和 time travel 的候选机制，不负责撤销已经提交的 Domain WRITE 或外部副作用。
 
@@ -59,6 +66,7 @@
 - Runtime Core / Intent / Policy 已完成阶段 3 初版。
 - Observability 文件日志已完成阶段 3.5 初版。
 - LangGraph Orchestration 已完成阶段 4 初版。
+- Skill System、Tool System 与两个 Domain 最小纵向切片已经完成；Research / Travel 完整初版仍是阶段 5 当前工作。
 - 旧 runtime 已归档到 `legacy_v0/app/`。
 - 当前代码放在 `app/`。
 - 当前计划放在 `plans/`。
@@ -72,7 +80,7 @@
 - `app/observability/`：event JSONL、LLM JSONL、application log 的文件日志模型和 writer。
 - `app/runtime/`：`RuntimeRequest`、`RuntimeSession`、`RuntimeResult`、`RuntimeService`、run record 写入 helper 和启动 bootstrap。
 - `app/intent/`：intent models、规则 classifier、LLM classifier 空实现和 `IntentService`。
-- `app/policy/`：policy models 和 `PolicyService`；`allowed_tools` 是唯一 Tool 授权结果。
+- `app/policy/`：policy models 和 `PolicyService`；`allowed_effects` 是动作授权结果。
 - `app/orchestration/`：`GraphState`、policy route、普通 node 函数、compiled `StateGraph`、`RuntimeOrchestrator` 和 Intent / Policy / route 语义事件。
 - `app/observability/logger.py`：应用拥有的 request-local `TraceSink` 接口；Graph 外关键阶段可继续使用同一事件边界。
 - `config/default.json`：声明默认数据库路径 `data/lifeops.sqlite3` 和默认日志根目录 `logs/sessions`。
@@ -95,7 +103,7 @@
 uv run python main.py
 ```
 
-`main.py` 已存在，但仍是阶段 4 runtime skeleton，不是完整产品 CLI。
+`main.py` 已存在并接入阶段 5 最小 Direct Executor，但还不是包含 ReAct、Planner、Context 和 Memory 的完整产品 CLI。
 
 当前 `main.py` 已接入 `config/default.json`、SQLite migration 和 `RuntimeService`。`RuntimeService` 当前执行：
 
@@ -105,12 +113,12 @@ RuntimeRequest
 -> classify_intent
 -> decide_policy
 -> policy conditional route
--> stub_execute / requires_confirmation / deny
+-> prepare_skills -> execute_tool / requires_confirmation / deny
 -> finalize
 -> RuntimeResult
 ```
 
-阶段 4 仍是 stub execution：policy `allow` 只表示当前请求通过授权判断，不代表已经执行真实 tool 或业务写入。`RuntimeService` 仍是外部入口并负责 transaction、run record 和 event writer；LangGraph 只接管 request-local orchestration。测试中使用 `:memory:` SQLite 和 migration helper，不读写真实 `data/lifeops.sqlite3`。
+阶段 5 已用真实 Gateway 替换 stub：policy `allow` 后仍需经过 Skill candidate、Policy effect、filtered catalog、pre/post Guardrails 才能执行 Tool。`RuntimeService` 仍是外部入口并负责 transaction、run record 和 event writer；LangGraph 接管 request-local orchestration。测试使用 `:memory:` SQLite 和 fixture providers，不读写真实 `data/lifeops.sqlite3`。
 
 阶段 4 完成后的状态：
 
@@ -118,10 +126,10 @@ RuntimeRequest
 - 阶段 3 Runtime Core / Intent / Policy 已完成初版。
 - 阶段 3.5 Observability 文件日志校正已完成初版。
 - 阶段 4 LangGraph Orchestration 已完成初版。
-- `docs/ARCHITECTURE.md` 已记录 Runtime Core、Intent / Policy、LangGraph Orchestration、文件日志和 stub execution 边界。
+- `docs/ARCHITECTURE.md` 已记录 Runtime Core、Intent / Policy、LangGraph Orchestration、Skill、Tool Gateway、Guardrails 和 Domain 纵向切片边界。
 - `docs/RUNTIME_CONCEPTS.md` 已记录 Runtime Core、Intent Layer、Policy / Permission Layer、Write Safety、LangGraph Orchestrator、LangGraph vs LangChain、Observability 和 SQLite Local Persistence 学习章节。
 - `plans/modules/STORAGE_SQLITE_PLAN.md`、`plans/modules/RUNTIME_CORE_PLAN.md`、`plans/modules/INTENT_POLICY_PLAN.md`、`plans/modules/OBSERVABILITY_LOGGING_PLAN.md` 和 `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md` 已记录完成状态。
-- 下一阶段是阶段 5：Skill System / Tool System 与 Domains；施工前应先创建或确认对应模块计划。
+- Research / Travel 完整初版完成并通过验证后，阶段 5 才可关闭；随后进入阶段 6 ReAct Executor，并创建 `plans/modules/EXECUTOR_PLAN.md`。
 
 当前有效测试命令：
 

@@ -57,7 +57,7 @@
 
 - `SkillDefinition`：Skill 的轻量声明，包含 ID、说明、routing metadata 和声明式资源索引；不是可执行工具。
 - `PromptContribution`：selected Skill 提供给未来 Context/prompt assembly 的一段有来源、可预算的说明；不是完整 prompt，也不是业务事实。
-- `AllowedToolSet`：Policy `allowed_tools` 经 registry 存在性校验后的本轮工具白名单；Skill 和 scope 不参与计算。
+- `AllowedToolSet`：selected Skill 业务候选（加空 `skill_ids` 的通用 Tool）与 Policy `allowed_effects` 求交后的本轮工具白名单。
 - `ToolDefinition`：工具名称、schema、effect、risk 等静态契约。
 - `ToolGateway`：所有工具通道统一经过的单次执行入口，负责 pre/post Guardrails、handler 调用和 evidence 输出。
 - `GuardrailDecision`：工具执行前或执行后的结构化安全判断；不能扩大 `PolicyDecision` 已授予的权限。
@@ -86,6 +86,18 @@ Framework adapter        != LifeOps safety boundary
 Persisted PlanRun         != Domain fact
 Checkpoint restore        != side-effect rollback
 ```
+
+当前 Tool Guardrail 的最小语义：authorization 先把 Policy 转换为 `AllowedToolSet`；pre-Guardrail 只消费该集合，检查当前 Tool membership、注册、WRITE Tool 名确认与 input schema，不重复读取 Policy；post-Guardrail 检查 call/result identity、成功状态、output schema 和 WRITE evidence。Guardrail 只能缩小或拒绝既有授权，不能新增 allowed tool。当前 confirmation 只绑定 Tool 名，参数摘要和过期时间留到后续交互状态设计。
+
+`ToolGateway` 是唯一允许调用 registry handler 的运行时入口。它不重新计算 Policy 权限，只消费 `AllowedToolSet`，并保证任何 handler 调用都夹在 pre/post Guardrails 之间。handler exception 和 contract violation 被转换为紧凑 `ToolError`，内部异常文本不会进入返回值或语义 event。
+
+Tool handler 接收完整 `ToolCall`，而不是只有 arguments；这样 handler 返回的 `ToolResult` 可以绑定原始 `call_id` 和 `tool_name`，post-Guardrail 能验证 result identity。Domain handler 仍只读取 `call.arguments` 作为业务输入，不能绕过 Gateway。
+
+Research 与 Travel 已用两条最小纵向切片验证同一 Tool Runtime：外部 READ 先产生 request-local observation/candidate，WRITE 只接受该临时对象的 ID，用户确认后才由 Domain repository 保存长期事实并产生 evidence。Domain 差异留在 model/service/repository/Port，Policy、Authorization、Guardrail 和 Gateway 不按 Domain 分叉。
+
+当前不实现 LangChain `StructuredTool` adapter。是否使用框架 adapter 的判断标准不是“框架提供了 Tool 类”，而是项目是否已有真实 LangChain 调用方，以及 adapter 是否能减少 schema/invocation glue。当前 LifeOps 已直接拥有 catalog、ToolCall、Gateway 和 Result；adapter 还必须注入 request-local authorization/confirmation/trace，因此净复杂度更高。未来若引入 agent 或 ToolNode，adapter 只能转换边界，不能成为新的 handler 入口或安全事实源。
+
+Gateway 当前不写 SQLite；`ToolResult`、`ExecutionEvidence` 和语义 events 已足够支持单次调用解释。`tool_calls` 只有在 Inspector、Eval、Recovery 或产品历史查询出现明确的跨 Run 查询需求后才接入，避免为了未来索引提前绑定存储模型。
 
 ## 当前 runtime 项目参考
 
@@ -118,10 +130,10 @@ Policy allow
 -> LifeOps validates selected IDs
 -> load selected SKILL.md body
 -> build PromptContribution list
--> stub execution
+-> filtered Tool selection -> ToolGateway
 ```
 
-`SkillService` 长期持有 `SkillRegistry` 和 `SkillSelectionClient`，像 Intent/Policy service 一样在 graph 构建时注入；每个 run 不同的 `TraceSink` 通过 `OrchestrationContext` 传入。Skill 永久启用，Runtime 不接受空 `SkillService`。selection、loaded IDs 和 contributions 是当前 run 的 `GraphState` 数据。生产 bootstrap 会发现内置 Skill，并组装使用 OpenAI Responses structured output 的 selection adapter；测试注入 deterministic fake client。
+`SkillService` 长期持有 `SkillRegistry` 和 `SkillSelectionClient`，像 Intent/Policy service 一样在 graph 构建时注入；每个 run 不同的 `TraceSink` 通过 `OrchestrationContext` 传入。Skill 永久启用，Runtime 不接受空 `SkillService`。GraphState 保存 selection 和 contributions；loaded IDs 可由 contributions 得出，不重复记录。生产 bootstrap 会发现内置 Skill，并组装 provider selection adapter；测试注入 deterministic fake client。
 
 ### 输入 / 输出 / 不负责什么
 
@@ -136,7 +148,7 @@ Skill System 不执行工具、不授权写入、不决定 Context budget、不�
 - reference ID 未声明、路径越界或正文超限。
 - selection/load 失败后仍继续 Executor，造成缺少必要约束的执行。
 
-当前实现把最后一种情况映射为 `runtime.skill_failed`，在 `stub_execute` 前终止 graph。
+当前实现把最后一种情况映射为 `runtime.skill_failed`，在 `execute_tool` 前终止 graph。
 
 ### 如何测试和观察
 
@@ -144,7 +156,7 @@ Skill System 不执行工具、不授权写入、不决定 Context budget、不�
 
 ### 面试解释
 
-可以这样讲：LifeOps 兼容 Agent Skills 的文件与 progressive disclosure 思路，但 routing、结构校验和安全边界由自己实现。LangGraph 只编排 `prepare_skills` 的位置；Skill 只提供 instructions，Policy 和 Tool System 负责工具授权，Guardrail 和 Gateway 负责安全执行。
+可以这样讲：LifeOps 兼容 Agent Skills 的文件与 progressive disclosure 思路，但 routing、结构校验和安全边界由自己实现。Skill 提供 instructions 并缩小业务候选 Tool，空 Skill 绑定的通用 Tool 独立加入候选；Policy 决定 effect 权限，Guardrail 和 Gateway 负责安全执行。Skill candidate 本身不是授权。
 
 ### 相关项目文件
 
@@ -180,12 +192,13 @@ Runtime Core 固定单轮请求的入口、生命周期和返回边界。它回�
 
 ```text
 RuntimeRequest
--> IntentService
--> PolicyService
+-> RuntimeOrchestrator / StateGraph
+-> IntentService -> PolicyService
+-> SkillService -> Direct Tool selection -> ToolGateway
 -> RuntimeResult
 ```
 
-传入 SQLite connection 时，它可以写入 `run_records`。传入 event log 或配置 `log_root` 时，它会把结构化 runtime event 写入 `events.jsonl`。当前 orchestration 和 tool execution 仍是 stub。
+传入 SQLite connection 时，它可以写入 `run_records`。传入 event log 或配置 `log_root` 时，它会把结构化 runtime event 写入 `events.jsonl`。当前已打通零或一个 ToolCall 的最小 Direct Executor；多步 ReAct loop 尚未实现。
 
 ### 输入 / 输出 / 不负责什么
 
@@ -193,7 +206,7 @@ RuntimeRequest
 
 输出是 `RuntimeResult`，其中可以包含 intent / policy 摘要。
 
-Runtime Core 不负责自然语言深度理解，不授权写入，不执行业务工具，不把 assistant final answer 升级为事实。
+Runtime Core 不负责自然语言深度理解或授权写入；它委托 orchestration 和 Tool Gateway 执行业务工具，也不把 assistant final answer 升级为事实。
 
 ### 常见失败模式
 
@@ -287,7 +300,7 @@ Policy / Permission Layer 判断系统现在被允许做什么。它把写入授
 ### 核心概念
 
 - `PolicyAction`：`allow`、`deny`、`requires_confirmation`。
-- `PolicyDecision`：当前请求的授权判断；`allowed_tools` 是唯一 Tool 授权结果。
+- `PolicyDecision`：当前请求的授权判断；`allowed_effects` 只表达本轮允许 read / external_read / write，不枚举业务 Tool。
 
 ### 当前 runtime 实现
 
@@ -296,7 +309,7 @@ Policy / Permission Layer 判断系统现在被允许做什么。它把写入授
 - `app/policy/models.py`
 - `app/policy/service.py`
 
-`PolicyService.evaluate(request, intent)` 只读取当前 `RuntimeRequest` 和 `IntentDecision`。疑似写入但对象不明确时返回 `requires_confirmation`；未知 intent 默认不 allow。当前 Domain tools 尚未实现，所以默认 service 暂不填充具体 `allowed_tools`。
+`PolicyService.evaluate(request, intent)` 只读取当前 `RuntimeRequest` 和 `IntentDecision`。READ 允许 read / external_read，明确且受支持的 WRITE request 只允许 write；疑似写入但对象不明确时返回 `requires_confirmation`，未知 intent 默认不 allow。具体业务 Tool 由 selected Skills 和 Registry 决定。
 
 ### 输入 / 输出 / 不负责什么
 
@@ -346,7 +359,7 @@ Write Safety 防止系统在没有明确授权时修改用户数据，也防止 
 
 ### 当前 runtime 实现
 
-阶段 3 当前只建立授权模型和主链路。`PolicyDecision.allowed_tools` 是唯一 Tool 授权结果，但 Runtime Core 仍返回 `runtime.orchestration.stubbed`，不会执行真实 tool 或业务写入。
+阶段 3 建立了授权模型和主链路；阶段 5 已让 `PolicyDecision.allowed_effects` 参与 Tool exposure intersection。Policy allow 仍不等于执行成功，真实结果必须来自 Gateway 返回的 `ToolResult` 和 WRITE evidence。
 
 ### 输入 / 输出 / 不负责什么
 
@@ -423,13 +436,13 @@ START
 
 输出是最终 `GraphState` 或其中的 `RuntimeResult`，以及实时追加的 Intent / Policy / route 语义事件和最终 graph path。
 
-Orchestrator 不负责产生授权、不调用真实 tool、不写业务 repository、不保存长期 Memory，也不把 graph checkpoint 当作事实来源。
+Orchestrator 不负责产生授权或直接调用 handler；它把 ToolCall 交给 Tool Gateway。业务 repository 只由受控 Domain handler 写入。Orchestrator也不保存长期 Memory，不把 graph checkpoint 当作事实来源。
 
 ### 常见失败模式
 
 - 把 `GraphState` 做成包含长期 Memory、业务事实和 writer 的大状态容器。
 - 把 Policy route 误解为新的授权判断；route 只能翻译已有 `PolicyDecision`。
-- `allow` 节点声称业务写入成功，而实际仍是 stub execution。
+- 把 Policy allow 或模型选择 Tool 误报为执行成功，而没有检查 Gateway `ToolResult` 和 WRITE evidence。
 - Intent 失败后仍进入 Policy，或 Policy 失败后仍进入执行节点。
 - 为了打 event，把所有非 Graph 关键阶段强行改造成 LangGraph node。
 
@@ -476,7 +489,7 @@ Orchestrator 不负责产生授权、不调用真实 tool、不写业务 reposit
 
 LangGraph 当前输入 LifeOps 自己定义的 request、state 和 service，输出仍是 LifeOps 的 `RuntimeResult`。LangGraph 不重新定义业务模型。
 
-LangChain 后续即使进入模型或工具层，也不能绕过 LifeOps Policy allowed tools、Tool Safety 和成功执行证据。
+LangChain 后续即使进入模型或工具层，也不能绕过 LifeOps Skill candidate / Policy effect intersection、Tool Safety 和成功执行证据。
 
 ### 常见失败模式
 

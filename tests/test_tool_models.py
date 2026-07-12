@@ -48,6 +48,18 @@ class ToolModelsTest(unittest.TestCase):
                 risk=ToolRisk.LOW,
             )
 
+    def test_definition_rejects_duplicate_skill_bindings(self) -> None:
+        with self.assertRaises(ValueError):
+            ToolDefinition(
+                name="research.sources_read",
+                description="Read trusted research sources.",
+                input_schema=_EMPTY_OBJECT_SCHEMA,
+                output_schema=_EMPTY_OBJECT_SCHEMA,
+                effect=ToolEffect.EXTERNAL_READ,
+                risk=ToolRisk.LOW,
+                skill_ids=("research", "research"),
+            )
+
     def test_failed_result_requires_structured_error(self) -> None:
         with self.assertRaises(ValueError):
             ToolResult(

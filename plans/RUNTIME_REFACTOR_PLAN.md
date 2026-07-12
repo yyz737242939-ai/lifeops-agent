@@ -20,7 +20,8 @@
 - 阶段 3：Runtime Core / Intent / Policy 初版已完成，详见 `plans/modules/RUNTIME_CORE_PLAN.md` 和 `plans/modules/INTENT_POLICY_PLAN.md`。
 - 阶段 3.5：Observability 文件日志校正已完成，详见 `plans/modules/OBSERVABILITY_LOGGING_PLAN.md`。
 - 阶段 4：LangGraph Orchestration 骨架已完成，详见 `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md`。
-- 下一阶段：阶段 5 Skill System / Tool System 与 Domains；施工前应先创建或确认对应模块计划。
+- 当前阶段：阶段 5 Skill System / Tool System 与 Domains。Skill System、Tool System 和两个最小 Domain 纵向切片已完成；Research / Travel 完整初版仍未完成。
+- 阶段 5 完成后进入阶段 6 ReAct Executor；施工前应创建并确认 `plans/modules/EXECUTOR_PLAN.md`。
 
 核心执行链路：
 
@@ -42,6 +43,7 @@ User Input
 - 先判断 intent，再决定是否 planning，避免关键词误触发。
 - Policy 是权限事实源，Planner、LLM 文本、Recovery Context、LangGraph checkpoint 都不是授权来源。
 - LangGraph 做编排层，自研 runtime 保留 policy、tool safety、context、memory、executor、recovery、facts source。
+- 施工顺序先搭稳定的外层控制框架：Tool 完成后依次实现 ReAct Executor、Plan-and-Execute Planner，再把 Context / Memory、Recovery / Feedback 通过预留窄接口接入；不要求先完成局部状态模块再反推整体编排。
 - PlanRun / PlanStep 是跨 Domain 的通用执行策略，可为暂停、恢复和审计持久化，但不是业务事实；长期事实只来自经授权且成功执行的 Domain WRITE。
 - Inspector / Eval 是一等公民，不是最后补的日志查看工具。
 - 新旧代码、新旧文档必须明确分离。
@@ -396,7 +398,7 @@ main.py
 - 所有工具通道必须经过同一个 Tool Gateway 和 pre/post Guardrails。
 - `policy` 不调用工具，不写业务数据。
 - `planning` 不调用工具，不授权 WRITE。
-- `execution` 可以调用 tools，但必须使用 PolicyDecision 和 allowed tools。
+- `execution` 可以调用 tools，但必须使用 selected Skill candidates、PolicyDecision 和最终 `AllowedToolSet`。
 - Planner / Executor 面向 Tool contract，不按 Domain 建立独立执行循环；Planner 与 Tool 的匹配模型留到 Planner 模块施工时设计，同一个 PlanRun 可以包含多个 Domain 的步骤。
 - `orchestration` 只做 graph wiring 和 route，不放业务逻辑。
 - `inspector` 只读 event log、LLM log、application log 和必要业务事实，不修改状态。
@@ -721,7 +723,7 @@ Travel 适合：
 - Calendar / weather / transport / lodging / place 的 fixture-backed external Port。
 - 外部 READ、业务 WRITE、confirmation、过期数据和副作用真实性。
 - 并行查询、部分失败、DAG、Recovery 和长期历史 Trip Context。
-- 阶段 8 Calendar MCP 通过 adapter 替换 fixture，不修改 Travel Domain。
+- 阶段 10 Calendar MCP 通过 adapter 替换 fixture，不修改 Travel Domain。
 
 Calendar MCP 适合：
 
@@ -877,16 +879,16 @@ docs/RUNTIME_CONCEPTS.md
 - graph path trace。
 - route tests。
 
-### 阶段 5：Skill System / Tool System 与 Domains
+### 阶段 5：Skill System / Tool System 与 Domains（进行中）
 
 目标：
 
 - 建立 Skill System、工具系统和 Research / Personal Knowledge、Travel 两个内部 domain。
 - Skill System 先明确 skill discovery、routing、prompt assembly、progressive reference loading 和多轮 skill state 的边界；Skill 只说明功能和工作流，不参与工具授权。
-- Skill routing 支持一次选择多个 Skill；工具授权完全由 Policy 的 allowed tools 决定，registry 校验工具存在，Guardrail 检查 confirmation 和具体调用。
+- Skill routing 支持一次选择多个 Skill并形成业务候选 Tool；空 Skill 绑定的通用 Tool 独立加入候选。Policy 只按 effect 决定动作权限，二者与 registry 求交得到 `AllowedToolSet`，Guardrail 再检查 confirmation 和具体调用。
 - Tool System 再处理 tool definition、Policy authorization resolution、pre/post Guardrails、Tool Gateway、execution evidence 和 domain tool 的运行时边界。
 - Skill 文件兼容 Agent Skills / Deep Agents 的 `SKILL.md` 与 progressive disclosure 约定；Tool 使用 LifeOps 原生安全核心和可选 LangChain adapter。
-- 两个 Domain 必须为阶段 6-9 的 Context、Memory、Recovery、Planner、Executor、Calendar MCP、Inspector、Eval 和 DAG 提供稳定 Port / read model / evidence 接口，但不提前实现这些模块。
+- 两个 Domain 必须为阶段 6-11 的 Executor、Planner、Context、Memory、Recovery、Feedback、Calendar MCP、Inspector、Eval 和 DAG 提供稳定 Port / read model / evidence 接口，但不提前实现这些模块。
 
 交付：
 
@@ -899,39 +901,66 @@ docs/RUNTIME_CONCEPTS.md
 - Research repository / service / tools / Hugging Face briefing。
 - Travel repository / service / tools / fixture-backed external Ports。
 
-### 阶段 6：Context / Memory / Recovery
+### 阶段 6：ReAct Executor
 
 目标：
 
-- 实现 request-local context、memory injection、解释型 recovery。
+- 在已完成的 Tool Gateway 之上建立通用 ReAct Executor 外层循环。
+- 支持 `reason -> ToolCall -> Observation -> reason` 的 bounded loop、明确终止条件和最大步数。
+- 先定义 Context provider、Memory provider、Recovery hook 和 Feedback sink 的窄接口，使用 empty/fake 实现保持边界可测；本阶段不实现这些模块。
+
+交付：
+
+- `plans/modules/EXECUTOR_PLAN.md`。
+- ReAct execution state / stop reason / loop limits。
+- 单次 Tool Gateway 调用与 Observation 回流。
+- 跨 Domain Tool 调用和逐 WRITE action confirmation。
+- Executor contract tests，以及 Context / Memory / Recovery / Feedback 的 fake adapter tests。
+
+### 阶段 7：Plan-and-Execute Planner
+
+目标：
+
+- 在阶段 6 ReAct Executor 之上实现跨 Domain Plan-and-Execute：简单请求直接进入 Executor，复杂、多步骤或有依赖请求由 Planner 生成计划并逐步调度同一个 Executor。
+
+交付：
+
+- `plans/modules/PLANNER_PLAN.md`。
+- 可持久化但不作为业务事实的 PlanRun / PlanStep。
+- Planner route、计划生成、逐 step 调度和 final answer handoff。
+- PlanStep 与候选 Tool 的匹配模型。
+- bounded replan 的控制接口；正式 Recovery / ExecutionFeedback 在阶段 9 接入。
+- Context / Memory 只通过阶段 6 预留接口提供 empty/fake 数据，不把尚未实现的模块写进 Planner 核心。
+
+### 阶段 8：Context / Memory
+
+目标：
+
+- 在不改写 Executor / Planner 控制骨架的前提下，实现 request-local context assembly 和受控 memory injection。
 
 交付：
 
 - `plans/modules/CONTEXT_PLAN.md`。
 - `plans/modules/MEMORY_PLAN.md`。
-- `plans/modules/RECOVERY_PLAN.md`。
-- Context report。
+- Context report / budget / assembly。
 - Memory repository / retriever / profile。
-- session event logs / recovery context。
+- 多轮 session context，并接入阶段 6/7 已定义的 provider 接口。
 
-### 阶段 7：Planner / Executor / Feedback
+### 阶段 9：Recovery / Feedback
 
 目标：
 
-- 实现跨 Domain Plan and Execute 当前 runtime 边界：简单单工具请求走 Direct Executor，复杂、多步骤或有依赖请求进入 Planner。
+- 基于 Executor / Planner 的真实停点、Observation、PlanRun / PlanStep 和 evidence 实现解释型恢复与结构化执行反馈。
 
 交付：
 
-- `plans/modules/PLANNER_PLAN.md`。
-- `plans/modules/EXECUTOR_PLAN.md`。
-- 可持久化但不作为业务事实的 PlanRun / PlanStep。
-- 单步 Executor。
-- ExecutionFeedback。
-- final answer 校验。
-- 跨 Domain tool 调用、逐 WRITE step confirmation 和 bounded replan；PlanStep 与 Tool 的匹配模型在 Planner 阶段单独设计。
+- `plans/modules/RECOVERY_PLAN.md`。
+- ExecutionFeedback 和 final answer 校验。
+- session event logs / recovery context。
+- bounded replan 的真实反馈接入。
 - LangGraph checkpoint / persistence 作为暂停、恢复、fault tolerance 的候选实现；不承担外部副作用回滚。
 
-### 阶段 8：Calendar MCP
+### 阶段 10：Calendar MCP
 
 目标：
 
@@ -945,7 +974,7 @@ docs/RUNTIME_CONCEPTS.md
 - 可选 OAuth adapter 设计。
 - calendar eval fixture。
 
-### 阶段 9：Inspector / Eval / DAG
+### 阶段 11：Inspector / Eval / DAG
 
 目标：
 
@@ -961,7 +990,7 @@ docs/RUNTIME_CONCEPTS.md
 - 串行 DAG scheduler。
 - demo 场景。
 
-### 阶段 10：面试收口
+### 阶段 12：面试收口
 
 目标：
 

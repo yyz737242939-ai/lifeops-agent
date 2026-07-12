@@ -4,6 +4,7 @@ import unittest
 
 from app.tools.errors import ToolNotFoundError, ToolRegistryError, ToolSchemaError
 from app.tools.models import (
+    ToolCall,
     ToolCallStatus,
     ToolDefinition,
     ToolEffect,
@@ -36,12 +37,12 @@ def _definition(name: str = "research.sources_read") -> ToolDefinition:
     )
 
 
-def _handler(arguments: dict[str, object]) -> ToolResult:
+def _handler(call: ToolCall) -> ToolResult:
     return ToolResult(
-        call_id="call_test",
-        tool_name="research.sources_read",
+        call_id=call.call_id,
+        tool_name=call.tool_name,
         status=ToolCallStatus.SUCCEEDED,
-        output={"content": str(arguments["source_id"])},
+        output={"content": str(call.arguments["source_id"])},
     )
 
 

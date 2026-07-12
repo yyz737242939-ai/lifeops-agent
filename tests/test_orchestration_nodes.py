@@ -7,22 +7,23 @@ from app.orchestration.nodes import (
     classify_intent,
     decide_policy,
     deny,
+    execute_tool,
     finalize,
     prepare_skills,
     require_confirmation,
-    stub_execute,
 )
 from app.orchestration.state import GraphRoute, create_graph_state
 from app.policy.models import PolicyAction, PolicyDecision
 from app.runtime.models import RuntimeRequest, RuntimeStatus
 from app.runtime.service import RuntimeService
 from tests.helpers import create_test_skill_service
+from app.tools.registry import ToolRegistry
+from app.tools.runtime import ToolRuntime
 
 
 class OrchestrationNodesTest(unittest.TestCase):
     def test_node_chain_matches_existing_runtime_result_semantics(self) -> None:
         cases = (
-            (IntentType.WRITE_REQUEST, PolicyAction.ALLOW, stub_execute),
             (
                 IntentType.CLARIFICATION_NEEDED,
                 PolicyAction.REQUIRES_CONFIRMATION,
@@ -50,7 +51,7 @@ class OrchestrationNodesTest(unittest.TestCase):
 
                 self.assertEqual(state["result"], expected)
 
-    def test_allow_nodes_preserve_stubbed_runtime_result(self) -> None:
+    def test_allow_nodes_finish_with_empty_authorized_catalog(self) -> None:
         state = create_graph_state(_request("把明天跑步加入任务"))
 
         state = classify_intent(state, FixedIntentService(IntentType.WRITE_REQUEST))
@@ -59,7 +60,11 @@ class OrchestrationNodesTest(unittest.TestCase):
             state,
             skill_service=create_test_skill_service(),
         )
-        state = stub_execute(state)
+        state = execute_tool(
+            state,
+            tool_runtime_factory=lambda: ToolRuntime.from_registry(ToolRegistry()),
+            selection_client=NoToolCallSelectionClient(),
+        )
         state = finalize(state)
 
         self.assertEqual(state["route"], GraphRoute.ALLOW)
@@ -69,7 +74,7 @@ class OrchestrationNodesTest(unittest.TestCase):
                 "classify_intent",
                 "decide_policy",
                 "prepare_skills",
-                "stub_execute",
+                "execute_tool",
                 "finalize",
             ],
         )
@@ -78,9 +83,9 @@ class OrchestrationNodesTest(unittest.TestCase):
         self.assertEqual(state["result"].status, RuntimeStatus.OK)
         self.assertEqual(
             state["result"].trace_summary,
-            ["runtime.orchestration.stubbed"],
+            ["runtime.tool_catalog.empty"],
         )
-        self.assertIn("execution is not implemented yet", state["result"].message)
+        self.assertIn("No authorized Tool", state["result"].message)
 
     def test_confirmation_node_does_not_claim_write(self) -> None:
         state = create_graph_state(_request("计划一下"))
@@ -190,6 +195,11 @@ class FailingPolicyService:
 
 def _request(user_input: str) -> RuntimeRequest:
     return RuntimeRequest(user_input=user_input, session_id="session_test")
+
+
+class NoToolCallSelectionClient:
+    def select(self, request, prompt_contributions, tool_catalog):
+        return None
 
 
 if __name__ == "__main__":

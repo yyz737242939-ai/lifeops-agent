@@ -14,13 +14,16 @@ from app.skills.models import SkillDefinition
 
 
 class SkillBootstrapTest(unittest.TestCase):
+    @patch("app.runtime.bootstrap.OpenAIToolCallSelectionClient")
     @patch("app.runtime.bootstrap.SkillSelectionClient")
     def test_bootstrap_discovers_skills_and_builds_default_selection_client(
         self,
         selection_client_type: Any,
+        tool_call_client_type: Any,
     ) -> None:
         client = RecordingSelectionClient()
         selection_client_type.return_value = client
+        tool_call_client_type.return_value = NoToolCallSelectionClient()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -86,6 +89,11 @@ class RecordingSelectionClient:
             "selected_skill_ids": ["research"],
             "reason": "Research request.",
         }
+
+
+class NoToolCallSelectionClient:
+    def select(self, request, prompt_contributions, tool_catalog):
+        return None
 
 
 if __name__ == "__main__":

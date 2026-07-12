@@ -27,7 +27,6 @@ class GraphState(TypedDict):
     policy: PolicyDecision | None
     route: GraphRoute | None
     skill_selection: SkillSelection | None
-    loaded_skill_ids: list[str]
     prompt_contributions: list[PromptContribution]
     result: RuntimeResult | None
     error_code: str | None
@@ -45,7 +44,6 @@ def create_graph_state(request: RuntimeRequest) -> GraphState:
         "policy": None,
         "route": None,
         "skill_selection": None,
-        "loaded_skill_ids": [],
         "prompt_contributions": [],
         "result": None,
         "error_code": None,
