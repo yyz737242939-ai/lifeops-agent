@@ -4,7 +4,7 @@ LifeOps Agent 是一个本地 Python 项目，用来学习和构建 Agent Runtim
 
 当前仓库处于 Runtime 重构。V0 代码、数据、日志、测试、旧计划和旧入口统一保存在 `legacy_v0/`，作为历史对照。当前工作使用清爽的 `app/`、`docs/` 和 `plans/` 结构。
 
-当前进度：阶段 0-5 功能实现与阶段 5 稳定化均已完成；`STAGE5_STABILIZATION_PLAN.md` 已给出 Stage 6 `go`，统一离线回归 `240/240` 通过。下一施工动作是创建并确认阶段 6 ReAct Executor 模块计划。
+当前进度：阶段 0-5 与阶段 6 ReAct Executor 均已完成。Executor 两层 compiled graph、跨 Domain loop、逐 WRITE confirmation、语义 events 与 session `llm.jsonl` 已验证，统一离线回归 `298/298` 通过；Stage 7 gate 为 `go`。下一施工入口是单独创建并确认 `plans/modules/PLANNER_PLAN.md`，当前尚未实施 Planner。
 
 ## 项目目标
 

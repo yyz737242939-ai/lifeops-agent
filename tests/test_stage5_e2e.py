@@ -4,6 +4,8 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+from app.executor.models import FinalAnswerDecision, ToolActionDecision
+from app.executor.service import ReactExecutor
 from app.common.time import utc_now_iso
 from app.domains.research.models import FetchedSourceDocument
 from app.domains.research.ports import FixtureResearchSourcePort
@@ -58,7 +60,7 @@ class Stage5GraphE2ETest(unittest.TestCase):
                 "classify_intent",
                 "decide_policy",
                 "prepare_skills",
-                "execute_tool",
+                "execute_executor",
                 "finalize",
             ],
         )
@@ -70,7 +72,11 @@ class Stage5GraphE2ETest(unittest.TestCase):
             state["result"].tool_result["output"]["source_key"], "hf-daily"
         )
         self.assertEqual(
-            [event for event, _ in self.trace.events][-4:],
+            [
+                event
+                for event, _ in self.trace.events
+                if event.startswith("tool.")
+            ][-4:],
             [
                 "tool.call.requested",
                 "tool.guardrail.decided",
@@ -172,7 +178,9 @@ class Stage5GraphE2ETest(unittest.TestCase):
             intent_service=ReadIntentService(),
             policy_service=ExternalReadPolicyService(),
             execution_scope_factory=self._tool_runtime,
-            tool_call_selection_client=FixedToolCallSelectionClient(call),
+            executor=ReactExecutor(
+                FixedExecutorModelClient(call),
+            ),
         )
 
     def _tool_runtime(self) -> ToolRuntime:
@@ -198,7 +206,9 @@ class Stage5GraphE2ETest(unittest.TestCase):
             intent_service=ReadIntentService(),
             policy_service=ExternalReadPolicyService(),
             execution_scope_factory=self._travel_tool_runtime,
-            tool_call_selection_client=FixedToolCallSelectionClient(call),
+            executor=ReactExecutor(
+                FixedExecutorModelClient(call),
+            ),
         )
 
     def _travel_tool_runtime(self) -> ToolRuntime:
@@ -246,12 +256,15 @@ class _FixtureBriefingContentPort:
         )
 
 
-class FixedToolCallSelectionClient:
+class FixedExecutorModelClient:
     def __init__(self, call: ToolCall) -> None:
-        self._call = call
+        self._decisions = [
+            ToolActionDecision(call),
+            FinalAnswerDecision("Tool execution completed."),
+        ]
 
-    def select(self, request, prompt_contributions, tool_catalog):
-        return self._call
+    def decide(self, model_input):
+        return self._decisions.pop(0)
 
 
 class ReadIntentService:

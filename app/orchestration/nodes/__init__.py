@@ -5,9 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from app.executor.models import ExecutorResult, ExecutorStatus, ExecutorStopReason
+from app.executor.service import ReactExecutor
 from app.intent.models import IntentDecision
 from app.intent.service import IntentService
-from app.observability.logger import TraceSink
+from app.observability.logger import LlmInteractionSink, TraceSink
 from app.orchestration.routes import route_after_policy
 from app.orchestration.state import GraphState, append_graph_path
 from app.policy.models import PolicyDecision
@@ -15,8 +17,7 @@ from app.policy.service import PolicyService
 from app.runtime.models import RuntimeResult, RuntimeStatus
 from app.skills.service import SkillService
 from app.tools.authorization import resolve_allowed_tools
-from app.tools.calling import ToolCallSelectionClient
-from app.tools.models import ToolCallStatus, ToolResult
+from app.tools.models import ToolResult
 from app.tools.runtime import ToolRuntime
 
 
@@ -109,13 +110,21 @@ def prepare_skills(
     *,
     skill_service: SkillService,
     trace: TraceSink | None = None,
+    llm_log: LlmInteractionSink | None = None,
 ) -> GraphState:
     """Select and load request-local Skills without executing tools."""
 
     updated = _append_node(state, "prepare_skills")
     request = updated["request"]
     try:
-        preparation = skill_service.prepare(request, trace=trace)
+        if llm_log is None:
+            preparation = skill_service.prepare(request, trace=trace)
+        else:
+            preparation = skill_service.prepare(
+                request,
+                trace=trace,
+                llm_log=llm_log,
+            )
         updated["skill_selection"] = preparation.selection
         updated["prompt_contributions"] = list(preparation.prompt_contributions)
     except Exception as exc:
@@ -131,16 +140,17 @@ def prepare_skills(
     return updated
 
 
-def execute_tool(
+def execute_executor(
     state: GraphState,
     *,
     execution_scope: ToolRuntime,
-    selection_client: ToolCallSelectionClient,
+    executor: ReactExecutor,
     trace: TraceSink | None = None,
+    llm_log: LlmInteractionSink | None = None,
 ) -> GraphState:
-    """Expose the authorized catalog, select one call, and execute it via Gateway."""
+    """Resolve fixed authorization and map one ReactExecutor result."""
 
-    updated = _append_node(state, "execute_tool")
+    updated = _append_node(state, "execute_executor")
     request = updated["request"]
     intent = updated["intent"]
     policy = updated["policy"]
@@ -149,13 +159,11 @@ def execute_tool(
         raise ValueError("intent, policy, and Skill selection must precede execution.")
 
     try:
-        tool_runtime = execution_scope
         allowed_tools = resolve_allowed_tools(
             selection.selected_skill_ids,
             policy,
-            tool_runtime.registry,
+            execution_scope.registry,
         )
-        catalog = tool_runtime.registry.model_catalog(allowed_tools.tool_names)
         if trace is not None:
             trace.append(
                 "tool.catalog.resolved",
@@ -164,43 +172,38 @@ def execute_tool(
                     "tool_count": len(allowed_tools.tool_names),
                 },
             )
-        if not catalog:
-            updated["result"] = RuntimeResult(
-                run_id=request.run_id,
-                session_id=request.session_id,
-                status=RuntimeStatus.OK,
-                message="No authorized Tool is available for this request.",
+        if llm_log is None:
+            executor_result = executor.execute(
+                request,
+                tuple(updated["prompt_contributions"]),
+                allowed_tools,
+                execution_scope,
+                trace=trace,
             )
-            return updated
-
-        call = selection_client.select(
-            request,
-            tuple(updated["prompt_contributions"]),
-            catalog,
-        )
-        if call is None:
-            updated["result"] = RuntimeResult(
-                run_id=request.run_id,
-                session_id=request.session_id,
-                status=RuntimeStatus.OK,
-                message="No Tool call was selected for this request.",
+        else:
+            executor_result = executor.execute(
+                request,
+                tuple(updated["prompt_contributions"]),
+                allowed_tools,
+                execution_scope,
+                trace=trace,
+                llm_log=llm_log,
             )
-            return updated
-
-        result = tool_runtime.gateway.execute(call, allowed_tools, trace=trace)
-        updated["result"] = _runtime_result_from_tool(
-            request.run_id,
+        updated["result"] = _runtime_result_from_executor(
+            executor_result,
             request.session_id,
-            result,
         )
+        updated["error_code"] = updated["result"].error_code
+        if updated["error_code"] is not None:
+            updated["error_stage"] = "executor"
     except Exception as exc:
-        updated["error_code"] = getattr(exc, "code", None) or "runtime.tool_failed"
-        updated["error_stage"] = "tool"
+        updated["error_code"] = getattr(exc, "code", None) or "runtime.executor_failed"
+        updated["error_stage"] = "executor"
         updated["result"] = RuntimeResult(
             run_id=request.run_id,
             session_id=request.session_id,
             status=RuntimeStatus.ERROR,
-            message="Tool execution failed.",
+            message="Executor failed.",
             error_code=updated["error_code"],
         )
     return updated
@@ -258,48 +261,68 @@ def _build_policy_result(
     return updated
 
 
-def _runtime_result_from_tool(
-    run_id: str,
+def _runtime_result_from_executor(
+    result: ExecutorResult,
     session_id: str,
-    result: ToolResult,
 ) -> RuntimeResult:
-    status = {
-        ToolCallStatus.SUCCEEDED: RuntimeStatus.OK,
-        ToolCallStatus.REQUIRES_CONFIRMATION: RuntimeStatus.REQUIRES_CONFIRMATION,
-        ToolCallStatus.DENIED: RuntimeStatus.UNSUPPORTED,
-        ToolCallStatus.FAILED: RuntimeStatus.ERROR,
-    }[result.status]
-    error_code = result.error.code if result.error is not None else None
+    if result.status == ExecutorStatus.COMPLETED:
+        status = RuntimeStatus.OK
+        message = result.final_message or "Executor completed."
+        error_code = None
+    elif result.stop_reason == ExecutorStopReason.CONFIRMATION_REQUIRED:
+        status = RuntimeStatus.REQUIRES_CONFIRMATION
+        message = "Tool action requires confirmation."
+        error_code = None
+    elif result.stop_reason == ExecutorStopReason.SAFETY_DENIED:
+        status = RuntimeStatus.UNSUPPORTED
+        message = "Tool action was denied by safety controls."
+        error_code = None
+    else:
+        status = RuntimeStatus.ERROR
+        message = (
+            "Executor reached its step limit."
+            if result.stop_reason == ExecutorStopReason.LIMIT_REACHED
+            else "Executor failed."
+        )
+        error_code = result.error_code or f"executor.{result.stop_reason.value}"
     return RuntimeResult(
-        run_id=run_id,
+        run_id=result.run_id,
         session_id=session_id,
         status=status,
-        message=f"Tool call {result.status.value}: {result.tool_name}.",
-        tool_result={
-            "call_id": result.call_id,
-            "tool_name": result.tool_name,
-            "status": result.status.value,
-            "output": result.output,
-            "evidence": [
-                {
-                    "evidence_type": item.evidence_type,
-                    "summary": item.summary,
-                    "reference": item.reference,
-                }
-                for item in result.evidence
-            ],
-            "error": (
-                {
-                    "code": result.error.code,
-                    "message": result.error.message,
-                    "retryable": result.error.retryable,
-                }
-                if result.error is not None
-                else None
-            ),
-        },
-        error_code=error_code if status == RuntimeStatus.ERROR else None,
+        message=message,
+        tool_result=(
+            _tool_result_payload(result.last_tool_result)
+            if result.last_tool_result is not None
+            else None
+        ),
+        error_code=error_code,
     )
+
+
+def _tool_result_payload(result: ToolResult) -> dict[str, object]:
+    return {
+        "call_id": result.call_id,
+        "tool_name": result.tool_name,
+        "status": result.status.value,
+        "output": result.output,
+        "evidence": [
+            {
+                "evidence_type": item.evidence_type,
+                "summary": item.summary,
+                "reference": item.reference,
+            }
+            for item in result.evidence
+        ],
+        "error": (
+            {
+                "code": result.error.code,
+                "message": result.error.message,
+                "retryable": result.error.retryable,
+            }
+            if result.error is not None
+            else None
+        ),
+    }
 
 
 def _append_node(state: GraphState, node_name: str) -> GraphState:

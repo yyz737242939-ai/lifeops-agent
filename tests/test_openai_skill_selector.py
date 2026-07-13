@@ -94,6 +94,54 @@ class SkillSelectionClientTest(unittest.TestCase):
 
         self.assertEqual(caught.exception.code, "skill_selection_empty_response")
 
+    @patch("app.skills.selector.load_dotenv")
+    @patch("app.skills.selector.OpenAI")
+    def test_records_success_and_empty_provider_interactions(
+        self,
+        openai_type: Any,
+        _load_dotenv: Any,
+    ) -> None:
+        sink = _RecordingLlmSink()
+        openai_type.return_value = FakeOpenAIClient(
+            json.dumps({"selected_skill_ids": ["travel"], "reason": "Travel."})
+        )
+        with patch.dict(
+            "os.environ",
+            {
+                "OPENROUTER_API_KEY": "test-key",
+                "OPENROUTER_BASE_URL": "https://example.test/v1",
+                "MODEL": "test-model",
+            },
+            clear=True,
+        ):
+            client = SkillSelectionClient()
+
+        client.select(self.request, self.metadata, llm_log=sink)
+
+        self.assertEqual(sink.records[0]["status"], "ok")
+        self.assertEqual(sink.records[0]["model"], "test-model")
+        self.assertIn("selected_skill_ids", sink.records[0]["response"]["content"])
+
+        failed_sink = _RecordingLlmSink()
+        openai_type.return_value = FakeOpenAIClient(None)
+        with patch.dict(
+            "os.environ",
+            {
+                "OPENROUTER_API_KEY": "test-key",
+                "OPENROUTER_BASE_URL": "https://example.test/v1",
+                "MODEL": "test-model",
+            },
+            clear=True,
+        ):
+            failed_client = SkillSelectionClient()
+        with self.assertRaises(SkillSelectionError):
+            failed_client.select(self.request, self.metadata, llm_log=failed_sink)
+        self.assertEqual(failed_sink.records[0]["status"], "failed")
+        self.assertEqual(
+            failed_sink.records[0]["error_code"],
+            "skill_selection_empty_response",
+        )
+
 
 class FakeCompletions:
     def __init__(self, content: str | None) -> None:
@@ -109,6 +157,14 @@ class FakeCompletions:
 class FakeOpenAIClient:
     def __init__(self, content: str | None) -> None:
         self.chat = SimpleNamespace(completions=FakeCompletions(content))
+
+
+class _RecordingLlmSink:
+    def __init__(self) -> None:
+        self.records: list[dict[str, Any]] = []
+
+    def record(self, **record: Any) -> None:
+        self.records.append(record)
 
 
 if __name__ == "__main__":

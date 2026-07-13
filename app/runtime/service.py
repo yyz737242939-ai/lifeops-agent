@@ -8,10 +8,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from app.executor.service import ReactExecutor
 from app.intent.service import IntentService
 from app.observability.events import LogTraceEvent
-from app.observability.file_logs import EventLogWriter, SessionLogWriter
+from app.observability.file_logs import EventLogWriter, RequestLlmLog, SessionLogWriter
 from app.observability.logger import (
+    close_application_logging,
     OptionalLogAppender,
     configure_application_logging,
     ensure_application_logger,
@@ -21,7 +23,6 @@ from app.policy.service import PolicyService
 from app.runtime.models import RuntimeRequest, RuntimeResult
 from app.runtime.run_store import fail_run_record, finish_run_record, insert_run_record
 from app.skills.service import SkillService
-from app.tools.calling import ToolCallSelectionClient
 from app.tools.runtime import ToolRuntime
 
 
@@ -37,7 +38,7 @@ class RuntimeService:
         event_log: EventLogWriter | None = None,
         log_root: str | Path | None = None,
         execution_scope_factory: Callable[[], ToolRuntime] | None = None,
-        tool_call_selection_client: ToolCallSelectionClient | None = None,
+        executor: ReactExecutor | None = None,
     ) -> None:
         self._intent_service = intent_service or IntentService()
         self._policy_service = policy_service or PolicyService()
@@ -46,7 +47,7 @@ class RuntimeService:
             policy_service=self._policy_service,
             skill_service=skill_service,
             execution_scope_factory=execution_scope_factory,
-            tool_call_selection_client=tool_call_selection_client,
+            executor=executor,
         )
         self._conn = conn
         self._event_log = event_log
@@ -59,16 +60,17 @@ class RuntimeService:
         """Run one request through authorization and direct Tool execution."""
 
         trace = OptionalLogAppender(self._build_event_appender(request))
+        llm_log = self._build_llm_log(request)
 
         if self._conn is None:
             self._append_request_started(request, trace)
-            return self._handle_core(request, trace=trace)
+            return self._handle_core(request, trace=trace, llm_log=llm_log)
 
         insert_run_record(self._conn, request)
         self._conn.commit()
         try:
             self._append_request_started(request, trace)
-            result = self._handle_core(request, trace=trace)
+            result = self._handle_core(request, trace=trace, llm_log=llm_log)
         except Exception:
             self._conn.rollback()
             fail_run_record(
@@ -89,15 +91,25 @@ class RuntimeService:
 
         if self._conn is not None:
             self._conn.close()
+        if self._log_root is not None:
+            close_application_logging()
 
     def _handle_core(
         self,
         request: RuntimeRequest,
         *,
         trace: OptionalLogAppender,
+        llm_log: RequestLlmLog | None,
     ) -> RuntimeResult:
         try:
-            final_state = self._orchestrator.invoke(request, trace=trace)
+            if llm_log is None:
+                final_state = self._orchestrator.invoke(request, trace=trace)
+            else:
+                final_state = self._orchestrator.invoke(
+                    request,
+                    trace=trace,
+                    llm_log=llm_log,
+                )
         except Exception as exc:
             trace.append(
                 "runtime.run.failed",
@@ -168,6 +180,11 @@ class RuntimeService:
             )
 
         return append_trace
+
+    def _build_llm_log(self, request: RuntimeRequest) -> RequestLlmLog | None:
+        if self._log_root is None:
+            return None
+        return RequestLlmLog(self._ensure_session_log(request).llm_log, request)
 
     def _append_request_started(
         self,

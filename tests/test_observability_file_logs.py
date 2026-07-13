@@ -6,11 +6,44 @@ import unittest
 from pathlib import Path
 
 from app.observability.events import LogLlmInteraction, LogTraceEvent
-from app.observability.file_logs import SessionLogWriter
+from app.observability.file_logs import RequestLlmLog, SessionLogWriter
+from app.runtime.models import RuntimeRequest
 from app.observability.logger import OptionalLogAppender, configure_application_logging
 
 
 class ObservabilityFileLogsTest(unittest.TestCase):
+    def test_request_llm_log_assigns_ordered_request_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            session = SessionLogWriter.create(tmpdir, session_id="session_llm")
+            request = RuntimeRequest(
+                user_input="hello",
+                session_id="session_llm",
+                run_id="run_llm",
+                turn_id="turn_llm",
+            )
+            sink = RequestLlmLog(session.llm_log, request)
+
+            sink.record(
+                provider="openai-compatible",
+                model="test-model",
+                request={"input": "first"},
+                response={"output": "one"},
+            )
+            sink.record(
+                provider="openai-compatible",
+                model="test-model",
+                request={"input": "second"},
+                response=None,
+                status="failed",
+                error_code="provider_failed",
+            )
+
+            rows = session.llm_log.read_all()
+            self.assertEqual([row["seq"] for row in rows], [1, 2])
+            self.assertEqual(rows[0]["run_id"], "run_llm")
+            self.assertEqual(rows[0]["turn_id"], "turn_llm")
+            self.assertEqual(rows[1]["status"], "failed")
+            self.assertEqual(rows[1]["error_code"], "provider_failed")
     def test_optional_log_appender_ignores_missing_callback(self) -> None:
         appender = OptionalLogAppender(None)
 

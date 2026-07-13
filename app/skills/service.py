@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.observability.logger import TraceSink
+from app.observability.logger import LlmInteractionSink, TraceSink
 from app.runtime.models import RuntimeRequest
 from app.skills.loader import load_skill
 from app.skills.models import SkillPreparation
@@ -29,6 +29,7 @@ class SkillService:
         request: RuntimeRequest,
         *,
         trace: TraceSink | None = None,
+        llm_log: LlmInteractionSink | None = None,
     ) -> SkillPreparation:
         """Select and load Skills for one request without executing tools."""
 
@@ -37,6 +38,7 @@ class SkillService:
             self._registry.list_definitions(),
             self._selection_client,
             trace=trace,
+            llm_log=llm_log,
         )
         loaded_skills = tuple(
             load_skill(self._registry.get(skill_id), trace=trace)

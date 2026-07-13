@@ -91,14 +91,14 @@ RuntimeRequest
 -> classify_intent
 -> decide_policy
 -> policy conditional route
--> prepare_skills -> execute_tool / requires_confirmation / deny
+-> prepare_skills -> execute_executor / requires_confirmation / deny
 -> finalize
 -> RuntimeResult
 ```
 
 传入 SQLite connection 时，Runtime Core 可以写入 `run_records`。传入 event log 或配置 `log_root` 时，Runtime Core 会把 runtime event 写入 `events.jsonl`。未传入 connection 时，它仍可通过文件 event log 记录运行路径，也可以保持 request-local 纯内存运行，便于聚焦测试。
 
-Policy allow 路径当前执行最小 Direct Executor：根据 selected Skills 与 Policy effects 生成 `AllowedToolSet`，只向模型暴露过滤后的 catalog，并把零或一个 `ToolCall` 交给统一 Gateway。完整 ReAct loop 留到阶段 6。
+Policy allow 路径当前调用通用 `ReactExecutor`：根据 selected Skills 与 Policy effects 生成固定 `AllowedToolSet`，只向模型暴露过滤后的 catalog，并在独立 compiled Executor graph 中执行有界 action → observation 循环。每次 ToolCall 仍只经过统一 Gateway。
 
 ## LangGraph Orchestration
 
@@ -109,7 +109,7 @@ LangGraph Orchestration 当前实现位于：
 - `app/orchestration/nodes/`
 - `app/orchestration/graph.py`
 
-`RuntimeService` 仍是唯一外部入口，负责 run lifecycle record、按 session 隔离的 event/application log、Domain WRITE transaction 闭合和最终 `RuntimeResult`。run record 先独立提交；Intent/Skill/LLM/external read 不占用 SQLite 写 transaction。`RuntimeOrchestrator` 负责把 Intent、Policy、Skill preparation 和当前最小 Direct Executor 映射到 compiled `StateGraph`。
+`RuntimeService` 仍是唯一外部入口，负责 run lifecycle record、按 session 隔离的 event/application log、Domain WRITE transaction 闭合和最终 `RuntimeResult`。run record 先独立提交；Intent/Skill/LLM/external read 不占用 SQLite 写 transaction。`RuntimeOrchestrator` 负责 outer compiled `StateGraph` 的 Intent、Policy、Skill preparation 和 Executor route；注入的 `ReactExecutor` 拥有独立、无 checkpointer 的 compiled cycle，最终只把 `ExecutorResult` 映射为 `RuntimeResult`。
 
 当前 graph 路径是：
 
@@ -117,12 +117,12 @@ LangGraph Orchestration 当前实现位于：
 START
 -> classify_intent
 -> decide_policy
--> allow -----------------> prepare_skills -> execute_tool \
+-> allow -----------------> prepare_skills -> execute_executor \
 -> requires_confirmation -> requires_confirmation --+-> finalize -> END
 -> deny ------------------> deny -------------------/
 ```
 
-Intent、Policy 或 Skill preparation 失败时，graph 在对应节点后直接进入 `END`。Skill 失败不会进入 `execute_tool`；确认和拒绝分支不会调用 Skill selector。
+Intent、Policy 或 Skill preparation 失败时，graph 在对应节点后直接进入 `END`。Skill 失败不会进入 `execute_executor`；Policy-level 确认和拒绝分支不会调用 Skill selector 或 Executor。
 
 `GraphState` 只保存当前 request 的编排数据：request、intent、policy、route、Skill selection、prompt contributions、result、结构化 error stage/code 和 graph-internal path。已加载 Skill ID 可由 prompt contributions 得出，不在 GraphState 重复保存。它不保存 trace summary、`SkillService`、Skill registry/client、长期 Memory、Domain 事实、Tool arguments/result cache 或授权替代来源。
 
@@ -158,7 +158,7 @@ Skill root
 -> filtered catalog -> zero or one ToolCall -> ToolGateway
 ```
 
-生产 bootstrap 根据 `config/default.json` 的 `skills.root` 总是执行 discovery，并直接构造 `SkillSelectionClient()`、Registry 与必需的 `SkillService`；模型和 provider 地址不再通过 bootstrap 或 JSON 配置逐层传参。不存在 Skill 开关或空 service 分支。`prepare_skills` 只位于 Policy allow 路径。稳定事件只包含 `skill.selected`、`skill.loaded`、`skill.reference.loaded` 及其失败事件，不记录机械化文件读取 lifecycle。LLM selection reason 保留在 request-local `SkillSelection` 中，不写 event payload。Skill selection 会参与业务候选 Tool 筛选，但不提供授权；Policy effect 才是动作权限来源。当前 prompt contributions 已供最小 Direct Executor 的 Tool selection 使用；完整 Context assembly 留到阶段 8。
+生产 bootstrap 根据 `config/default.json` 的 `skills.root` 总是执行 discovery，并直接构造 `SkillSelectionClient()`、Registry、必需的 `SkillService` 与使用 OpenAI-compatible adapter 的 `ReactExecutor`；模型和 provider 地址不通过 JSON 配置逐层传参。不存在 Skill 开关或空 service 分支。`prepare_skills` 只位于 Policy allow 路径。稳定 Skill events 只包含 selection/body/reference 语义边界。LLM selection reason 保留在 request-local `SkillSelection` 中，不写 event payload。Skill selection 会参与业务候选 Tool 筛选，但不提供授权；Policy effect 才是动作权限来源。prompt contributions 已进入每步 Executor model input；完整 Context assembly 留到阶段 8。
 
 ## Tool System
 
@@ -170,7 +170,7 @@ Tool System 当前已完成阶段 5 闭环，位于 `app/tools/`。`ToolDefiniti
 
 原生 `ToolGateway.execute(...)` 已把 `AllowedToolSet -> pre-Guardrail -> registered handler -> post-Guardrail` 串成单次调用闭环。pre 拒绝或要求确认时 handler 不会执行；handler exception、非 `ToolResult` 返回和 post 拒绝都会转换为不泄露内部异常的结构化 `ToolResult`。Gateway 实时写 `tool.call.requested`、`tool.guardrail.decided`、`tool.call.completed` / `failed` 语义事件，payload 只包含 call/tool identity、stage、action、reason code、status、error code 和 evidence count，不包含原始 arguments、output 或异常文本。
 
-Gateway 当前不写 `tool_calls`。该表保留为阶段 2 migration 的历史兼容结构，但 Inspector、Eval、Recovery 和产品历史查询尚无真实消费者，因此不提前绑定摘要字段或 transaction。当前 compiled Graph 已通过 `execute_tool` 接入真实 Research / Travel handlers；每个 runtime invocation 创建一个 execution scope，同 run 的未来多次 Tool 调用复用该 scope，跨 run 隔离。Domain WRITE 在 handler/repository 开始写入时进入短 SQLite transaction，external read 与 LLM 不持有写 transaction。
+Gateway 当前不写 `tool_calls`。该表保留为阶段 2 migration 的历史兼容结构，但 Inspector、Eval、Recovery 和产品历史查询尚无真实消费者，因此不提前绑定摘要字段或 transaction。outer compiled Graph 已通过 `execute_executor` 调用 `ReactExecutor`，后者全循环复用 Runtime 创建的同一个 execution scope 并通过真实 Gateway 接入 Research / Travel handlers；跨 run scope 隔离。Domain WRITE 在 handler/repository 开始写入时进入短 SQLite transaction，external read 与 LLM 不持有写 transaction。
 
 LangChain Tool adapter 已在本地 `langchain-core 1.4.9` 上完成 API 评估，当前不保留实现。`StructuredTool` 能包装 callable 和 Pydantic/JSON args schema，但 LifeOps 已直接拥有模型 catalog、ToolCall、schema validation、Gateway、ToolResult 和错误语义；当前也没有 LangChain agent/ToolNode 调用方。此时 adapter 需要额外桥接 request-local `AllowedToolSet`、confirmation 和 trace，增加了可绕过 Gateway 的 callable 表面，没有减少 glue。未来真实 LangChain 调用方出现时只增加窄 adapter，并用 contract test 保证 invocation 必须回到 Gateway。
 
@@ -237,18 +237,22 @@ Runtime 的事实来源是：
 当前 observability 分成三类日志：
 
 - `events.jsonl`：结构化 runtime event，只保存少量必要字段和紧凑 payload，用于解释 runtime 路径和失败层级。
-- `llm.jsonl`：原始 LLM / agent request-response 记录，用于人工排查最原始对话，不作为业务事实或写入授权来源。
+- `llm.jsonl`：按 request 独立编号的 LLM / agent provider interaction，记录 provider、model、实际 request、结构化 response、status 和安全 error code，用于人工排查模型输入输出；不作为业务事实或写入授权来源。
 - `application.log`：当前 active session 的本地异常与诊断日志；不镜像 routine 语义事件。
 
-三类日志默认写入 `logs/sessions/session_<timestamp>_<session_id>/`。event writer 按 session 隔离；application logger 同一时刻只保留一个 active session FileHandler，切换时关闭旧 handler。SQLite 不再默认承载 runtime event log 或 LLM log。
+三类日志默认写入 `logs/sessions/session_<timestamp>_<session_id>/`。event writer 按 session 隔离；application logger 同一时刻只保留一个 active session FileHandler，切换或 `RuntimeService.close()` 时关闭旧 handler。SQLite 不再默认承载 runtime event log 或 LLM log。
 
-`TraceSink` 是应用拥有的 request-local event 接口。Graph 内 node 通过 `OrchestrationContext` 使用同一个 sink；Graph 外未来的 Executor、Tool Safety、repository 或 integration 关键阶段也可以直接写同一个 sink，不需要为了可观察性变成 LangGraph node。Event 在真实逻辑边界实时追加，不根据最终 state 事后补写。
+`RuntimeService` 为每个 request 建立 `RequestLlmLog`，通过 request-local orchestration context 传给 Skill selection 和 `ReactExecutor`，不进入 outer `GraphState` 或 `ExecutorState`。Skill selection 记录实际 chat-completions request 与 content；Executor adapter 记录每一步 Responses request，以及 final text 或 function-call identity/arguments。provider/config/contract failure 记录 stable error code，不写 exception text；日志 writer 自身失败只进入 `application.log`，不能改变 model decision、Tool evidence 或 RuntimeResult。deterministic file-backed E2E 已验证一次 current Runtime run 能按顺序生成完整 `events.jsonl` 和三次 Skill/Executor `llm.jsonl` interaction。
+
+`TraceSink` 是应用拥有的 request-local event 接口。outer Graph node 与 `ReactExecutor` 通过 runtime context / service 参数复用同一个 sink；Tool Safety、repository 或 integration 关键阶段也可以直接写同一个 sink，不需要为了可观察性变成 LangGraph node。Event 在真实逻辑边界实时追加，不根据最终 state 事后补写。
+
+Executor 稳定语义事件包含 `executor.action.selected`、`executor.observation.recorded`、`executor.stopped`；hook failure 使用安全的 `executor.hook.failed`。这些 payload 只记录 step、decision type、call/tool identity、status、error code、retryable、evidence count 和 stop reason，不复制 Gateway 已记录的 arguments/output/Guardrail 明细，也不包含 prompt、Context/Memory content、provider response 或异常文本。Feedback sink 与 Recovery hook 是可选观察消费者；失败时不改写 ExecutorResult、Tool evidence 或业务事实。
 
 ## Runtime 不变量
 
 - 用户数据安全优先。业务写入必须来自用户当前输入中的明确授权。
 - Intent 只提供语义信号，不授权写入。
-- Policy 是当前写入授权事实源；Executor 未来只能执行 Policy 允许的操作。
+- Policy 是当前写入授权事实源；Executor 只能执行 Policy 通过 `AllowedToolSet` 允许的操作。
 - 不能只凭 assistant 文本判断成功。Runtime 状态和成功的 WRITE action 才是“已保存”或“已更新”的事实来源。
 - Skill、Tool authorization、Context、Runtime State、业务数据和长期 Memory 必须保持分离。
 - Conversation Summary 不是 Long-term Memory。Context compaction 结果不能自动升级为长期记忆。
@@ -272,7 +276,7 @@ Research Skill 当前在 `app/skills/research/sources/` 声明 `hf_daily_papers`
 
 Research external-read 的 typed 边界已实现为 `ResearchContentPort` / `HuggingFaceResearchContentPort`。adapter 先加载可信 source declaration，再限制 HTTP status、最终 URL redirect、HTML content type、响应大小、timeout 和解码失败，返回含 raw HTML、hash、fetched time 和 provenance 的 request-local `FetchedSourceDocument`。`ResearchService` 只按当前 request 已取得的 `document_id` 调用解析；raw HTML 不进入 SQLite。`parse_research_items`、`dedupe_research_items`、`rank_research_items` 是无网络、无存储副作用的 deterministic 函数，输出 typed `ResearchItem`。
 
-临时 briefing 已暴露 `research.fetch_briefing_source`、`research.parse_items`、`research.rank_items`、`research.build_brief_draft` 四个 Tool，并统一经过 Skill candidate、Policy effect、Guardrail 和 Gateway。rank 支持 deterministic topic filter。Tool 输出不包含 raw HTML；document、item set 和 `ResearchBriefDraft` 都只存在于 request-local `ResearchService`。Draft 保存来源 URL，而不是把临时 item ID 冒充长期 Source ID；保存 Brief 时 repository 只接受已经存在于 `research_sources` 的 URL。当前阶段 5 Direct Executor 每个 run 只选择一个 Tool，因此 compiled Graph 尚不能连续完成四步链路；阶段 6 ReAct Executor 将复用同一 Tool contract 完成循环调度。
+临时 briefing 已暴露 `research.fetch_briefing_source`、`research.parse_items`、`research.rank_items`、`research.build_brief_draft` 四个 Tool，并统一经过 Skill candidate、Policy effect、Guardrail 和 Gateway。rank 支持 deterministic topic filter。Tool 输出不包含 raw HTML；document、item set 和 `ResearchBriefDraft` 都只存在于 request-local `ResearchService`。Draft 保存来源 URL，而不是把临时 item ID 冒充长期 Source ID；保存 Brief 时 repository 只接受已经存在于 `research_sources` 的 URL。当前 `ReactExecutor` 已在跨 Domain compiled E2E 中验证同一 execution scope 连续调度 Research 多步 Tool、Travel 多步 Tool，以及 Research READ → Travel READ sequence。
 
 Research WRITE 当前包含 `research.save_source`、`research.save_brief` 和 `research.create_note`。briefing fetch 会为同一个 list-page document 生成 request-local observation，使 Source 可以先经过独立 WRITE 保存；Brief WRITE 只接收 request-local `draft_id`，repository 会把 draft 的 source URL 解析到已经保存的 `research_sources`，任何缺失来源都会 fail-closed，不能由 Brief WRITE 隐式创建 Source。Note WRITE 接收 title/body。三个 WRITE 都经过 Policy write effect、结构化 `ConfirmedAction`、短 transaction 和 post-Guardrail evidence；临时 ID 不能跨 execution scope 使用。
 

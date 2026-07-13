@@ -197,13 +197,34 @@ LifeOps 自研 runtime
 - [Hugging Face Hub API](https://huggingface.co/docs/hub/en/api)
   学习重点：Hub 官方 API/OpenAPI 入口和 provider contract。阶段 5 首版仍可基于声明的 Papers/Blog 页面 fixture 重写 V0 briefing，但 source identity、fetch metadata、失败和 provenance 必须使用稳定结构，未来 adapter 可以切换到官方 API。
 
-### 当前阶段明确不提前实现
+### 阶段 5 明确不提前实现
 
 - LangChain `create_agent` 替换现有 Runtime/LangGraph 主流程。
 - Tool 通过 `ToolRuntime.store` 直接写 LifeOps Memory 或 Domain facts。
 - Travel 真实预订、付款、Calendar 写入或具体商业 provider 集成。
 - semantic retrieval、embedding、向量数据库和完整 RAG。
 - 完整 LangGraph interrupt/checkpointer confirmation resume。
+
+## 阶段 6：ReAct Executor
+
+### ReAct 与有界 action / observation loop
+
+- [ReAct: Synergizing Reasoning and Acting in Language Models](https://arxiv.org/abs/2210.03629)
+  学习重点：理解 ReAct 通过 reasoning/action 与 environment observation 交替推进任务的核心机制。LifeOps 采用可测试的 action → ToolResult/Observation → next action 控制循环，但不要求、保存或记录模型 private chain-of-thought；副作用事实仍来自 Gateway evidence。
+
+- [LangGraph Graph API](https://docs.langchain.com/oss/python/langgraph/graph-api)
+  学习重点：用 nodes、conditional edges 和 cycle 表达 bounded Executor loop，并明确 state reducer、termination 和 recursion limit 的职责。LifeOps 使用显式 `max_steps` 作为业务控制边界，不把 framework recursion exception 当作正常 stop reason。
+
+- [LangGraph workflows and agents](https://docs.langchain.com/oss/python/langgraph/workflows-agents)
+  学习重点：对照官方 tool-calling agent loop 的 model node、tool node 和 conditional routing。LifeOps 保留自己的 `AllowedToolSet`、Tool Gateway、Guardrails、execution scope、stop reason 和 evidence，不用预构建 agent 替换 Runtime 主流程。
+
+### Tool calling 与 confirmation continuation 边界
+
+- [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling)
+  学习重点：理解模型产生 function call、应用执行函数、再把 function output 反馈给模型的多步协议。LifeOps provider adapter 只负责 decision 编解码；catalog authorization、参数复验、handler 调用和 evidence 仍由本地 Gateway 负责。
+
+- [LangGraph interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)
+  学习重点：理解暂停、恢复、checkpointer 和 side-effect 重放风险。本阶段只实现同 run synchronous confirmation provider，不提前实现跨进程/跨 run pending execution；未来若引入 interrupt，必须重新证明 execution scope、幂等和已提交副作用边界。
 
 ## 暂不收录
 

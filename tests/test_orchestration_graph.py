@@ -51,7 +51,7 @@ class OrchestrationGraphTest(unittest.TestCase):
 
         self.assertNotIn(secret, repr(sink.events))
 
-    def test_allow_route_runs_direct_executor_then_finalize(self) -> None:
+    def test_allow_route_runs_react_executor_then_finalize(self) -> None:
         state = _invoke(IntentType.WRITE_REQUEST, PolicyAction.ALLOW)
 
         self.assertEqual(
@@ -60,12 +60,12 @@ class OrchestrationGraphTest(unittest.TestCase):
                 "classify_intent",
                 "decide_policy",
                 "prepare_skills",
-                "execute_tool",
+                "execute_executor",
                 "finalize",
             ],
         )
         self.assertEqual(state["result"].status, RuntimeStatus.OK)
-        self.assertIn("No authorized Tool", state["result"].message)
+        self.assertIn("No Tool call", state["result"].message)
 
     def test_confirmation_route_does_not_use_interrupt(self) -> None:
         state = _invoke(
@@ -134,7 +134,7 @@ class OrchestrationGraphTest(unittest.TestCase):
         ).handle(_request())
 
         self.assertEqual(result.status, RuntimeStatus.OK)
-        self.assertIn("No authorized Tool", result.message)
+        self.assertIn("No Tool call", result.message)
 
 
 def _invoke(intent_type: IntentType, action: PolicyAction):

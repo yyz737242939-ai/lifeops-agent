@@ -23,7 +23,20 @@
 
 项目已完成阶段 4：LangGraph Orchestration 骨架。
 
-阶段 5 功能实现与稳定化均已完成。2026-07-13 冻结报告关闭全部 blocking findings 并给出 Stage 6 `go`；下一施工动作是创建并确认 `plans/modules/EXECUTOR_PLAN.md`，尚未开始实现 ReAct Executor。
+阶段 5 功能实现与稳定化均已完成。Stage 6 ReAct Executor 实施步骤 1-12 已全部完成，完成标准与统一离线回归通过，Stage 7 gate 为 `go`。下一阶段可以创建并确认 `plans/modules/PLANNER_PLAN.md`，当前尚未实施 Planner。
+
+- Stage 6 Executor 实施步骤 2 已完成：新增 `ExecutionLimits`、互斥的 model decisions、`ToolObservation` 安全投影、冻结的 status / stop reason、结构化 `ExecutorResult` 和最小 request-local `ExecutorState`；models 不保存 private reasoning，不依赖 Domain、repository、storage、LangGraph 或 provider SDK。新增 Executor models/contracts 与 Stage 5 architecture/runtime/tool/domain 公共契约共 `26/26` 通过。
+- Stage 6 Executor 实施步骤 3 已完成：新增 typed `ExecutorModelInput`、Context/Memory contributions，冻结 model、Context、Memory、confirmation、Recovery、Feedback 六个窄 Protocol；production empty/no-op adapters 不授权、不自动确认、不 replay，测试 fake 只记录和返回精确 typed values。Executor models/contracts/ports 与 Stage 5 architecture/runtime/tool/domain 公共契约共 `31/31` 通过。
+- Stage 6 Executor 实施步骤 4 已完成：新增独立、无 checkpointer 的 compiled `StateGraph`，以显式 final/tool/continue/stop/error routes 完成有界 action → observation cycle。每次 model decision 消耗一步；success/failed observation 可回流，deny/confirmation/limit/model/invalid/internal failure 收敛为冻结的结构化结果，重复 call ID 在第二次 Tool 执行前拒绝。合法上限 `max_steps=16` 通过显式 `limit_reached` 停止，不依赖 LangGraph recursion exception。Executor 与 Stage 5 冻结公共契约共 `43/43` 通过。
+- Stage 6 Executor 实施步骤 5 已完成：`ReactExecutor` 一次加载 Context/Memory provider、按固定 `AllowedToolSet` 从 request-local Registry 生成 filtered catalog，并在整个 bounded loop 中只复用同一个 `ToolRuntime.gateway`。真实 Gateway integration 已验证同 scope 多 Tool、跨 scope 隔离、catalog 外 Tool 零 handler 调用、safe observation 回流和 provider failure 前置停止；Executor 分层回归 `31/31` 通过。
+- Stage 6 Executor 实施步骤 6 已完成：只有 Registry 中、当前 `AllowedToolSet` 内的 WRITE Tool 才调用 synchronous confirmation provider；provider 返回的 exact `ConfirmedAction` 原样交给 Gateway 校验。READ 不请求确认，WRITE 缺失/拒绝确认零 handler 调用；两个 WRITE 分别确认，旧确认不能复用，参数、call ID、run 或 expiry 变化全部 fail-closed。聚焦确认测试 `6/6` 通过。
+- Stage 6 Executor 实施步骤 7 已完成：新增 OpenAI-compatible Responses adapter，每步只从 typed LifeOps state 重建 user input、Skill/Context/Memory contributions、filtered catalog、ordered safe observations 和 step index；关闭 parallel calls、最多一个 ToolCall，不保存 provider response 或 `previous_response_id`。final/tool 混合、多个/未知 ToolCall、非法 JSON/arguments 和空结果均 fail-closed；provider failure 与 contract failure 分别映射为 `model_failed` / `invalid_model_action`。adapter/graph/core contract `20/20` 通过。
+- Stage 6 Executor 实施步骤 8 已完成：outer allow node 已由 `execute_tool` 替换为 `execute_executor`，在 node-local 解析固定 `AllowedToolSet`、调用注入的 `ReactExecutor`，再把结构化 status/stop reason/last ToolResult 映射到冻结的 `RuntimeResult`。Policy confirmation/deny routes 不调用 Executor，outer `GraphState` 未增加 observations/limits/transcript。生产 bootstrap、RuntimeService 和 RuntimeOrchestrator 已删除旧 `ToolCallSelectionClient` 接缝，旧单 Tool adapter 与测试已删除；受影响 Runtime/Orchestration/Stage 5 E2E `42/42` 通过。
+- Stage 6 Executor 实施步骤 9 已完成：在真实 decision、Gateway result 和终止边界追加 `executor.action.selected`、`executor.observation.recorded`、`executor.stopped`，payload 只含 step/action/tool identity/status/error code/retryable/evidence count，不复制 arguments、output、prompt、exception 或 Gateway 明细。Feedback 按 observation → final result 顺序接收；Recovery 只观察终止结果；hook exception 只产生安全 `executor.hook.failed`，不改写主结果或 evidence。Executor suite `48/48`、受影响 Runtime/Tool/Stage 5 suite `63/63` 通过。
+- Stage 6 Executor 实施步骤 10 已完成：新增 `9` 个 deterministic/offline 跨 Domain compiled E2E，真实 outer graph 与 Executor subgraph 在同一 request-local scope 中完成 Research fetch → parse → rank → draft、Travel search → compare → draft、Research READ → Travel READ、多 WRITE 逐 action confirmation、无确认零写、失败 observation 回流、catalog deny、step limit、partial/expired provider result 和 itinerary 幂等 retry；`9/9` 通过，未访问真实网络、provider、用户数据库或日志目录。
+- Stage 6 Executor 实施步骤 11 已完成：分层回归依次为 Executor models/contracts/ports `16/16`（`0.023s`）、Tool/Domain integration `41/41`（`0.160s`）、Runtime/compiled graph `69/69`（`0.883s`）、architecture/migration contracts `31/31`（`0.266s`）；四层共执行 `157` 次且零失败。统一离线 `unittest discover` 去重后 `294/294`（`2.279s`）通过，失败分类为 contract `0`、integration `0`、runtime/graph `0`、architecture/migration `0`、unexpected `0`。
+- Stage 6 日志收口已完成：新增 request-local `LlmInteractionSink` / `RequestLlmLog`，Skill selection 与每步 Executor model decision 都把实际 provider request、结构化 response、provider/model、status 和安全 error code 写入 session `llm.jsonl`；interaction 使用独立 `seq`，provider exception text 不落盘，日志写失败不改变主结果。file-backed offline smoke 已验证 current Runtime → Skill → Executor → Gateway → final 的 `events.jsonl` 顺序，以及 `1` 次 Skill selection + `2` 次 Executor decision 的 `llm.jsonl` 落盘；active `application.log` handler 在 service close 时释放。
+- Stage 6 Executor 实施步骤 12 已完成：两层 compiled graph、bounded loop、filtered catalog、Gateway-only execution、逐 WRITE confirmation、safe observation/evidence、request-local hooks 与三类日志边界均已同步到当前文档。最终统一离线回归 `298/298`（`2.753s`）通过；真实 LLM/provider E2E 未运行，作为非阻塞外部可用性验证单独保留。Stage 6 结论为 `go`。
 
 - Stage 5 稳定化步骤 6-11 已完成：公共 Tool schema、依赖方向、Runtime/Tool/Domain contract 与事件 payload 已增加兼容性门禁；每个 run 显式拥有一个 execution scope，同 run 复用、跨 run 隔离。
 - Runtime 公共结果已精简，内部 exception、Intent/Policy 摘要和 trace summary 不再进入 `RuntimeResult`；run lifecycle record 与 Domain WRITE transaction 已分离，LLM/external read 不占用 SQLite 写 transaction，异常 run record 可闭合。
@@ -145,7 +158,7 @@ RuntimeRequest
 - `docs/ARCHITECTURE.md` 已记录 Runtime Core、Intent / Policy、LangGraph Orchestration、Skill、Tool Gateway、Guardrails 和 Domain 纵向切片边界。
 - `docs/RUNTIME_CONCEPTS.md` 已记录 Runtime Core、Intent Layer、Policy / Permission Layer、Write Safety、LangGraph Orchestrator、LangGraph vs LangChain、Observability 和 SQLite Local Persistence 学习章节。
 - `plans/modules/STORAGE_SQLITE_PLAN.md`、`plans/modules/RUNTIME_CORE_PLAN.md`、`plans/modules/INTENT_POLICY_PLAN.md`、`plans/modules/OBSERVABILITY_LOGGING_PLAN.md` 和 `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md` 已记录完成状态。
-- 下一施工入口是创建并确认 `plans/modules/EXECUTOR_PLAN.md`；计划确认前不开始 ReAct Executor 实现。
+- Stage 6 已关闭。下一施工入口是为 Stage 7 单独创建并确认 `plans/modules/PLANNER_PLAN.md`；本次未创建或实施 Planner。
 
 当前有效测试命令：
 

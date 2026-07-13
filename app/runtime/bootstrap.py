@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from app.executor.model_adapter import OpenAIExecutorModelClient
+from app.executor.service import ReactExecutor
 from app.common.config import load_app_config
 from app.domains.research.ports import HuggingFaceResearchContentPort
 from app.domains.research.repository import ResearchRepository
@@ -21,7 +23,6 @@ from app.skills.selector import SkillSelectionClient
 from app.skills.service import SkillService
 from app.storage.migrations import migrate
 from app.storage.sqlite import connect_sqlite
-from app.tools.calling import OpenAIToolCallSelectionClient
 from app.tools.registry import ToolRegistry
 from app.tools.runtime import ToolRuntime
 
@@ -47,7 +48,7 @@ def build_runtime_service(
         conn=conn,
         log_root=config.log_root,
         execution_scope_factory=lambda: _build_tool_runtime(conn, config.skill_root),
-        tool_call_selection_client=OpenAIToolCallSelectionClient(),
+        executor=ReactExecutor(OpenAIExecutorModelClient()),
     )
 
 

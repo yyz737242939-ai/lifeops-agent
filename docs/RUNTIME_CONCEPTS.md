@@ -511,6 +511,57 @@ LangChain 后续即使进入模型或工具层，也不能绕过 LifeOps Skill c
 - 本项目：`app/orchestration/`
 - 本项目：`docs/ARCHITECTURE.md`
 
+## ReAct Executor
+
+### 解决什么问题
+
+单次 Tool 选择无法处理“先查资料、根据结果再比较、最后生成回答”这类依赖 observation 的请求。ReAct Executor 提供一个通用、有界、跨 Domain 的 action → observation 循环，同时保持 Policy、Tool Gateway 和 Domain 事实边界不变。
+
+### 核心概念
+
+- Action：模型二选一返回一个 `ToolActionDecision` 或一个非空 `FinalAnswerDecision`。
+- Observation：Gateway 返回的 `ToolResult` 安全投影，包含 call/tool identity、status、结构化 output/error 和 evidence。
+- Bounded loop：每次 model decision 消耗一个 step，默认最多 `8`，合法范围 `1..16`。
+- Stop reason：`final_answer`、`confirmation_required`、`limit_reached`、`safety_denied` 和明确的 model/input/internal failure。
+- Private reasoning boundary：Executor 不定义 thought、reasoning 或 chain-of-thought 字段。
+
+### 当前 runtime 实现
+
+outer compiled graph 负责 Intent → Policy → Skill → Executor；独立 Executor compiled graph 负责 decide → execute Tool → observe → decide。Runtime 每个 run 只创建一个 `ToolRuntime`，整个循环复用同一 Registry/Gateway/Domain service scope。模型只看到 Policy 与 Skill 求交后的 filtered catalog；每个 ToolCall 仍必须经过 pre/post Guardrails。WRITE action 逐次请求 exact synchronous confirmation，不能跨 call 或 run 复用。
+
+### 输入 / 输出 / 不负责什么
+
+输入是 `RuntimeRequest`、Skill prompt contributions、固定 `AllowedToolSet`、request-local `ToolRuntime` 以及 empty/fake Context/Memory providers。输出是结构化 `ExecutorResult`，包含 status、stop reason、step count、ordered observations 和最后一个安全 ToolResult。
+
+Executor 不授权、不持久化 GraphState、不自动 retry/replay WRITE、不拥有 Domain repository、不保存 provider response，也不把 final answer 当作副作用 evidence。
+
+### 常见失败模式
+
+- 模型返回 final answer 与 ToolCall 混合、多个 ToolCall、未知 Tool 或非法 arguments。
+- 重复 call ID、catalog 外 Tool、伪造或跨 scope temporary ID。
+- WRITE 缺少、过期或与 arguments 不匹配的 confirmation。
+- Tool failure 回流后模型继续消耗 step，最终达到 limit。
+- provider、Context/Memory provider 或 hook failure 被归一化为安全 error code。
+
+### 如何测试和观察
+
+`events.jsonl` 可以按 `seq` 看到 `executor.action.selected` → Gateway/Guardrail events → `executor.observation.recorded` → 下一 action → `executor.stopped`。`llm.jsonl` 按独立 interaction `seq` 保存 Skill selection 与每一步 Executor provider request/response；`application.log` 只保存异常诊断。
+
+当前 deterministic/offline E2E 覆盖 Research 四步链、Travel search → compare → draft、跨 Domain sequence、confirmed/unconfirmed WRITE、failure recovery、limit、partial/expired result 和 idempotent retry。真实 provider E2E 不是强制 gate，provider 可用性风险与 LifeOps contract failure 分开判断。
+
+### 面试解释
+
+可以这样讲：我没有直接采用黑盒 agent helper，而是用两个 StateGraph 分离外层授权编排和内层 ReAct cycle。Executor 只负责有界控制流，Tool Gateway 仍是唯一执行入口；observation、confirmation、evidence 和 stop reason 都是自有 typed contract，因此可以独立测试安全、失败恢复和跨 Domain 行为。
+
+### 相关项目文件
+
+- `app/executor/`
+- `app/orchestration/graph.py`
+- `app/tools/gateway.py`
+- `tests/test_executor_cross_domain_e2e.py`
+- `tests/test_runtime_observability_e2e.py`
+- `plans/modules/EXECUTOR_PLAN.md`
+
 ## Observability
 
 ### 解决什么问题

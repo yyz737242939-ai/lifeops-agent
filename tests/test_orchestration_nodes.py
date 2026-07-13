@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import unittest
 
+from app.executor.models import FinalAnswerDecision
+from app.executor.service import ReactExecutor
 from app.intent.models import IntentDecision, IntentType
 from app.orchestration.nodes import (
     classify_intent,
     decide_policy,
     deny,
-    execute_tool,
+    execute_executor,
     finalize,
     prepare_skills,
     require_confirmation,
@@ -19,6 +21,7 @@ from app.runtime.service import RuntimeService
 from tests.helpers import create_test_skill_service
 from app.tools.registry import ToolRegistry
 from app.tools.runtime import ToolRuntime
+from tests.executor_fakes import FakeExecutorModelClient
 
 
 class OrchestrationNodesTest(unittest.TestCase):
@@ -60,10 +63,14 @@ class OrchestrationNodesTest(unittest.TestCase):
             state,
             skill_service=create_test_skill_service(),
         )
-        state = execute_tool(
+        state = execute_executor(
             state,
             execution_scope=ToolRuntime.from_registry(ToolRegistry()),
-            selection_client=NoToolCallSelectionClient(),
+            executor=ReactExecutor(
+                FakeExecutorModelClient(
+                    [FinalAnswerDecision("No Tool call was selected for this request.")]
+                )
+            ),
         )
         state = finalize(state)
 
@@ -74,14 +81,14 @@ class OrchestrationNodesTest(unittest.TestCase):
                 "classify_intent",
                 "decide_policy",
                 "prepare_skills",
-                "execute_tool",
+                "execute_executor",
                 "finalize",
             ],
         )
         self.assertEqual(state["skill_selection"].selected_skill_ids, ())
         self.assertEqual(state["prompt_contributions"], [])
         self.assertEqual(state["result"].status, RuntimeStatus.OK)
-        self.assertIn("No authorized Tool", state["result"].message)
+        self.assertIn("No Tool call", state["result"].message)
 
     def test_confirmation_node_does_not_claim_write(self) -> None:
         state = create_graph_state(_request("计划一下"))
@@ -190,11 +197,6 @@ class FailingPolicyService:
 
 def _request(user_input: str) -> RuntimeRequest:
     return RuntimeRequest(user_input=user_input, session_id="session_test")
-
-
-class NoToolCallSelectionClient:
-    def select(self, request, prompt_contributions, tool_catalog):
-        return None
 
 
 if __name__ == "__main__":

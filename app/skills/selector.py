@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -11,7 +12,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.observability.logger import TraceSink
+from app.observability.logger import LlmInteractionSink, TraceSink
 from app.runtime.models import RuntimeRequest
 from app.skills.errors import SkillSelectionError
 from app.skills.models import SkillDefinition, SkillSelection
@@ -49,6 +50,8 @@ class SkillSelectionClient:
         self,
         request: RuntimeRequest,
         skill_metadata: tuple[SkillDefinition, ...],
+        *,
+        llm_log: LlmInteractionSink | None = None,
     ) -> Mapping[str, Any]:
         """Select zero or more Skills using all supplied metadata."""
 
@@ -59,9 +62,9 @@ class SkillSelectionClient:
                 for item in skill_metadata
             ],
         }
-        response = self._client.chat.completions.create(
-            model=self._model,
-            messages=[
+        provider_request = {
+            "model": self._model,
+            "messages": [
                 {
                     "role": "system",
                     "content": (
@@ -76,22 +79,58 @@ class SkillSelectionClient:
                     "content": json.dumps(request_payload, ensure_ascii=False),
                 },
             ],
-            response_format={"type": "json_object"},
-            temperature=0,
-        )
-        content = response.choices[0].message.content
-        if not content:
-            raise SkillSelectionError(
-                "Skill selection response is empty.",
-                code="skill_selection_empty_response",
-            )
+            "response_format": {"type": "json_object"},
+            "temperature": 0,
+        }
+        content: str | None = None
         try:
+            response = self._client.chat.completions.create(**provider_request)
+            content = response.choices[0].message.content
+            if not content:
+                raise SkillSelectionError(
+                    "Skill selection response is empty.",
+                    code="skill_selection_empty_response",
+                )
             parsed = _SkillSelectionOutput.model_validate_json(content)
+        except SkillSelectionError as exc:
+            _record_llm(
+                llm_log,
+                self._model,
+                provider_request,
+                None,
+                status="failed",
+                error_code=exc.code,
+            )
+            raise
         except ValueError as exc:
+            _record_llm(
+                llm_log,
+                self._model,
+                provider_request,
+                {"content": content},
+                status="failed",
+                error_code="skill_selection_invalid_provider_output",
+            )
             raise SkillSelectionError(
                 "Skill selection response is not valid structured output.",
                 code="skill_selection_invalid_provider_output",
             ) from exc
+        except Exception:
+            _record_llm(
+                llm_log,
+                self._model,
+                provider_request,
+                None,
+                status="failed",
+                error_code="skill_selection_model_failed",
+            )
+            raise
+        _record_llm(
+            llm_log,
+            self._model,
+            provider_request,
+            {"content": content},
+        )
         return parsed.model_dump()
 
 
@@ -101,12 +140,16 @@ def select_skills(
     llm: SkillSelectionClient,
     *,
     trace: TraceSink | None = None,
+    llm_log: LlmInteractionSink | None = None,
 ) -> SkillSelection:
     """Ask an LLM to select Skills, then validate against LifeOps metadata."""
 
     try:
         metadata = _validate_metadata(skill_metadata)
-        raw = llm.select(request, metadata)
+        if llm_log is None:
+            raw = llm.select(request, metadata)
+        else:
+            raw = llm.select(request, metadata, llm_log=llm_log)
         selection = _validate_selection(raw, metadata)
     except Exception as exc:
         if trace is not None:
@@ -134,6 +177,31 @@ def select_skills(
             },
         )
     return selection
+
+
+def _record_llm(
+    sink: LlmInteractionSink | None,
+    model: str,
+    request: dict[str, Any],
+    response: dict[str, Any] | None,
+    *,
+    status: str = "ok",
+    error_code: str | None = None,
+) -> None:
+    if sink is not None:
+        try:
+            sink.record(
+                provider="openai-compatible",
+                model=model,
+                request=request,
+                response=response,
+                status=status,
+                error_code=error_code,
+            )
+        except Exception:
+            logging.getLogger("lifeops.llm").exception(
+                "Skill selection LLM interaction log failed"
+            )
 
 
 def _validate_metadata(

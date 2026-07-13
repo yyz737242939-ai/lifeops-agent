@@ -35,7 +35,7 @@ class OrchestrationSkillStageTest(unittest.TestCase):
                 "classify_intent",
                 "decide_policy",
                 "prepare_skills",
-                "execute_tool",
+                "execute_executor",
                 "finalize",
             ],
         )
@@ -55,6 +55,8 @@ class OrchestrationSkillStageTest(unittest.TestCase):
                 "skill.loaded",
                 "skill.loaded",
                 "tool.catalog.resolved",
+                "executor.action.selected",
+                "executor.stopped",
             ],
         )
 
@@ -79,7 +81,7 @@ class OrchestrationSkillStageTest(unittest.TestCase):
         self.assertEqual(state["result"].status, RuntimeStatus.ERROR)
         self.assertEqual(state["result"].error_code, "runtime.skill_failed")
         self.assertEqual(state["error_stage"], "skill")
-        self.assertNotIn("execute_tool", state["graph_path"])
+        self.assertNotIn("execute_executor", state["graph_path"])
         self.assertEqual(trace.events[-1][0], "skill.selection.failed")
 
     def test_confirmation_and_deny_routes_do_not_call_skill_selector(self) -> None:

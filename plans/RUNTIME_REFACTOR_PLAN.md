@@ -21,7 +21,8 @@
 - 阶段 3.5：Observability 文件日志校正已完成，详见 `plans/modules/OBSERVABILITY_LOGGING_PLAN.md`。
 - 阶段 4：LangGraph Orchestration 骨架已完成，详见 `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md`。
 - 当前阶段：阶段 5 功能实现与稳定化均已完成；`STAGE5_STABILIZATION_PLAN.md` 已关闭全部 blocking findings，并在 `240/240` 统一离线回归后给出 Stage 6 `go`。
-- 下一阶段：创建并确认 `plans/modules/EXECUTOR_PLAN.md`，随后进入阶段 6 ReAct Executor；计划确认前不开始实现。
+- 当前阶段：阶段 6 ReAct Executor 实施步骤 1-12 已全部完成，统一离线回归 `298/298` 通过，Stage 7 gate 为 `go`。
+- 下一阶段：创建并确认 `plans/modules/PLANNER_PLAN.md` 后实施阶段 7 Plan-and-Execute Planner；当前尚未创建或实施 Planner。
 
 核心执行链路：
 
@@ -903,6 +904,8 @@ docs/RUNTIME_CONCEPTS.md
 - Travel repository / service / tools / fixture-backed external Ports。
 
 ### 阶段 6：ReAct Executor
+
+状态：已完成。两层 compiled graph、bounded action → observation loop、真实 Gateway、逐 WRITE confirmation、跨 Domain E2E、语义 events、request-local LLM interaction log 与统一离线回归均已验证；Stage 7 gate 为 `go`。
 
 目标：
 

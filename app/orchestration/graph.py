@@ -11,13 +11,15 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 
+from app.executor.models import FinalAnswerDecision
+from app.executor.service import ReactExecutor
 from app.intent.service import IntentService
-from app.observability.logger import TraceSink
+from app.observability.logger import LlmInteractionSink, TraceSink
 from app.orchestration.nodes import (
     classify_intent,
     decide_policy,
     deny,
-    execute_tool,
+    execute_executor,
     finalize,
     prepare_skills,
     require_confirmation,
@@ -26,7 +28,6 @@ from app.orchestration.state import GraphRoute, GraphState, create_graph_state
 from app.policy.service import PolicyService
 from app.runtime.models import RuntimeRequest, RuntimeResult
 from app.skills.service import SkillService
-from app.tools.calling import ToolCallSelectionClient
 from app.tools.registry import ToolRegistry
 from app.tools.runtime import ToolRuntime
 
@@ -36,6 +37,7 @@ class OrchestrationContext:
     """Request-local dependencies that must not become graph state."""
 
     trace: TraceSink | None = None
+    llm_log: LlmInteractionSink | None = None
     execution_scope: ToolRuntime | None = None
 
 
@@ -43,7 +45,7 @@ def build_runtime_graph(
     intent_service: IntentService,
     policy_service: PolicyService,
     skill_service: SkillService,
-    tool_call_selection_client: ToolCallSelectionClient | None = None,
+    executor: ReactExecutor | None = None,
 ) -> CompiledStateGraph:
     """Build and compile the stage-4 runtime orchestration graph."""
 
@@ -65,9 +67,9 @@ def build_runtime_graph(
         _prepare_skills_with_runtime(skill_service),
     )
     graph.add_node(
-        "execute_tool",
-        _execute_tool_with_runtime(
-            tool_call_selection_client or _NoToolCallSelectionClient(),
+        "execute_executor",
+        _execute_executor_with_runtime(
+            executor or ReactExecutor(_NoOpExecutorModelClient()),
         ),
     )
     graph.add_node("requires_confirmation", require_confirmation)
@@ -97,11 +99,11 @@ def build_runtime_graph(
         "prepare_skills",
         _route_after_skill_preparation,
         {
-            "continue": "execute_tool",
+            "continue": "execute_executor",
             "error": END,
         },
     )
-    graph.add_edge("execute_tool", "finalize")
+    graph.add_edge("execute_executor", "finalize")
     graph.add_edge("requires_confirmation", "finalize")
     graph.add_edge("deny", "finalize")
     graph.add_edge("finalize", END)
@@ -117,7 +119,7 @@ class RuntimeOrchestrator:
         intent_service: IntentService | None = None,
         policy_service: PolicyService | None = None,
         execution_scope_factory: Callable[[], ToolRuntime] | None = None,
-        tool_call_selection_client: ToolCallSelectionClient | None = None,
+        executor: ReactExecutor | None = None,
     ) -> None:
         self._intent_service = intent_service or IntentService()
         self._policy_service = policy_service or PolicyService()
@@ -127,13 +129,14 @@ class RuntimeOrchestrator:
             self._intent_service,
             self._policy_service,
             self._skill_service,
-            tool_call_selection_client,
+            executor,
         )
 
     def invoke(
         self,
         request: RuntimeRequest,
         trace: TraceSink | None = None,
+        llm_log: LlmInteractionSink | None = None,
     ) -> GraphState:
         """Run the compiled graph and return its request-local final state."""
 
@@ -143,6 +146,7 @@ class RuntimeOrchestrator:
                 create_graph_state(request),
                 context=OrchestrationContext(
                     trace=trace,
+                    llm_log=llm_log,
                     execution_scope=self._execution_scope_factory(),
                 ),
             ),
@@ -155,10 +159,11 @@ class RuntimeOrchestrator:
         self,
         request: RuntimeRequest,
         trace: TraceSink | None = None,
+        llm_log: LlmInteractionSink | None = None,
     ) -> RuntimeResult:
         """Run the compiled graph and return its structured runtime result."""
 
-        final_state = self.invoke(request, trace=trace)
+        final_state = self.invoke(request, trace=trace, llm_log=llm_log)
         result = final_state["result"]
         if result is None:
             raise RuntimeError("runtime graph completed without a result.")
@@ -202,13 +207,14 @@ def _prepare_skills_with_runtime(
             state,
             skill_service=skill_service,
             trace=context.trace,
+            llm_log=context.llm_log,
         )
 
     return invoke_node
 
 
-def _execute_tool_with_runtime(
-    selection_client: ToolCallSelectionClient,
+def _execute_executor_with_runtime(
+    executor: ReactExecutor,
 ) -> Callable[[GraphState, Runtime[OrchestrationContext]], GraphState]:
     def invoke_node(
         state: GraphState,
@@ -216,11 +222,12 @@ def _execute_tool_with_runtime(
     ) -> GraphState:
         context = runtime.context or OrchestrationContext()
         execution_scope = context.execution_scope or _empty_tool_runtime()
-        return execute_tool(
+        return execute_executor(
             state,
             execution_scope=execution_scope,
-            selection_client=selection_client,
+            executor=executor,
             trace=context.trace,
+            llm_log=context.llm_log,
         )
 
     return invoke_node
@@ -230,9 +237,9 @@ def _empty_tool_runtime() -> ToolRuntime:
     return ToolRuntime.from_registry(ToolRegistry())
 
 
-class _NoToolCallSelectionClient:
-    def select(self, request, prompt_contributions, tool_catalog):
-        return None
+class _NoOpExecutorModelClient:
+    def decide(self, model_input):
+        return FinalAnswerDecision("No Tool call was selected for this request.")
 
 
 def _with_runtime_trace(

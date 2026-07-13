@@ -17,6 +17,22 @@ class TraceSink(Protocol):
         ...
 
 
+class LlmInteractionSink(Protocol):
+    """Request-local sink for ordered provider request/response records."""
+
+    def record(
+        self,
+        *,
+        provider: str,
+        model: str,
+        request: dict[str, Any],
+        response: dict[str, Any] | None,
+        status: str = "ok",
+        error_code: str | None = None,
+    ) -> None:
+        ...
+
+
 class OptionalLogAppender:
     """Wrap an optional log callback behind a stable append method."""
 
@@ -65,3 +81,13 @@ def configure_application_logging(session_dir: str | Path) -> Path:
     )
     logger.addHandler(handler)
     return log_path
+
+
+def close_application_logging() -> None:
+    """Close the active session FileHandler, if one is configured."""
+
+    logger = ensure_application_logger()
+    for handler in list(logger.handlers):
+        if isinstance(handler, logging.FileHandler):
+            logger.removeHandler(handler)
+            handler.close()

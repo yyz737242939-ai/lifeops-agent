@@ -50,9 +50,11 @@ class RuntimeServiceTest(unittest.TestCase):
                         "intent.classified",
                         "policy.decided",
                         "orchestration.route.selected",
-                        "skill.selected",
-                        "tool.catalog.resolved",
-                        "runtime.run.completed",
+                "skill.selected",
+                "tool.catalog.resolved",
+                "executor.action.selected",
+                "executor.stopped",
+                "runtime.run.completed",
                     ],
                 )
                 self.assertEqual(events[1]["payload"]["intent_type"], "write_request")
@@ -85,13 +87,13 @@ class RuntimeServiceTest(unittest.TestCase):
         self.assertNotIn("已写入", result.message)
         self.assertNotIn("saved", result.message.lower())
 
-    def test_policy_allow_with_empty_catalog_finishes_without_model_call(self) -> None:
+    def test_policy_allow_with_empty_catalog_can_return_final_answer(self) -> None:
         result = RuntimeService(create_test_skill_service()).handle(
             _request("把明天跑步加入任务")
         )
 
         self.assertEqual(result.status, RuntimeStatus.OK)
-        self.assertIn("No authorized Tool", result.message)
+        self.assertIn("No Tool call", result.message)
 
     def test_intent_failure_returns_error_and_skips_policy(self) -> None:
         policy = RecordingPolicyService()

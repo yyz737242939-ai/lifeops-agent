@@ -14,16 +14,16 @@ from app.skills.models import SkillDefinition
 
 
 class SkillBootstrapTest(unittest.TestCase):
-    @patch("app.runtime.bootstrap.OpenAIToolCallSelectionClient")
+    @patch("app.runtime.bootstrap.OpenAIExecutorModelClient")
     @patch("app.runtime.bootstrap.SkillSelectionClient")
     def test_bootstrap_discovers_skills_and_builds_default_selection_client(
         self,
         selection_client_type: Any,
-        tool_call_client_type: Any,
+        executor_model_client_type: Any,
     ) -> None:
         client = RecordingSelectionClient()
         selection_client_type.return_value = client
-        tool_call_client_type.return_value = NoToolCallSelectionClient()
+        executor_model_client_type.return_value = FinalAnswerModelClient()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -82,6 +82,8 @@ class RecordingSelectionClient:
         self,
         request: RuntimeRequest,
         skill_metadata: tuple[SkillDefinition, ...],
+        *,
+        llm_log=None,
     ) -> dict[str, Any]:
         self.called = True
         self.received_metadata = skill_metadata
@@ -91,9 +93,11 @@ class RecordingSelectionClient:
         }
 
 
-class NoToolCallSelectionClient:
-    def select(self, request, prompt_contributions, tool_catalog):
-        return None
+class FinalAnswerModelClient:
+    def decide(self, model_input):
+        from app.executor.models import FinalAnswerDecision
+
+        return FinalAnswerDecision("No Tool call was selected for this request.")
 
 
 if __name__ == "__main__":

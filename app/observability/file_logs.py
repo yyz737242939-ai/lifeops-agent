@@ -9,6 +9,7 @@ from typing import Any
 from app.common.serialization import to_json
 from app.common.time import utc_now_iso
 from app.observability.events import LogLlmInteraction, LogRuntimeEvent
+from app.runtime.models import RuntimeRequest
 
 
 @dataclass(frozen=True)
@@ -113,6 +114,41 @@ class LlmLogWriter:
 
     def read_all(self) -> list[dict[str, Any]]:
         return self._writer.read_all()
+
+
+class RequestLlmLog:
+    """Assign ordered interaction sequence numbers for one RuntimeRequest."""
+
+    def __init__(self, writer: LlmLogWriter, request: RuntimeRequest) -> None:
+        self._writer = writer
+        self._request = request
+        self._seq = 0
+
+    def record(
+        self,
+        *,
+        provider: str,
+        model: str,
+        request: dict[str, Any],
+        response: dict[str, Any] | None,
+        status: str = "ok",
+        error_code: str | None = None,
+    ) -> None:
+        self._seq += 1
+        self._writer.append(
+            LogLlmInteraction(
+                run_id=self._request.run_id,
+                session_id=self._request.session_id,
+                turn_id=self._request.turn_id,
+                seq=self._seq,
+                provider=provider,
+                model=model,
+                request=request,
+                response=response,
+                status=status,
+                error_code=error_code,
+            )
+        )
 
 
 class SessionLogWriter:
