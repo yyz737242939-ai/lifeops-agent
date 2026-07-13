@@ -76,6 +76,26 @@ class TravelKnowledgeReferencesTest(unittest.TestCase):
         self.assertEqual(view.references[0].status, "unavailable")
         self.assertEqual(view.references[0].error_code, "reference_unavailable")
 
+    def test_resolution_statuses_reject_ambiguous_payloads(self) -> None:
+        reference = KnowledgeReference("ref_1", "research", "note", "note_1")
+
+        with self.assertRaisesRegex(ValueError, "cannot contain error_code"):
+            KnowledgeReferenceResolution(
+                reference,
+                "resolved",
+                title="Note",
+                summary="Summary",
+                provenance="research:note",
+                error_code="stale_error",
+            )
+        with self.assertRaisesRegex(ValueError, "cannot contain resolved content"):
+            KnowledgeReferenceResolution(
+                reference,
+                "unavailable",
+                title="Stale title",
+                error_code="reference_unavailable",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

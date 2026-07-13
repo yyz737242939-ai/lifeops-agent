@@ -93,6 +93,37 @@ class ObservabilityFileLogsTest(unittest.TestCase):
                         logger.removeHandler(handler)
                         handler.close()
 
+    def test_application_logging_switches_to_one_active_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            first_log = configure_application_logging(root / "session_a")
+            second_log = configure_application_logging(root / "session_b")
+            logger = logging.getLogger("lifeops")
+            try:
+                logger.warning("diagnostic-for-session-b")
+
+                self.assertNotIn(
+                    "diagnostic-for-session-b",
+                    first_log.read_text(encoding="utf-8"),
+                )
+                self.assertIn(
+                    "diagnostic-for-session-b",
+                    second_log.read_text(encoding="utf-8"),
+                )
+                active = [
+                    handler
+                    for handler in logger.handlers
+                    if isinstance(handler, logging.FileHandler)
+                ]
+                self.assertEqual(len(active), 1)
+            finally:
+                for handler in list(logger.handlers):
+                    if isinstance(handler, logging.FileHandler) and Path(
+                        handler.baseFilename
+                    ).is_relative_to(root.resolve()):
+                        logger.removeHandler(handler)
+                        handler.close()
+
 
 if __name__ == "__main__":
     unittest.main()

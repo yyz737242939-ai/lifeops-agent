@@ -1,4 +1,6 @@
-# Tool System 模块计划
+# Tool System 最终设计说明
+
+文档状态：阶段 5 实现完成后的稳定设计。后续 Tool 必须保持 `AllowedToolSet -> Guardrail -> Gateway -> handler -> evidence` 单一执行入口。
 
 ## 1. 目标
 
@@ -28,12 +30,12 @@
 - `ToolRegistry`：注册、重复校验、按 name 查询、生成模型可见 catalog。
 - `AllowedToolSet`：selected Skill 业务候选（加通用 Tool）与 Policy `allowed_effects` 求交后的本轮 Tool 白名单。
 - `ToolCall` / `ToolResult` / `ToolError` / `ExecutionEvidence`。
-- `ToolExecutionContext`：run IDs、Policy、AllowedToolSet、TraceSink 和 request-local dependencies。
+- `ConfirmedAction`：绑定 run ID、call ID、Tool 名、canonical arguments digest 和有效期的结构化确认。
 - 统一 `ToolGateway.execute(...)`。
 - 执行前和执行后 `GuardrailDecision`。
 - READ、WRITE、EXTERNAL_READ 三类 effect；阶段 5 不实现外部交易写入。
 - Research / Travel tools 接入同一 gateway。
-- 成功/失败 tool call 写入 `tool_calls` 摘要并追加语义 event。
+- 成功/失败 Tool call 追加紧凑语义 event；`tool_calls` 暂不写入，保留为历史兼容表。
 - 已评估但当前不保留 LangChain Tool adapter；LifeOps definition 已能直接生成模型 catalog，真实模型调用接入前增加 `StructuredTool` 只会复制 schema 和 invocation lifecycle。
 
 ### 3.2 初版不做
@@ -78,16 +80,14 @@ ToolResult + ExecutionEvidence + trace
 - `stage`: pre_execution / post_execution；
 - `reason_code` 与紧凑 reason；
 - `tool_name`；
-- `sanitized_args_summary`；
-- `evidence_requirements`。
 
 Guardrail 是确定性安全边界。LangChain middleware 可作为额外 adapter/hook，但不得绕过或替代它。
 
-当前 V1 pre-Guardrail 接收 authorization 已生成的 `AllowedToolSet`，不再直接读取 `PolicyDecision`；WRITE 只在 `confirmed_tool_name` 与当前 `ToolCall.tool_name` 一致时继续，READ / EXTERNAL_READ 不要求确认。参数摘要绑定、过期时间和跨 run confirmation token 留到 Interaction Safety State 施工，不在本步提前实现。
+当前 V1 pre-Guardrail 接收 authorization 已生成的 `AllowedToolSet`，不再直接读取 `PolicyDecision`；WRITE 必须提供匹配当前 run/call/tool/arguments 且未过期的 `ConfirmedAction`，READ / EXTERNAL_READ 不要求确认。Guardrail decision 只保留 action、stage、reason code、紧凑 reason 和 Tool 名。
 
 ### 4.2 未来适配接口
 
-- Context 只通过 `ToolExecutionContext` 的窄引用提供已组装数据，不把完整 GraphState 注入工具。
+- Context 未来通过 Executor 的窄 provider 接口接入，不把完整 GraphState 或 Domain internals 注入 Tool handler。
 - Memory tool 与业务 tool 使用同一 gateway；具体 WRITE Tool 必须被 Policy 点名授权。
 - Planner 只看到 catalog，不调用 handler。
 - Planner 的 step 与 Tool 如何匹配留到 Planner 模块施工时设计；当前 Tool System 不预留 capability 字段。
@@ -121,7 +121,7 @@ Domain handler 只调用 service；service 再调用 repository 或 external Por
 - 未注册、重复注册或 schema 不合法；
 - Tool 声明了错误 Skill ID，或 selected Skill 不匹配；
 - Policy 未允许 Tool effect；
-- WRITE confirmation 缺失或未绑定当前 Tool 名；参数摘要绑定和过期检查留到后续 Interaction Safety State；
+- WRITE confirmation 缺失、过期，或与当前 run/call/tool/arguments 不匹配；
 - 参数验证失败；
 - handler timeout / provider failure；
 - handler 声称成功但缺少 evidence；
@@ -154,10 +154,10 @@ Domain handler 只调用 service；service 再调用 repository 或 external Por
 1. [已完成] 定义 Tool、Result、Evidence、Guardrail 模型。
 2. [已完成] 实现 registry 和 schema validation。
 3. [已完成] 实现 Tool exposure intersection：selected Skill IDs 选出绑定的业务候选 Tool，空 `skill_ids` 的通用 Tool 始终作为候选，再与 Policy `allowed_effects` 和 registry contracts 求交；Skill 不授权，Policy 不枚举业务 Tool 名。
-4. [已完成] 实现 pre/post guardrail pipeline：pre 消费 `AllowedToolSet` 并检查当前 Tool membership、注册状态、WRITE Tool 名确认和 input schema，不重复读取 Policy；post 检查 result identity、success、output schema 和 WRITE evidence。
+4. [已完成] 实现 pre/post guardrail pipeline：pre 消费 `AllowedToolSet` 并检查 membership、注册状态、input schema，以及 WRITE 的 `ConfirmedAction` 是否匹配 run/call/tool/arguments/expiry，不重复读取 Policy；post 检查 result identity、success、output schema 和 WRITE evidence。
 5. [已完成] 实现原生 `ToolGateway` 和语义 events：按 `AllowedToolSet -> pre-Guardrail -> handler -> post-Guardrail` 执行，拒绝/确认不触达 handler，handler 异常与非法结果归一化为安全 `ToolResult`，event 不记录原始参数或输出。当前没有真实的跨 Run 查询消费者，因此 Gateway 不提前写 `tool_calls`。
-6. [已完成] 接入最小真实 Research Domain 纵向切片：Research tools 绑定 `skill_ids=("research",)`；`research.fetch_source` 通过 fixture-backed `ResearchSourcePort` 产生 request-local `ExternalObservation`，`research.save_source` 只能按 observation ID 经 Policy WRITE effect、confirmation 和 Gateway 保存 `ResearchSource`，成功返回持久化 evidence；handler contract 接收完整 `ToolCall` 以绑定 call identity。
-7. [已完成] 接入最小真实 Travel Domain 纵向切片并验证 Tool Runtime 不需要 Domain 特例；初始 `travel.search_options` / `CandidateOption` 兼容切片随后已由 Travel Domain 的五个 typed EXTERNAL_READ Tools、compare/draft 与 draft-based `travel.save_itinerary` 替代，WRITE 继续经过 Policy effect、confirmation、Gateway、transaction 和 evidence。
+6. [已完成] 接入最小真实 Research Domain 纵向切片：Research tools 绑定 `skill_ids=("research",)`；`research.fetch_source` 通过 fixture-backed `ResearchSourcePort` 产生 request-local `ExternalObservation`，`research.save_source` 只能按当前 execution scope 的 observation ID 经 Policy WRITE effect、`ConfirmedAction` 和 Gateway 保存 `ResearchSource`，成功返回持久化 evidence；handler contract 接收完整 `ToolCall` 以绑定 call identity。
+7. [已完成] 接入最小真实 Travel Domain 纵向切片并验证 Tool Runtime 不需要 Domain 特例；初始 `travel.search_options` / `CandidateOption` 兼容切片随后已由 Travel Domain 的五个 typed EXTERNAL_READ Tools、compare/draft 与 draft-based `travel.save_itinerary` 替代，WRITE 继续经过 Policy effect、`ConfirmedAction`、Gateway、transaction 和 evidence。
 8. [已完成] 评估 LangChain adapter，当前不实现：本地 `langchain-core 1.4.9` 的 `StructuredTool` 接受 callable 与 Pydantic/JSON args schema，但 LifeOps 已有 JSON Schema catalog、ToolCall、Gateway 和 Result；当前没有 LangChain agent/ToolNode 调用方，adapter 会复制 schema/错误语义，并需要额外注入 request-local `AllowedToolSet`、confirmation 和 trace，不能减少现有 glue。未来只有真实调用方出现时再按窄 adapter 重新评估。
 9. [已完成] 用真实 Gateway 替换 `stub_execute` 的最小 Direct Executor 路径：Skill 业务候选与 Policy effect 先形成 request-local `AllowedToolSet`，只有对应 filtered catalog 发送给 Responses function calling；V1 最多选择一个 `ToolCall`，随后仍由 pre/post Guardrail 和 Gateway 独立验证并执行。Registry、Gateway 与 Domain service 每次 invocation 重建，避免 observation/option 跨 run 泄漏；结构化 `ToolResult` 映射回 `RuntimeResult`。
 10. [已完成] 补齐 compiled Graph -> Skill -> filtered catalog -> Gateway -> Domain handler 的阶段 5 E2E，以及未授权 Tool 的 Guardrail deny / no-write 断言；全量回归、compileall、冗余状态审计和当前文档同步均通过。

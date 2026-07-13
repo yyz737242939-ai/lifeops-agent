@@ -42,8 +42,14 @@ class KnowledgeReferenceResolution:
             self.title is None or self.summary is None or self.provenance is None
         ):
             raise ValueError("resolved references require title, summary, and provenance.")
+        if self.status == "resolved" and self.error_code is not None:
+            raise ValueError("resolved references cannot contain error_code.")
         if self.status == "unavailable" and self.error_code is None:
             raise ValueError("unavailable references require error_code.")
+        if self.status == "unavailable" and any(
+            value is not None for value in (self.title, self.summary, self.provenance)
+        ):
+            raise ValueError("unavailable references cannot contain resolved content.")
 
 
 class KnowledgeReferenceResolutionError(Exception):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
+from collections.abc import Callable
 
 from app.common.ids import new_id
 from app.common.time import utc_now_iso
@@ -57,6 +58,7 @@ class TravelService:
         transport_port: TransportSearchPort | None = None,
         lodging_port: LodgingSearchPort | None = None,
         place_port: PlaceSearchPort | None = None,
+        clock: Callable[[], str] = utc_now_iso,
     ) -> None:
         self._repository = repository
         self._calendar_port = calendar_port
@@ -64,6 +66,7 @@ class TravelService:
         self._transport_port = transport_port
         self._lodging_port = lodging_port
         self._place_port = place_port
+        self._clock = clock
         self._external_results: dict[str, ExternalLookupResult] = {}
         self._comparisons: dict[str, TravelComparison] = {}
         self._drafts: dict[str, ItineraryDraft] = {}
@@ -260,6 +263,11 @@ class TravelService:
             raise ValueError("draft_id is not available in this request.") from exc
         if not idempotency_key.strip():
             raise ValueError("idempotency_key must be a non-empty string.")
+        existing = self._repository.get_idempotent_itinerary_save(
+            idempotency_key, draft.draft_id
+        )
+        if existing is not None:
+            return existing
         comparison = self._comparisons[draft.comparison_id]
         candidates = {
             candidate.candidate_id: candidate
@@ -271,12 +279,14 @@ class TravelService:
             self._external_results[item].observation
             for item in draft.observation_ids
         )
+        if any(self._is_expired(item.expires_at) for item in observations):
+            raise ValueError("Expired candidates cannot be saved as an itinerary.")
         expires_at_values = tuple(
             item.expires_at for item in observations if item.expires_at is not None
         )
         if not expires_at_values:
             raise ValueError("Selected candidates do not have saveable expiry metadata.")
-        now = utc_now_iso()
+        now = self._clock()
         destination = next(
             (
                 item.value
@@ -336,8 +346,7 @@ class TravelService:
             raise ValueError(f"{capability} port is not configured.")
         return port
 
-    @staticmethod
-    def _assess_candidate(candidate, result, constraints) -> CandidateAssessment:
+    def _assess_candidate(self, candidate, result, constraints) -> CandidateAssessment:
         matched: list[str] = []
         conflicts: list[str] = []
         unresolved: list[str] = []
@@ -351,10 +360,7 @@ class TravelService:
                 conflicts.append(constraint.constraint_id)
             else:
                 unresolved.append(constraint.constraint_id)
-        expires_at = result.observation.expires_at
-        expired = False
-        if expires_at is not None:
-            expired = datetime.fromisoformat(expires_at) <= datetime.now(UTC)
+        expired = self._is_expired(result.observation.expires_at)
         return CandidateAssessment(
             candidate_id=candidate.candidate_id,
             candidate_kind=TravelService._candidate_kind(candidate),
@@ -364,6 +370,14 @@ class TravelService:
             expired=expired,
             summary=TravelService._candidate_summary(candidate),
         )
+
+    def _is_expired(self, expires_at: str | None) -> bool:
+        if expires_at is None:
+            return False
+        now = datetime.fromisoformat(self._clock())
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=UTC)
+        return datetime.fromisoformat(expires_at) <= now
 
     @staticmethod
     def _constraint_outcome(candidate, kind: str, value: str) -> str:

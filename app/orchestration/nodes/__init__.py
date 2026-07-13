@@ -35,14 +35,12 @@ def classify_intent(
     except Exception as exc:
         updated["error_code"] = "runtime.intent_failed"
         updated["error_stage"] = "intent"
-        updated["trace_summary"] = [_safe_error_summary(exc)]
         updated["result"] = RuntimeResult(
             run_id=request.run_id,
             session_id=request.session_id,
             status=RuntimeStatus.ERROR,
             message="Intent classification failed.",
             error_code=updated["error_code"],
-            trace_summary=updated["trace_summary"],
         )
         if trace is not None:
             trace.append(
@@ -79,15 +77,12 @@ def decide_policy(
     except Exception as exc:
         updated["error_code"] = "runtime.policy_failed"
         updated["error_stage"] = "policy"
-        updated["trace_summary"] = [_safe_error_summary(exc)]
         updated["result"] = RuntimeResult(
             run_id=request.run_id,
             session_id=request.session_id,
             status=RuntimeStatus.ERROR,
             message="Policy evaluation failed.",
-            intent=_intent_summary(intent),
             error_code=updated["error_code"],
-            trace_summary=updated["trace_summary"],
         )
         if trace is not None:
             trace.append(
@@ -126,16 +121,12 @@ def prepare_skills(
     except Exception as exc:
         updated["error_code"] = "runtime.skill_failed"
         updated["error_stage"] = "skill"
-        updated["trace_summary"] = [_safe_error_summary(exc)]
         updated["result"] = RuntimeResult(
             run_id=request.run_id,
             session_id=request.session_id,
             status=RuntimeStatus.ERROR,
             message="Skill preparation failed.",
-            intent=_intent_summary(updated["intent"]),
-            policy=_policy_summary(updated["policy"]),
             error_code=updated["error_code"],
-            trace_summary=updated["trace_summary"],
         )
     return updated
 
@@ -143,7 +134,7 @@ def prepare_skills(
 def execute_tool(
     state: GraphState,
     *,
-    tool_runtime_factory: Callable[[], ToolRuntime],
+    execution_scope: ToolRuntime,
     selection_client: ToolCallSelectionClient,
     trace: TraceSink | None = None,
 ) -> GraphState:
@@ -158,7 +149,7 @@ def execute_tool(
         raise ValueError("intent, policy, and Skill selection must precede execution.")
 
     try:
-        tool_runtime = tool_runtime_factory()
+        tool_runtime = execution_scope
         allowed_tools = resolve_allowed_tools(
             selection.selected_skill_ids,
             policy,
@@ -174,15 +165,11 @@ def execute_tool(
                 },
             )
         if not catalog:
-            updated["trace_summary"] = ["runtime.tool_catalog.empty"]
             updated["result"] = RuntimeResult(
                 run_id=request.run_id,
                 session_id=request.session_id,
                 status=RuntimeStatus.OK,
                 message="No authorized Tool is available for this request.",
-                intent=_intent_summary(intent),
-                policy=_policy_summary(policy),
-                trace_summary=updated["trace_summary"],
             )
             return updated
 
@@ -192,41 +179,29 @@ def execute_tool(
             catalog,
         )
         if call is None:
-            updated["trace_summary"] = ["runtime.tool_call.not_selected"]
             updated["result"] = RuntimeResult(
                 run_id=request.run_id,
                 session_id=request.session_id,
                 status=RuntimeStatus.OK,
                 message="No Tool call was selected for this request.",
-                intent=_intent_summary(intent),
-                policy=_policy_summary(policy),
-                trace_summary=updated["trace_summary"],
             )
             return updated
 
         result = tool_runtime.gateway.execute(call, allowed_tools, trace=trace)
-        updated["trace_summary"] = [f"runtime.tool_call.{result.status.value}"]
         updated["result"] = _runtime_result_from_tool(
             request.run_id,
             request.session_id,
-            intent,
-            policy,
             result,
-            updated["trace_summary"],
         )
     except Exception as exc:
         updated["error_code"] = getattr(exc, "code", None) or "runtime.tool_failed"
         updated["error_stage"] = "tool"
-        updated["trace_summary"] = [_safe_error_summary(exc)]
         updated["result"] = RuntimeResult(
             run_id=request.run_id,
             session_id=request.session_id,
             status=RuntimeStatus.ERROR,
             message="Tool execution failed.",
-            intent=_intent_summary(intent),
-            policy=_policy_summary(policy),
             error_code=updated["error_code"],
-            trace_summary=updated["trace_summary"],
         )
     return updated
 
@@ -274,15 +249,11 @@ def _build_policy_result(
         raise ValueError("intent and policy must be available before result construction.")
 
     updated = _append_node(state, node_name)
-    updated["trace_summary"] = [f"runtime.policy_result.{expected_status.value}"]
     updated["result"] = RuntimeResult(
         run_id=updated["request"].run_id,
         session_id=updated["request"].session_id,
         status=expected_status,
         message=message,
-        intent=_intent_summary(intent),
-        policy=_policy_summary(policy),
-        trace_summary=updated["trace_summary"],
     )
     return updated
 
@@ -290,10 +261,7 @@ def _build_policy_result(
 def _runtime_result_from_tool(
     run_id: str,
     session_id: str,
-    intent: IntentDecision,
-    policy: PolicyDecision,
     result: ToolResult,
-    trace_summary: list[str],
 ) -> RuntimeResult:
     status = {
         ToolCallStatus.SUCCEEDED: RuntimeStatus.OK,
@@ -307,8 +275,6 @@ def _runtime_result_from_tool(
         session_id=session_id,
         status=status,
         message=f"Tool call {result.status.value}: {result.tool_name}.",
-        intent=_intent_summary(intent),
-        policy=_policy_summary(policy),
         tool_result={
             "call_id": result.call_id,
             "tool_name": result.tool_name,
@@ -319,7 +285,6 @@ def _runtime_result_from_tool(
                     "evidence_type": item.evidence_type,
                     "summary": item.summary,
                     "reference": item.reference,
-                    "attributes": item.attributes,
                 }
                 for item in result.evidence
             ],
@@ -334,7 +299,6 @@ def _runtime_result_from_tool(
             ),
         },
         error_code=error_code if status == RuntimeStatus.ERROR else None,
-        trace_summary=trace_summary,
     )
 
 
@@ -347,18 +311,8 @@ def _append_node(state: GraphState, node_name: str) -> GraphState:
 def _intent_summary(intent: IntentDecision) -> dict[str, Any]:
     return {
         "intent_type": intent.intent_type.value,
-        "confidence": intent.confidence,
         "needs_clarification": intent.needs_clarification,
         "write_candidate": intent.write_candidate,
-        "classifier_results": [
-            {
-                "classifier_name": result.classifier_name,
-                "status": result.status,
-                "intent_type": result.intent_type.value,
-                "confidence": result.confidence,
-            }
-            for result in intent.classifier_results
-        ],
     }
 
 
@@ -367,9 +321,4 @@ def _policy_summary(policy: PolicyDecision) -> dict[str, Any]:
         "action": policy.action.value,
         "allowed_effects": policy.allowed_effects,
         "requires_confirmation": policy.requires_confirmation,
-        "denied_reason": policy.denied_reason,
     }
-
-
-def _safe_error_summary(exc: Exception) -> str:
-    return f"{exc.__class__.__name__}: {exc}"

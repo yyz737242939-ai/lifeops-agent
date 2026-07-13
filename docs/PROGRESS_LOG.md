@@ -23,7 +23,14 @@
 
 项目已完成阶段 4：LangGraph Orchestration 骨架。
 
-阶段 5 已完成：Skill System、Tool System、Research / Personal Knowledge 与 Travel Domain 完整初版均已验证关闭。下一步是在创建并确认 `plans/modules/EXECUTOR_PLAN.md` 后进入阶段 6 ReAct Executor。
+阶段 5 功能实现与稳定化均已完成。2026-07-13 冻结报告关闭全部 blocking findings 并给出 Stage 6 `go`；下一施工动作是创建并确认 `plans/modules/EXECUTOR_PLAN.md`，尚未开始实现 ReAct Executor。
+
+- Stage 5 稳定化步骤 6-11 已完成：公共 Tool schema、依赖方向、Runtime/Tool/Domain contract 与事件 payload 已增加兼容性门禁；每个 run 显式拥有一个 execution scope，同 run 复用、跨 run 隔离。
+- Runtime 公共结果已精简，内部 exception、Intent/Policy 摘要和 trace summary 不再进入 `RuntimeResult`；run lifecycle record 与 Domain WRITE transaction 已分离，LLM/external read 不占用 SQLite 写 transaction，异常 run record 可闭合。
+- WRITE confirmation 已升级为 `ConfirmedAction`，绑定 run/call/tool/canonical arguments digest/expiry；Evidence 与 Guardrail model 删除无消费者字典/摘要字段。
+- Research Context/Memory 已支持 Topic scoped query；Travel 保存 itinerary 前重新验证 quote expiry，同时保持已成功保存结果的幂等重试。
+- Observability 已固定单 active session application FileHandler，删除 routine started/completed 普通日志镜像并精简 Intent/Policy event payload。2026-07-13 统一离线回归 `240/240` 通过。
+- Stage 5 冻结基线已建立：分层验证八层共执行 `272` 次（含有意重叠）且全部通过，统一回归去重后 `240/240` 通过；公共 Runtime、Skill、Tool、Domain read contract、KnowledgeReference 与语义事件表面由 compatibility / architecture tests 保护。真实 LLM / HTTP provider E2E 仍为非强制集成验证。
 
 - Skill System 已完成核心模型、错误、metadata registry 和原生 discovery / validation；当前严格支持 `name`、`description` frontmatter 子集，不引入 Deep Agents / LangChain loader 或 middleware。
 - discovery 只扫描根目录的直接 Skill 子目录，只读取 `SKILL.md` metadata；完整 body 和附属资源仍保持未加载。
@@ -44,19 +51,19 @@
 - Tool System 第一步已完成框架无关的核心模型：Tool definition 与 handler 分离，并定义 call/result/error、execution evidence 和结构化 pre/post guardrail decision。
 - Tool System 第二步已完成原生 `ToolRegistry` 与 V1 JSON Schema 子集递归校验：definition/handler 在 registry 绑定，重复和未知工具返回 typed error，模型 catalog 不暴露 handler 或授权信息。
 - Tool System 第三步已调整为两维 Tool exposure intersection：selected Skills 选出 `ToolDefinition.skill_ids` 匹配的业务候选，空 `skill_ids` 的通用 Tool 始终作为候选；Policy `allowed_effects` 再按 read / external_read / write 过滤并生成 `AllowedToolSet`。Skill 不授权，Policy 不枚举业务 Tool 名，filtered model catalog 只暴露最终集合。
-- Tool System 第四步已完成 framework-independent pre/post Guardrails：pre 只消费 authorization 生成的 `AllowedToolSet`，检查当前 Tool membership、注册、WRITE Tool 名确认和递归 input schema，不重复读取 Policy，参数摘要不保留原始值；post 检查 result identity、成功状态、递归 output schema 和 WRITE evidence。当前 confirmation 只绑定 Tool 名，参数摘要、过期和跨 run token 留到后续 Interaction Safety State。
+- Tool System 第四步已完成 framework-independent pre/post Guardrails：pre 只消费 authorization 生成的 `AllowedToolSet`，检查 membership、注册、递归 input schema 和结构化 `ConfirmedAction`；post 检查 result identity、成功状态、递归 output schema 和 WRITE evidence。确认绑定 run/call/tool/canonical arguments digest/expiry。
 - Tool System 第五步已完成原生 `ToolGateway` 和语义 events：拒绝/确认不触达 handler，handler exception、非法返回和 post 拒绝统一收敛为安全 `ToolResult`；event 不记录原始 arguments、output 或异常文本。当前没有跨 Run 查询消费者，Gateway 不提前写 `tool_calls`；该表仅作为阶段 2 migration 的历史兼容结构保留。
 - Tool System 第六步已完成最小 Research Source 纵向切片：handler contract 接收完整 `ToolCall`；Research tools 绑定 Research Skill，fixture-backed READ 产生 request-local observation 且不落库；受控 WRITE 只按当前 observation ID 保存，不能从参数伪造 provenance，并经过 Policy write effect、Gateway confirmation、SQLite transaction 和 post-Guardrail evidence。
 - Research Domain 实施步骤 1-2 已完成：补齐 `ResearchTopic`、`ResearchNote`、`ResearchBriefDraft`、`ResearchBrief`、`KnowledgeLink`、`ResearchRevision` 模型与 SQLite migration；repository/service 已支持 Topic、Note、Brief-Source 引用、受目标存在性检查的 KnowledgeLink 和 append-only Revision。Brief draft 与 Source observation 一样保持 request-local，相关新能力尚未接入 Tool Runtime。
 - Research Domain 实施步骤 3 已完成：Research Skill 声明 `hf_daily_papers` / `hf_blog` 两个稳定 source key；严格 JSON manifest loader 会拒绝未知 key、路径逃逸、schema 不匹配、非 HTTPS/非 Hugging Face host 和精确 allowlist 外 URL。该步骤只加载可信元数据，不执行网络抓取。
 - Research Domain 实施步骤 4 已完成：新增 typed `ResearchContentPort` 与 Hugging Face HTML adapter，抓取前必须解析可信 manifest 声明，抓取时限制 status、redirect、content type、响应大小和 timeout；raw HTML 只保存在 request-local `FetchedSourceDocument`。Papers / Blog parse、URL/title dedupe 和 score/source-order rank 已改为 typed、deterministic、无副作用函数，并通过 fixture、失败路径及现有 Source Tool 回归验证；尚未接入新 Tools 或 compiled Graph。
 - Research Domain 实施步骤 5 已完成：`research.fetch_briefing_source`、`research.parse_items`、`research.rank_items`、`research.build_brief_draft` 已注册为 Research Skill 的 EXTERNAL_READ / READ Tools，输出不暴露 raw HTML，并通过 request-local document/item-set ID 传递可信中间状态。中文 draft 包含来源链接和“基于 Hugging Face 列表页可见信息”边界，整个链路不写 SQLite。当前 Direct Executor 每个 run 只执行一个 Tool，完整四步模型循环等待阶段 6 ReAct Executor；当前已通过同一 service、Registry 和 Gateway 的链路测试。
-- Research Domain 实施步骤 6 已完成：`research.save_source`、`research.save_brief`、`research.create_note` 均经过 Policy write effect、Gateway confirmation、SQLite transaction 和 post-Guardrail evidence。Brief 只按 request-local `draft_id` 保存，并要求 draft 中每个列表页 source URL 已经独立保存为 `ResearchSource`；缺失来源时 fail-closed，不隐式创建 Source。Note 保存确认后的 title/body。当前 confirmation 仍只绑定 Tool 名，参数摘要、过期和跨 run token 仍是后续 Interaction Safety State 范围。
+- Research Domain 实施步骤 6 已完成：`research.save_source`、`research.save_brief`、`research.create_note` 均经过 Policy write effect、Gateway structured confirmation、SQLite transaction 和 post-Guardrail evidence。Brief 只按 request-local `draft_id` 保存，并要求 draft 中每个列表页 source URL 已经独立保存为 `ResearchSource`；缺失来源时 fail-closed，不隐式创建 Source。Note 保存确认后的 title/body。
 - Research Domain 实施步骤 7 已完成：`ResearchReadService` 实现仓库共享的 `DomainPlanningReadModel`、`DomainContextProvider`、`DomainMemoryCandidateProvider`。fake consumers 已验证 Planner 读取 Topic 覆盖快照、Context 按预算读取带 provenance candidates、Memory 只读取确认保存的 Note / Brief candidates；消费者不直接写 SQL 或提前实现后续模块。另补充稳定排序的 saved-item limit/offset 分页接口。
 - Research、Travel 和未来业务 Domain 已统一采用 `plans/DOMAIN_CONTRACT_STANDARD.md`；共享 Port/Tool/Planning/Context/Memory/安全/测试规范。Research 与 Travel 均已实现 `app/domains/contracts.py` 的三个共享只读 Protocol，Travel scope 固定为 Trip ID。
 - Research Domain 实施步骤 8 已按确认范围完成：schema version 1 fixture 可 deterministic 生成 120 Source、240 Note、20 Brief，共 380 条长期数据；已覆盖分页稳定/不重叠、Context budget 稳定、timeout、HTTP 503、empty parse、missing link、unsaved Brief source 和 duplicate Source。用户明确允许跳过的 prompt injection / 恶意内容 fixtures 未实现。
-- Research Domain 实施步骤 9 已完成并关闭阶段 5 完整初版：补齐 `list_topics`、`research.search_knowledge`、topic filter、unresolved questions、Source metadata/content-hash 去重和 Source/Snapshot 分离。schema v5 可从 v4 迁移旧 Source/Brief 引用；Brief 固定 snapshot，新抓取可为同 URL 追加 snapshot。compiled Graph 已调用真实 briefing handler 且不暴露 raw HTML，catalog 外 WRITE 继续由 Guardrail 拒绝。仓库全量 182 项 unittest 通过。
-- Travel Domain 完整初版已完成：schema v8 保存 Trip、constraints、Itinerary/items/decision 和稳定 KnowledgeReference；五个 typed fixture-backed Ports/Tools 统一表达 success/no-results/partial-failure/failed；compare/draft 只消费 request-local IDs；`travel.save_itinerary` 只按当前 draft ID 与 idempotency key 经 confirmation/transaction/evidence 保存长期事实。旧聚合 option 路径已删除，Tool Runtime 未增加 Travel 特例。
+- Research Domain 实施步骤 9 已完成并关闭阶段 5 完整初版：补齐 `list_topics`、`research.search_knowledge`、topic filter、unresolved questions、Source metadata/content-hash 去重和 Source/Snapshot 分离。schema v5 可从 v4 迁移旧 Source/Brief 引用；Brief 固定 snapshot，新抓取可为同 URL 追加 snapshot。compiled Graph 已调用真实 briefing handler且不暴露 raw HTML，catalog 外 WRITE 继续由 Guardrail 拒绝。当时全量快照为 182 项；当前数字见上方稳定化事实。
+- Travel Domain 完整初版已完成：schema v8 保存 Trip、constraints、Itinerary/items/decision 和稳定 KnowledgeReference；五个 typed fixture-backed Ports/Tools 统一表达 success/no-results/partial-failure/failed；compare/draft 只消费 request-local IDs；`travel.save_itinerary` 只按当前 draft ID 与 idempotency key 经 structured confirmation/transaction/evidence 保存长期事实。旧聚合 option 路径已删除，Tool Runtime 未增加 Travel 特例。
 - Tool System 第八步已完成 LangChain adapter 评估并决定当前不实现：本地 `langchain-core 1.4.9` 的 `StructuredTool` 可以包装 callable 与 args schema，但当前没有 LangChain agent/ToolNode 调用方，LifeOps 已有直接 catalog 和完整 Gateway 语义；adapter 反而需要重复 schema/错误转换并桥接 `AllowedToolSet`、confirmation、trace。未来只有出现真实调用方时再以窄 adapter 和 contract tests 接入。
 - Tool System 第九步已完成 compiled Graph 的最小 Direct Executor：V1 选择零或一个 ToolCall，并始终经过 filtered catalog、pre/post Guardrails 和 Gateway；完整 ReAct loop 留到阶段 6。
 - 阶段 5 E2E 已证明 compiled Graph 可从 START 经过 Skill、Policy、filtered catalog 和两阶段 Guardrail 调用真实 Research 与 Travel handlers；Travel `search_places` 返回 typed observation/candidate，catalog 外 WRITE Tool 被 Guardrail 以 `tool_not_allowed` 拒绝且 SQLite 无写入。
@@ -75,7 +82,7 @@
 - Runtime Core / Intent / Policy 已完成阶段 3 初版。
 - Observability 文件日志已完成阶段 3.5 初版。
 - LangGraph Orchestration 已完成阶段 4 初版。
-- 阶段 5 的 Skill System、Tool System、Research 与 Travel 完整初版均已完成；Travel 聚焦测试 33 项、仓库全量 unittest 216 项通过。
+- 阶段 5 的 Skill System、Tool System、Research、Travel 与稳定化步骤 1-15 均已完成，Stage 6 gate 为 `go`。
 - 旧 runtime 已归档到 `legacy_v0/app/`。
 - 当前代码放在 `app/`。
 - 当前计划放在 `plans/`。
@@ -87,7 +94,7 @@
 - `app/common/`：配置读取、ID、UTC 时间、项目错误类型和 JSON 序列化。
 - `app/storage/`：SQLite 连接、schema migration、`run_records` / `tool_calls` 基础表和 `SqliteUnitOfWork`。
 - `app/observability/`：event JSONL、LLM JSONL、application log 的文件日志模型和 writer。
-- `app/runtime/`：`RuntimeRequest`、`RuntimeSession`、`RuntimeResult`、`RuntimeService`、run record 写入 helper 和启动 bootstrap。
+- `app/runtime/`：`RuntimeRequest`、精简 `RuntimeResult`、`RuntimeService`、run record 写入 helper 和启动 bootstrap。
 - `app/intent/`：intent models、规则 classifier、LLM classifier 空实现和 `IntentService`。
 - `app/policy/`：policy models 和 `PolicyService`；`allowed_effects` 是动作授权结果。
 - `app/orchestration/`：`GraphState`、policy route、普通 node 函数、compiled `StateGraph`、`RuntimeOrchestrator` 和 Intent / Policy / route 语义事件。
@@ -127,7 +134,7 @@ RuntimeRequest
 -> RuntimeResult
 ```
 
-阶段 5 已用真实 Gateway 替换 stub：policy `allow` 后仍需经过 Skill candidate、Policy effect、filtered catalog、pre/post Guardrails 才能执行 Tool。`RuntimeService` 仍是外部入口并负责 transaction、run record 和 event writer；LangGraph 接管 request-local orchestration。测试使用 `:memory:` SQLite 和 fixture providers，不读写真实 `data/lifeops.sqlite3`。
+阶段 5 已用真实 Gateway 替换 stub：policy `allow` 后仍需经过 Skill candidate、Policy effect、filtered catalog、pre/post Guardrails 才能执行 Tool。`RuntimeService` 仍是外部入口并负责 run lifecycle、短 Domain WRITE transaction 和 event writer；LangGraph 接管 request-local orchestration。测试使用 `:memory:` SQLite、临时日志目录和 fixture providers，不读写真实 `data/lifeops.sqlite3`。
 
 阶段 4 完成后的状态：
 
@@ -138,7 +145,7 @@ RuntimeRequest
 - `docs/ARCHITECTURE.md` 已记录 Runtime Core、Intent / Policy、LangGraph Orchestration、Skill、Tool Gateway、Guardrails 和 Domain 纵向切片边界。
 - `docs/RUNTIME_CONCEPTS.md` 已记录 Runtime Core、Intent Layer、Policy / Permission Layer、Write Safety、LangGraph Orchestrator、LangGraph vs LangChain、Observability 和 SQLite Local Persistence 学习章节。
 - `plans/modules/STORAGE_SQLITE_PLAN.md`、`plans/modules/RUNTIME_CORE_PLAN.md`、`plans/modules/INTENT_POLICY_PLAN.md`、`plans/modules/OBSERVABILITY_LOGGING_PLAN.md` 和 `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md` 已记录完成状态。
-- 下一施工入口是创建并确认 `plans/modules/EXECUTOR_PLAN.md`，随后进入阶段 6 ReAct Executor。
+- 下一施工入口是创建并确认 `plans/modules/EXECUTOR_PLAN.md`；计划确认前不开始 ReAct Executor 实现。
 
 当前有效测试命令：
 

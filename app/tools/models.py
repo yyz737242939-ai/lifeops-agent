@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import StrEnum
+import hashlib
+import json
 import re
 from typing import Any
 
@@ -125,6 +128,59 @@ class ToolCall:
 
 
 @dataclass(frozen=True)
+class ConfirmedAction:
+    """One expiring confirmation bound to a run and exact ToolCall."""
+
+    run_id: str
+    call_id: str
+    tool_name: str
+    arguments_digest: str
+    expires_at: str
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "run_id",
+            "call_id",
+            "tool_name",
+            "arguments_digest",
+            "expires_at",
+        ):
+            require_non_empty_string(getattr(self, field_name), field_name)
+
+    @classmethod
+    def for_call(
+        cls, run_id: str, call: ToolCall, *, expires_at: str
+    ) -> "ConfirmedAction":
+        return cls(
+            run_id=run_id,
+            call_id=call.call_id,
+            tool_name=call.tool_name,
+            arguments_digest=_arguments_digest(call.arguments),
+            expires_at=expires_at,
+        )
+
+    def matches(self, run_id: str, call: ToolCall, *, now: datetime) -> bool:
+        try:
+            expiry = datetime.fromisoformat(self.expires_at)
+        except ValueError:
+            return False
+        if expiry.tzinfo is None:
+            return False
+        return (
+            self.run_id == run_id
+            and self.call_id == call.call_id
+            and self.tool_name == call.tool_name
+            and self.arguments_digest == _arguments_digest(call.arguments)
+            and expiry.astimezone(UTC) > now.astimezone(UTC)
+        )
+
+
+def _arguments_digest(arguments: dict[str, Any]) -> str:
+    canonical = json.dumps(arguments, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
 class ToolError:
     code: str
     message: str
@@ -144,15 +200,12 @@ class ExecutionEvidence:
     evidence_type: str
     summary: str
     reference: str | None = None
-    attributes: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         require_non_empty_string(self.evidence_type, "evidence_type")
         require_non_empty_string(self.summary, "summary")
         if self.reference is not None:
             require_non_empty_string(self.reference, "reference")
-        if not isinstance(self.attributes, dict):
-            raise ValueError("attributes must be a dict.")
 
 
 @dataclass(frozen=True)
@@ -192,8 +245,6 @@ class GuardrailDecision:
     reason_code: str
     reason: str
     tool_name: str
-    sanitized_args_summary: dict[str, Any] = field(default_factory=dict)
-    evidence_requirements: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         if not isinstance(self.action, GuardrailAction):
@@ -203,8 +254,3 @@ class GuardrailDecision:
         require_non_empty_string(self.reason_code, "reason_code")
         require_non_empty_string(self.reason, "reason")
         require_non_empty_string(self.tool_name, "tool_name")
-        if not isinstance(self.sanitized_args_summary, dict):
-            raise ValueError("sanitized_args_summary must be a dict.")
-        require_unique_non_empty_strings(
-            self.evidence_requirements, "evidence_requirements"
-        )

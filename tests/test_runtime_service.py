@@ -33,8 +33,6 @@ class RuntimeServiceTest(unittest.TestCase):
                 ).handle(request)
 
                 self.assertEqual(result.status, RuntimeStatus.OK)
-                self.assertEqual(result.intent["intent_type"], "write_request")
-                self.assertEqual(result.policy["action"], "allow")
 
                 row = conn.execute(
                     "SELECT id, status, error_code FROM run_records WHERE id = ?",
@@ -49,7 +47,6 @@ class RuntimeServiceTest(unittest.TestCase):
                     [event["event_type"] for event in events],
                     [
                         "runtime.run.started",
-                        "runtime.request.created",
                         "intent.classified",
                         "policy.decided",
                         "orchestration.route.selected",
@@ -58,19 +55,9 @@ class RuntimeServiceTest(unittest.TestCase):
                         "runtime.run.completed",
                     ],
                 )
-                self.assertEqual(events[2]["payload"]["intent_type"], "write_request")
-                self.assertEqual(events[3]["payload"]["action"], "allow")
-                self.assertEqual(events[4]["payload"]["route"], "allow")
-                self.assertEqual(
-                    events[7]["payload"]["graph_path"],
-                    [
-                        "classify_intent",
-                        "decide_policy",
-                        "prepare_skills",
-                        "execute_tool",
-                        "finalize",
-                    ],
-                )
+                self.assertEqual(events[1]["payload"]["intent_type"], "write_request")
+                self.assertEqual(events[2]["payload"]["action"], "allow")
+                self.assertEqual(events[3]["payload"]["route"], "allow")
                 self.assertEqual(events[0]["run_id"], request.run_id)
                 self.assertEqual(events[0]["session_id"], request.session_id)
         finally:
@@ -95,7 +82,6 @@ class RuntimeServiceTest(unittest.TestCase):
         result = RuntimeService(create_test_skill_service()).handle(_request("计划一下"))
 
         self.assertEqual(result.status, RuntimeStatus.REQUIRES_CONFIRMATION)
-        self.assertEqual(result.policy["action"], "requires_confirmation")
         self.assertNotIn("已写入", result.message)
         self.assertNotIn("saved", result.message.lower())
 
@@ -105,8 +91,6 @@ class RuntimeServiceTest(unittest.TestCase):
         )
 
         self.assertEqual(result.status, RuntimeStatus.OK)
-        self.assertEqual(result.policy["action"], "allow")
-        self.assertEqual(result.trace_summary, ["runtime.tool_catalog.empty"])
         self.assertIn("No authorized Tool", result.message)
 
     def test_intent_failure_returns_error_and_skips_policy(self) -> None:
@@ -120,7 +104,6 @@ class RuntimeServiceTest(unittest.TestCase):
         self.assertEqual(result.status, RuntimeStatus.ERROR)
         self.assertEqual(result.error_code, "runtime.intent_failed")
         self.assertFalse(policy.called)
-        self.assertIsNone(result.policy)
 
     def test_policy_failure_returns_error(self) -> None:
         result = RuntimeService(
@@ -131,8 +114,6 @@ class RuntimeServiceTest(unittest.TestCase):
 
         self.assertEqual(result.status, RuntimeStatus.ERROR)
         self.assertEqual(result.error_code, "runtime.policy_failed")
-        self.assertEqual(result.intent["intent_type"], "chat")
-        self.assertIsNone(result.policy)
 
 
 class FailingIntentService:

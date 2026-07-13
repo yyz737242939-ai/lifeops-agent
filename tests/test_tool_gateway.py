@@ -14,6 +14,7 @@ from app.tools.models import (
     ToolRisk,
 )
 from app.tools.registry import ToolRegistry
+from tests.helpers import confirmed_action
 
 
 _SCHEMA = {
@@ -87,6 +88,23 @@ class ToolGatewayTest(unittest.TestCase):
             ],
         )
         self.assertNotIn("secret", str(trace.events))
+        expected_fields = {
+            "tool.call.requested": {"call_id", "tool_name"},
+            "tool.guardrail.decided": {
+                "stage",
+                "action",
+                "reason_code",
+                "tool_name",
+            },
+            "tool.call.completed": {
+                "call_id",
+                "tool_name",
+                "status",
+                "evidence_count",
+            },
+        }
+        for event_type, payload in trace.events:
+            self.assertEqual(set(payload), expected_fields[event_type])
 
     def test_write_confirmation_and_evidence_are_enforced(self) -> None:
         gateway = ToolGateway(
@@ -98,7 +116,8 @@ class ToolGatewayTest(unittest.TestCase):
         missing_evidence = gateway.execute(
             call,
             AllowedToolSet(("demo.run",)),
-            confirmed_tool_name="demo.run",
+            confirmation=confirmed_action(call),
+            run_id="run_test",
         )
 
         self.assertEqual(

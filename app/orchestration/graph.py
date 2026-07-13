@@ -36,13 +36,13 @@ class OrchestrationContext:
     """Request-local dependencies that must not become graph state."""
 
     trace: TraceSink | None = None
+    execution_scope: ToolRuntime | None = None
 
 
 def build_runtime_graph(
     intent_service: IntentService,
     policy_service: PolicyService,
     skill_service: SkillService,
-    tool_runtime_factory: Callable[[], ToolRuntime] | None = None,
     tool_call_selection_client: ToolCallSelectionClient | None = None,
 ) -> CompiledStateGraph:
     """Build and compile the stage-4 runtime orchestration graph."""
@@ -67,7 +67,6 @@ def build_runtime_graph(
     graph.add_node(
         "execute_tool",
         _execute_tool_with_runtime(
-            tool_runtime_factory or _empty_tool_runtime,
             tool_call_selection_client or _NoToolCallSelectionClient(),
         ),
     )
@@ -117,17 +116,17 @@ class RuntimeOrchestrator:
         skill_service: SkillService,
         intent_service: IntentService | None = None,
         policy_service: PolicyService | None = None,
-        tool_runtime_factory: Callable[[], ToolRuntime] | None = None,
+        execution_scope_factory: Callable[[], ToolRuntime] | None = None,
         tool_call_selection_client: ToolCallSelectionClient | None = None,
     ) -> None:
         self._intent_service = intent_service or IntentService()
         self._policy_service = policy_service or PolicyService()
         self._skill_service = skill_service
+        self._execution_scope_factory = execution_scope_factory or _empty_tool_runtime
         self._graph = build_runtime_graph(
             self._intent_service,
             self._policy_service,
             self._skill_service,
-            tool_runtime_factory,
             tool_call_selection_client,
         )
 
@@ -142,7 +141,10 @@ class RuntimeOrchestrator:
             GraphState,
             self._graph.invoke(
                 create_graph_state(request),
-                context=OrchestrationContext(trace=trace),
+                context=OrchestrationContext(
+                    trace=trace,
+                    execution_scope=self._execution_scope_factory(),
+                ),
             ),
         )
         if final_state["result"] is None:
@@ -206,7 +208,6 @@ def _prepare_skills_with_runtime(
 
 
 def _execute_tool_with_runtime(
-    tool_runtime_factory: Callable[[], ToolRuntime],
     selection_client: ToolCallSelectionClient,
 ) -> Callable[[GraphState, Runtime[OrchestrationContext]], GraphState]:
     def invoke_node(
@@ -214,9 +215,10 @@ def _execute_tool_with_runtime(
         runtime: Runtime[OrchestrationContext],
     ) -> GraphState:
         context = runtime.context or OrchestrationContext()
+        execution_scope = context.execution_scope or _empty_tool_runtime()
         return execute_tool(
             state,
-            tool_runtime_factory=tool_runtime_factory,
+            execution_scope=execution_scope,
             selection_client=selection_client,
             trace=context.trace,
         )

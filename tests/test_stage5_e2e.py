@@ -171,7 +171,7 @@ class Stage5GraphE2ETest(unittest.TestCase):
             skill_service=SkillService(skill_registry, ResearchSkillSelectionClient()),
             intent_service=ReadIntentService(),
             policy_service=ExternalReadPolicyService(),
-            tool_runtime_factory=self._tool_runtime,
+            execution_scope_factory=self._tool_runtime,
             tool_call_selection_client=FixedToolCallSelectionClient(call),
         )
 
@@ -197,7 +197,7 @@ class Stage5GraphE2ETest(unittest.TestCase):
             skill_service=SkillService(skill_registry, TravelSkillSelectionClient()),
             intent_service=ReadIntentService(),
             policy_service=ExternalReadPolicyService(),
-            tool_runtime_factory=self._travel_tool_runtime,
+            execution_scope_factory=self._travel_tool_runtime,
             tool_call_selection_client=FixedToolCallSelectionClient(call),
         )
 

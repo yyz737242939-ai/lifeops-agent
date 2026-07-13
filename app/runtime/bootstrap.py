@@ -5,20 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.common.config import load_app_config
-from app.domains.research.ports import (
-    FixtureResearchSourcePort,
-    HuggingFaceResearchContentPort,
-)
+from app.domains.research.ports import HuggingFaceResearchContentPort
 from app.domains.research.repository import ResearchRepository
 from app.domains.research.service import ResearchService
 from app.domains.research.tools import build_research_tools
-from app.domains.travel.adapters import (
-    FixtureCalendarAvailabilityAdapter,
-    FixtureLodgingSearchAdapter,
-    FixturePlaceSearchAdapter,
-    FixtureTransportSearchAdapter,
-    FixtureWeatherInformationAdapter,
-)
 from app.domains.travel.repository import TravelRepository
 from app.domains.travel.service import TravelService
 from app.domains.travel.tools import build_travel_tools
@@ -34,9 +24,6 @@ from app.storage.sqlite import connect_sqlite
 from app.tools.calling import OpenAIToolCallSelectionClient
 from app.tools.registry import ToolRegistry
 from app.tools.runtime import ToolRuntime
-
-
-TRAVEL_FIXTURE_ROOT = Path("tests/fixtures/travel")
 
 
 def build_runtime_service(
@@ -59,7 +46,7 @@ def build_runtime_service(
         skill_service=skill_service,
         conn=conn,
         log_root=config.log_root,
-        tool_runtime_factory=lambda: _build_tool_runtime(conn, config.skill_root),
+        execution_scope_factory=lambda: _build_tool_runtime(conn, config.skill_root),
         tool_call_selection_client=OpenAIToolCallSelectionClient(),
     )
 
@@ -78,42 +65,42 @@ def _build_tool_runtime(conn, skill_root: Path) -> ToolRuntime:
     """Build request-local domain services and one shared registry/Gateway pair."""
 
     research_service = ResearchService(
-        FixtureResearchSourcePort(
-            {
-                "hf-daily": {
-                    "title": "Hugging Face Daily Papers fixture",
-                    "url": "https://huggingface.co/papers",
-                    "summary": "Declared fixture for the Research Tool vertical slice.",
-                }
-            }
-        ),
+        _UnavailableResearchSourcePort(),
         ResearchRepository(conn),
         content_port=HuggingFaceResearchContentPort(skill_root / "research"),
     )
+    unavailable_travel = _UnavailableTravelPorts()
     travel_service = TravelService(
         TravelRepository(conn),
-        calendar_port=FixtureCalendarAvailabilityAdapter(
-            TRAVEL_FIXTURE_ROOT / "calendar_available.json",
-            TRAVEL_FIXTURE_ROOT / "provider_failures.json",
-        ),
-        weather_port=FixtureWeatherInformationAdapter(
-            TRAVEL_FIXTURE_ROOT / "weather_tokyo_october.json",
-            TRAVEL_FIXTURE_ROOT / "provider_failures.json",
-        ),
-        transport_port=FixtureTransportSearchAdapter(
-            TRAVEL_FIXTURE_ROOT / "transport_shanghai_tokyo.json",
-            TRAVEL_FIXTURE_ROOT / "provider_failures.json",
-        ),
-        lodging_port=FixtureLodgingSearchAdapter(
-            TRAVEL_FIXTURE_ROOT / "lodging_tokyo.json",
-            TRAVEL_FIXTURE_ROOT / "provider_failures.json",
-        ),
-        place_port=FixturePlaceSearchAdapter(
-            TRAVEL_FIXTURE_ROOT / "places_tokyo.json",
-            TRAVEL_FIXTURE_ROOT / "provider_failures.json",
-        ),
+        calendar_port=unavailable_travel,
+        weather_port=unavailable_travel,
+        transport_port=unavailable_travel,
+        lodging_port=unavailable_travel,
+        place_port=unavailable_travel,
     )
     registry = ToolRegistry(
         (*build_research_tools(research_service), *build_travel_tools(travel_service))
     )
     return ToolRuntime.from_registry(registry)
+
+
+class _UnavailableResearchSourcePort:
+    def fetch(self, source_key: str):
+        raise RuntimeError("Research source provider is not configured.")
+
+
+class _UnavailableTravelPorts:
+    def check_availability(self, query):
+        raise RuntimeError("Travel calendar provider is not configured.")
+
+    def get_weather(self, query):
+        raise RuntimeError("Travel weather provider is not configured.")
+
+    def search_transport(self, query):
+        raise RuntimeError("Travel transport provider is not configured.")
+
+    def search_lodging(self, query):
+        raise RuntimeError("Travel lodging provider is not configured.")
+
+    def search_places(self, query):
+        raise RuntimeError("Travel place provider is not configured.")

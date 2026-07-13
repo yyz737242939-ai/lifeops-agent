@@ -62,7 +62,7 @@ class OrchestrationNodesTest(unittest.TestCase):
         )
         state = execute_tool(
             state,
-            tool_runtime_factory=lambda: ToolRuntime.from_registry(ToolRegistry()),
+            execution_scope=ToolRuntime.from_registry(ToolRegistry()),
             selection_client=NoToolCallSelectionClient(),
         )
         state = finalize(state)
@@ -81,10 +81,6 @@ class OrchestrationNodesTest(unittest.TestCase):
         self.assertEqual(state["skill_selection"].selected_skill_ids, ())
         self.assertEqual(state["prompt_contributions"], [])
         self.assertEqual(state["result"].status, RuntimeStatus.OK)
-        self.assertEqual(
-            state["result"].trace_summary,
-            ["runtime.tool_catalog.empty"],
-        )
         self.assertIn("No authorized Tool", state["result"].message)
 
     def test_confirmation_node_does_not_claim_write(self) -> None:
@@ -125,7 +121,7 @@ class OrchestrationNodesTest(unittest.TestCase):
         self.assertEqual(state["result"].status, RuntimeStatus.ERROR)
         self.assertFalse(policy.called)
 
-    def test_policy_failure_keeps_intent_summary(self) -> None:
+    def test_policy_failure_keeps_structured_stop_reason(self) -> None:
         state = create_graph_state(_request("hello"))
         state = classify_intent(state, FixedIntentService(IntentType.CHAT))
 
@@ -133,8 +129,7 @@ class OrchestrationNodesTest(unittest.TestCase):
 
         self.assertEqual(state["error_code"], "runtime.policy_failed")
         self.assertEqual(state["graph_path"], ["classify_intent", "decide_policy"])
-        self.assertEqual(state["result"].intent["intent_type"], "chat")
-        self.assertIsNone(state["result"].policy)
+        self.assertEqual(state["result"].error_code, "runtime.policy_failed")
 
 
 class FixedIntentService:

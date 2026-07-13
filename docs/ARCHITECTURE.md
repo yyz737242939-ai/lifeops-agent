@@ -80,7 +80,7 @@ Runtime Core 是当前单轮 request lifecycle 的入口层，当前实现位于
 
 `RuntimeRequest` 是当前 turn/run 的结构化输入，包含 `session_id`、`turn_id`、`run_id` 和 `user_input`。它不是长期 conversation memory。
 
-`RuntimeResult` 是本轮可展示结果，包含 status、message、intent 摘要、policy 摘要和 trace summary。它不是业务事实来源。
+`RuntimeResult` 是本轮可展示结果，只包含 run/session identity、status、message、可选 Tool result 和稳定 error code。Intent、Policy 与执行路径由语义事件解释，不在公共结果中重复，也不暴露内部异常文本。
 
 当前 `RuntimeService.handle(...)` 的链路是：
 
@@ -109,7 +109,7 @@ LangGraph Orchestration 当前实现位于：
 - `app/orchestration/nodes/`
 - `app/orchestration/graph.py`
 
-`RuntimeService` 仍是唯一外部入口，负责 SQLite transaction、run record、request event writer 和最终 `RuntimeResult`。`RuntimeOrchestrator` 负责把 Intent、Policy、Skill preparation 和当前最小 Direct Executor 映射到 compiled `StateGraph`。
+`RuntimeService` 仍是唯一外部入口，负责 run lifecycle record、按 session 隔离的 event/application log、Domain WRITE transaction 闭合和最终 `RuntimeResult`。run record 先独立提交；Intent/Skill/LLM/external read 不占用 SQLite 写 transaction。`RuntimeOrchestrator` 负责把 Intent、Policy、Skill preparation 和当前最小 Direct Executor 映射到 compiled `StateGraph`。
 
 当前 graph 路径是：
 
@@ -124,7 +124,7 @@ START
 
 Intent、Policy 或 Skill preparation 失败时，graph 在对应节点后直接进入 `END`。Skill 失败不会进入 `execute_tool`；确认和拒绝分支不会调用 Skill selector。
 
-`GraphState` 只保存当前 request 的编排数据：request、intent、policy、route、Skill selection、prompt contributions、result、error、graph path 和紧凑 trace summary。已加载 Skill ID 可由 prompt contributions 得出，不在 GraphState 重复保存。它不保存 `SkillService`、Skill registry/client、长期 Memory、Task 事实、工具执行事实或授权替代来源。
+`GraphState` 只保存当前 request 的编排数据：request、intent、policy、route、Skill selection、prompt contributions、result、结构化 error stage/code 和 graph-internal path。已加载 Skill ID 可由 prompt contributions 得出，不在 GraphState 重复保存。它不保存 trace summary、`SkillService`、Skill registry/client、长期 Memory、Domain 事实、Tool arguments/result cache 或授权替代来源。
 
 `IntentService`、`PolicyService` 和 `SkillService` 是 graph 构建期依赖。`SkillService` 长期持有 `SkillRegistry` 与 `SkillSelectionClient`，统一执行 selection、lazy loading 和 contribution assembly。`OrchestrationContext` 只携带每个 run 不同的应用 `TraceSink`；它通过 LangGraph `context_schema` / `Runtime` 提供给节点，不进入 `GraphState` 或 checkpoint。Intent / Policy node 在真实 service 返回后分别写 `intent.classified` / `policy.decided`，失败时写对应 failed event；Policy 分支确定后写 `orchestration.route.selected`。机械化的 graph/node started/completed 不进入稳定事件契约。
 
@@ -166,11 +166,11 @@ Tool System 当前已完成阶段 5 闭环，位于 `app/tools/`。`ToolDefiniti
 
 `resolve_allowed_tools(selected_skill_ids, policy, registry)` 生成 request-local `AllowedToolSet`。`ToolDefinition.skill_ids` 声明业务绑定：与 selected Skill 匹配的 Tool 成为业务候选，空 `skill_ids` 的通用 Tool 不依赖 Skill、始终是候选；候选随后与 Policy `allowed_effects` 求交。Skill selection 只缩小业务范围、不能授权；Policy 只决定 read / external_read / write 动作权限、不枚举业务 Tool 名。Policy deny、requires-confirmation 或空 effects 都产生空集合。
 
-模型可见 catalog 只包含稳定排序的 name、description 和 input schema，并返回 schema 深拷贝，不暴露 handler 或 risk 等执行信息；传入 `AllowedToolSet.tool_names` 后只返回当前集合内工具。当前模型层还定义了 `ToolCall`、结构化 `ToolResult` / `ToolError`、`ExecutionEvidence`，以及 pre/post 两阶段的 `GuardrailDecision`。`evaluate_pre_execution(...)` 只消费 authorization 已生成的 `AllowedToolSet`，检查当前 Tool membership、注册状态、WRITE Tool 名确认和递归 input schema；它不直接读取 Policy、不读取 Skill 功能元数据，也不建立第二套授权。参数摘要只记录字段名与值类型。`evaluate_post_execution(...)` 检查 call/result identity、成功状态、递归 output schema，以及 WRITE 成功 evidence。当前确认只绑定 Tool 名，参数摘要、过期时间和跨 run token 留到 Interaction Safety State。Guardrails 不依赖 LangChain 或 LangGraph。
+模型可见 catalog 只包含稳定排序的 name、description 和 input schema，并返回 schema 深拷贝，不暴露 handler 或 risk 等执行信息；传入 `AllowedToolSet.tool_names` 后只返回当前集合内工具。当前模型层还定义了 `ToolCall`、结构化 `ToolResult` / `ToolError`、精简 `ExecutionEvidence`、`ConfirmedAction`，以及 pre/post 两阶段的 `GuardrailDecision`。`evaluate_pre_execution(...)` 只消费 authorization 已生成的 `AllowedToolSet`，检查 membership、注册状态、递归 input schema，以及 WRITE confirmation 是否匹配 run/call/tool/canonical arguments digest 且未过期；它不直接读取 Policy、不读取 Skill 功能元数据，也不建立第二套授权。`evaluate_post_execution(...)` 检查 call/result identity、成功状态、递归 output schema，以及 WRITE 成功 evidence。Guardrails 不依赖 LangChain 或 LangGraph。
 
 原生 `ToolGateway.execute(...)` 已把 `AllowedToolSet -> pre-Guardrail -> registered handler -> post-Guardrail` 串成单次调用闭环。pre 拒绝或要求确认时 handler 不会执行；handler exception、非 `ToolResult` 返回和 post 拒绝都会转换为不泄露内部异常的结构化 `ToolResult`。Gateway 实时写 `tool.call.requested`、`tool.guardrail.decided`、`tool.call.completed` / `failed` 语义事件，payload 只包含 call/tool identity、stage、action、reason code、status、error code 和 evidence count，不包含原始 arguments、output 或异常文本。
 
-Gateway 当前不写 `tool_calls`。该表保留为阶段 2 migration 的历史兼容结构，但 Inspector、Eval、Recovery 和产品历史查询尚无真实消费者，因此不提前绑定摘要字段或 transaction。当前 compiled Graph 已通过 `execute_tool` 接入真实 Research / Travel handlers；Domain WRITE 仍由各自 repository 在 RuntimeService 的 SQLite transaction 内完成。
+Gateway 当前不写 `tool_calls`。该表保留为阶段 2 migration 的历史兼容结构，但 Inspector、Eval、Recovery 和产品历史查询尚无真实消费者，因此不提前绑定摘要字段或 transaction。当前 compiled Graph 已通过 `execute_tool` 接入真实 Research / Travel handlers；每个 runtime invocation 创建一个 execution scope，同 run 的未来多次 Tool 调用复用该 scope，跨 run 隔离。Domain WRITE 在 handler/repository 开始写入时进入短 SQLite transaction，external read 与 LLM 不持有写 transaction。
 
 LangChain Tool adapter 已在本地 `langchain-core 1.4.9` 上完成 API 评估，当前不保留实现。`StructuredTool` 能包装 callable 和 Pydantic/JSON args schema，但 LifeOps 已直接拥有模型 catalog、ToolCall、schema validation、Gateway、ToolResult 和错误语义；当前也没有 LangChain agent/ToolNode 调用方。此时 adapter 需要额外桥接 request-local `AllowedToolSet`、confirmation 和 trace，增加了可绕过 Gateway 的 callable 表面，没有减少 glue。未来真实 LangChain 调用方出现时只增加窄 adapter，并用 contract test 保证 invocation 必须回到 Gateway。
 
@@ -238,9 +238,9 @@ Runtime 的事实来源是：
 
 - `events.jsonl`：结构化 runtime event，只保存少量必要字段和紧凑 payload，用于解释 runtime 路径和失败层级。
 - `llm.jsonl`：原始 LLM / agent request-response 记录，用于人工排查最原始对话，不作为业务事实或写入授权来源。
-- `application.log`：普通程序日志，用于测试和 debug。
+- `application.log`：当前 active session 的本地异常与诊断日志；不镜像 routine 语义事件。
 
-三类日志默认写入 `logs/sessions/session_<timestamp>_<session_id>/`。SQLite 不再默认承载 runtime event log 或 LLM log。
+三类日志默认写入 `logs/sessions/session_<timestamp>_<session_id>/`。event writer 按 session 隔离；application logger 同一时刻只保留一个 active session FileHandler，切换时关闭旧 handler。SQLite 不再默认承载 runtime event log 或 LLM log。
 
 `TraceSink` 是应用拥有的 request-local event 接口。Graph 内 node 通过 `OrchestrationContext` 使用同一个 sink；Graph 外未来的 Executor、Tool Safety、repository 或 integration 关键阶段也可以直接写同一个 sink，不需要为了可观察性变成 LangGraph node。Event 在真实逻辑边界实时追加，不根据最终 state 事后补写。
 
@@ -264,7 +264,7 @@ Research / Travel 是业务逻辑分组：各自拥有 models、service、reposi
 
 Research 位于 `app/domains/research/`。当前领域模型与 SQLite 基础已包含 Source、SourceSnapshot、Topic、Note、Brief、固定 snapshot 的 Brief-Source 引用、KnowledgeLink 和 append-only Revision；KnowledgeLink / Revision 的多类型引用由 repository 在写入前检查目标存在性。`ResearchBriefDraft` 与 `ExternalObservation` 保持 request-local，只有 service 当前持有的临时对象才能进入后续保存路径。
 
-Research Source 纵向切片已接入 Tool Runtime。Research Tool 绑定 `skill_ids=("research",)`；`FixtureResearchSourcePort` 只接受显式声明的 source key，返回带 content hash、fetched time 和 fixture provenance 的 request-local `ExternalObservation`。`ResearchService` 暂存 observation，未确认时不写 SQLite。`research.save_source` 只接收当前 service 已持有的 observation ID，经 Research Skill candidate、Policy write effect、Gateway WRITE confirmation 和 shared SQLite transaction 后由 `ResearchRepository` 保存 `ResearchSource`，并返回 `research_source_saved` evidence。模型不能通过 Tool 参数自行提供 provenance。
+Research Source 纵向切片已接入 Tool Runtime。Research Tool 绑定 `skill_ids=("research",)`；`FixtureResearchSourcePort` 只接受显式声明的 source key，返回带 content hash、fetched time 和 fixture provenance 的 request-local `ExternalObservation`。`ResearchService` 暂存 observation，未确认时不写 SQLite。`research.save_source` 只接收当前 execution scope 内 service 已持有的 observation ID，经 Research Skill candidate、Policy write effect、结构化 `ConfirmedAction` 和短 SQLite transaction 后由 `ResearchRepository` 保存 `ResearchSource`，并返回 `research_source_saved` evidence。模型不能通过 Tool 参数自行提供 provenance。
 
 schema v5 将稳定的 Source identity（URL、source type、title）与每次抓取的 snapshot（summary、content hash、fetched/published metadata、provenance）分表。同 URL 新内容追加 snapshot；全局重复 content hash fail-closed。`research_brief_sources` 同时固定 `source_id` 与保存 Brief 时的 `snapshot_id`，因此后续 Source 刷新不会改变旧 Brief 的引用事实。当前没有删除 Tool；未来若增加删除能力，必须采用归档/软删除并保持这些引用。
 
@@ -274,17 +274,17 @@ Research external-read 的 typed 边界已实现为 `ResearchContentPort` / `Hug
 
 临时 briefing 已暴露 `research.fetch_briefing_source`、`research.parse_items`、`research.rank_items`、`research.build_brief_draft` 四个 Tool，并统一经过 Skill candidate、Policy effect、Guardrail 和 Gateway。rank 支持 deterministic topic filter。Tool 输出不包含 raw HTML；document、item set 和 `ResearchBriefDraft` 都只存在于 request-local `ResearchService`。Draft 保存来源 URL，而不是把临时 item ID 冒充长期 Source ID；保存 Brief 时 repository 只接受已经存在于 `research_sources` 的 URL。当前阶段 5 Direct Executor 每个 run 只选择一个 Tool，因此 compiled Graph 尚不能连续完成四步链路；阶段 6 ReAct Executor 将复用同一 Tool contract 完成循环调度。
 
-Research WRITE 当前包含 `research.save_source`、`research.save_brief` 和 `research.create_note`。briefing fetch 会为同一个 list-page document 生成 request-local observation，使 Source 可以先经过独立 WRITE 保存；Brief WRITE 只接收 request-local `draft_id`，repository 会把 draft 的 source URL 解析到已经保存的 `research_sources`，任何缺失来源都会 fail-closed，不能由 Brief WRITE 隐式创建 Source。Note WRITE 接收 title/body。三个 WRITE 都经过 Policy write effect、Gateway confirmation、shared transaction 和 post-Guardrail evidence；当前 confirmation 仍只绑定 Tool 名，参数摘要、过期和跨 run token 留给后续 Interaction Safety State。
+Research WRITE 当前包含 `research.save_source`、`research.save_brief` 和 `research.create_note`。briefing fetch 会为同一个 list-page document 生成 request-local observation，使 Source 可以先经过独立 WRITE 保存；Brief WRITE 只接收 request-local `draft_id`，repository 会把 draft 的 source URL 解析到已经保存的 `research_sources`，任何缺失来源都会 fail-closed，不能由 Brief WRITE 隐式创建 Source。Note WRITE 接收 title/body。三个 WRITE 都经过 Policy write effect、结构化 `ConfirmedAction`、短 transaction 和 post-Guardrail evidence；临时 ID 不能跨 execution scope 使用。
 
 所有业务 Domain 遵守 `plans/DOMAIN_CONTRACT_STANDARD.md`，共享 `DomainPlanningReadModel.get_planning_snapshot(scope_id)`、`DomainContextProvider.query_context_candidates(...)` 和 `DomainMemoryCandidateProvider.query_memory_candidates(...)`。统一的是方法语义和安全边界，snapshot/candidate 业务类型仍归各 Domain 所有。
 
-Research 的 `ResearchReadService` 实现三个共享 contract：planning snapshot 返回 Topic 的资料覆盖计数、最近 Brief 标题和以 `KnowledgeLink(relation="unresolved_question")` 表达的未解决问题；Context 按 query 与字符预算返回带 provenance / estimated size 的 Source、Note、Brief candidates；Memory 只返回用户确认保存的 Note / Brief candidates，不包含 Source，也不写 Memory。Research planning scope 是 Topic ID；Context/Memory 当前只支持全局 query，对非空 scope 明确拒绝。SQL 保持在 `ResearchRepository` 内。Domain 另提供稳定排序的 `list_topics`、`search_saved_items(..., limit, offset)` 和模型可见 `research.search_knowledge` READ Tool。
+Research 的 `ResearchReadService` 实现三个共享 contract：planning snapshot 返回 Topic 的资料覆盖计数、最近 Brief 标题和以 `KnowledgeLink(relation="unresolved_question")` 表达的未解决问题；Context 按 query 与字符预算返回带 provenance / estimated size 的 Source、Note、Brief candidates；Memory 只返回用户确认保存的 Note / Brief candidates，不包含 Source，也不写 Memory。Research planning/context/memory scope 是 Topic ID；Context/Memory 同时支持全局和 Topic scoped query，未知 Topic 明确失败。SQL 保持在 `ResearchRepository` 内。Domain 另提供稳定排序的 `list_topics`、`search_saved_items(..., limit, offset)` 和模型可见 `research.search_knowledge` READ Tool。
 
 Travel 位于 `app/domains/travel/`，当前已有 Trip / TravelConstraint 长期事实、五个 typed external Ports 和 fixture-backed EXTERNAL_READ Tools。`travel.check_calendar_availability`、`travel.get_weather`、`travel.search_transport`、`travel.search_lodging`、`travel.search_places` 统一返回 request-local `ExternalLookupResult`，其中 observation 携带 provider、source reference、observed/expires time 和 provenance；candidate 只能引用当前 observation ID，success/no-results/partial-failure/failed 与 retryable provider failure 保持结构化。聚合 `travel.search_options` 已从 Tool Registry 删除，不再与五个细分 Tool 重复暴露。
 
 `travel.compare_options` 只接受当前 request-local observation IDs，把候选按保存的 Trip destination / budget constraints 生成 `CandidateAssessment` 和 `TravelComparison`；无法判断的约束保持 unresolved，不伪装成匹配。`travel.build_itinerary_draft` 再只接受该 comparison 中的 candidate IDs，拒绝伪造、冲突或过期候选，并为同一 Trip 生成 request-local 递增 version。comparison / draft 都不写 SQLite，也不代表 booking。
 
-Itinerary WRITE 已迁移为 draft-based 保存：`travel.save_itinerary` 只接受当前 request-local `draft_id` 与显式 idempotency key，经 Travel Skill candidate、Policy write effect、Gateway confirmation 和 transaction 原子保存 `Itinerary`、`ItineraryItem` 与 itinerary `TravelDecision`，成功返回 `travel_itinerary_saved` evidence。相同 key + draft 返回同一长期事实；不同 draft 复用 key fail-closed。未安排时间的 Place item 保持空时间，不伪造日程。旧 `CandidateOption`、`TravelOptionPort` 和聚合 `search_options()` 路径已删除。Travel 接入没有修改 Tool Runtime 核心。
+Itinerary WRITE 已迁移为 draft-based 保存：`travel.save_itinerary` 只接受当前 request-local `draft_id` 与显式 idempotency key，经 Travel Skill candidate、Policy write effect、结构化 `ConfirmedAction` 和短 transaction 原子保存 `Itinerary`、`ItineraryItem` 与 itinerary `TravelDecision`，成功返回 `travel_itinerary_saved` evidence。保存前重新验证 quote expiry；相同 key + draft 已成功时返回同一长期事实，即使 quote 后来过期，不同 draft 复用 key fail-closed。未安排时间的 Place item 保持空时间，不伪造日程。旧 `CandidateOption`、`TravelOptionPort` 和聚合 `search_options()` 路径已删除。Travel 接入没有修改 Tool Runtime 核心。
 
 跨 Domain 资料引用使用 `app/domains/references.py` 的通用 `KnowledgeReference` 与 `KnowledgeReferenceResolver`。Travel 的 `travel_knowledge_refs` 只保存稳定 reference ID、domain、item kind 和 item ID，不复制 Research 正文，也不 import Research repository。resolver 以 structured `resolved/unavailable` 返回只读摘要；解析失败不会阻止读取 Trip 主体。
 

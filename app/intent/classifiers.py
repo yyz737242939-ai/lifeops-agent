@@ -44,6 +44,16 @@ class RuleBasedIntentClassifier:
         "记忆",
         "健康记录",
         "wellbeing",
+        "研究",
+        "笔记",
+        "简报",
+        "source",
+        "brief",
+        "note",
+        "旅行",
+        "行程",
+        "trip",
+        "itinerary",
     )
     _PLAN_ACTIONS = (
         "帮我规划",
@@ -74,6 +84,10 @@ class RuleBasedIntentClassifier:
         "show",
         "list",
         "read",
+        "search",
+        "fetch",
+        "搜索",
+        "获取",
     )
 
     def classify(self, request: RuntimeRequest) -> ClassifierResult:

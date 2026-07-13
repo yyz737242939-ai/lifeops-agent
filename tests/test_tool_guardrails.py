@@ -5,6 +5,7 @@ import unittest
 from app.tools.guardrails import evaluate_post_execution, evaluate_pre_execution
 from app.tools.models import (
     AllowedToolSet,
+    ConfirmedAction,
     ExecutionEvidence,
     GuardrailAction,
     ToolCall,
@@ -16,6 +17,7 @@ from app.tools.models import (
     ToolRisk,
 )
 from app.tools.registry import ToolRegistry
+from tests.helpers import confirmed_action
 
 
 _INPUT_SCHEMA = {
@@ -69,22 +71,57 @@ class ToolGuardrailsTest(unittest.TestCase):
         self.assertEqual(unregistered.reason_code, "tool_not_registered")
         self.assertEqual(disallowed.reason_code, "tool_not_allowed")
 
-    def test_write_requires_confirmation_bound_to_tool_name(self) -> None:
+    def test_write_requires_confirmation_bound_to_exact_action(self) -> None:
         registry = ToolRegistry([(_definition(ToolEffect.WRITE), _handler)])
         allowed_tools = AllowedToolSet(("tasks.save",))
         call = ToolCall("call_1", "tasks.save", {"title": "Run"})
 
         missing = evaluate_pre_execution(call, allowed_tools, registry)
+        wrong_call = ToolCall("call_1", "memory.save", {"title": "Run"})
         wrong = evaluate_pre_execution(
-            call, allowed_tools, registry, confirmed_tool_name="memory.save"
+            call,
+            allowed_tools,
+            registry,
+            confirmation=confirmed_action(wrong_call),
+            run_id="run_test",
         )
         confirmed = evaluate_pre_execution(
-            call, allowed_tools, registry, confirmed_tool_name="tasks.save"
+            call,
+            allowed_tools,
+            registry,
+            confirmation=confirmed_action(call),
+            run_id="run_test",
+        )
+        changed_arguments = evaluate_pre_execution(
+            ToolCall("call_1", "tasks.save", {"title": "Changed"}),
+            allowed_tools,
+            registry,
+            confirmation=confirmed_action(call),
+            run_id="run_test",
+        )
+        other_run = evaluate_pre_execution(
+            call,
+            allowed_tools,
+            registry,
+            confirmation=confirmed_action(call),
+            run_id="run_other",
+        )
+        expired = evaluate_pre_execution(
+            call,
+            allowed_tools,
+            registry,
+            confirmation=ConfirmedAction.for_call(
+                "run_test", call, expires_at="2000-01-01T00:00:00+00:00"
+            ),
+            run_id="run_test",
         )
 
         self.assertEqual(missing.action, GuardrailAction.REQUIRES_CONFIRMATION)
         self.assertEqual(wrong.action, GuardrailAction.REQUIRES_CONFIRMATION)
         self.assertEqual(confirmed.action, GuardrailAction.ALLOW)
+        self.assertEqual(changed_arguments.action, GuardrailAction.REQUIRES_CONFIRMATION)
+        self.assertEqual(other_run.action, GuardrailAction.REQUIRES_CONFIRMATION)
+        self.assertEqual(expired.action, GuardrailAction.REQUIRES_CONFIRMATION)
 
     def test_pre_rejects_invalid_arguments_without_recording_raw_values(self) -> None:
         registry = ToolRegistry([(_definition(), _handler)])
@@ -94,7 +131,6 @@ class ToolGuardrailsTest(unittest.TestCase):
         decision = evaluate_pre_execution(call, allowed_tools, registry)
 
         self.assertEqual(decision.reason_code, "arguments_invalid")
-        self.assertEqual(decision.sanitized_args_summary, {"title": "str"})
         self.assertNotIn("Run", str(decision))
 
     def test_post_rejects_identity_failure_and_invalid_output(self) -> None:

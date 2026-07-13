@@ -46,5 +46,18 @@ def finish_run_record(conn: sqlite3.Connection, result: RuntimeResult) -> None:
     )
 
 
+def fail_run_record(conn: sqlite3.Connection, run_id: str, error_code: str) -> None:
+    """Close one unexpectedly failed run without storing exception text."""
+
+    conn.execute(
+        """
+        UPDATE run_records
+        SET finished_at = ?, status = 'error', summary = ?, error_code = ?
+        WHERE id = ?
+        """,
+        (utc_now_iso(), "Runtime orchestration failed.", error_code, run_id),
+    )
+
+
 def _hash_user_input(user_input: str) -> str:
     return hashlib.sha256(user_input.encode("utf-8")).hexdigest()

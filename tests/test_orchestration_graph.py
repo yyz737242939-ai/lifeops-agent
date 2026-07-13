@@ -65,10 +65,7 @@ class OrchestrationGraphTest(unittest.TestCase):
             ],
         )
         self.assertEqual(state["result"].status, RuntimeStatus.OK)
-        self.assertEqual(
-            state["result"].trace_summary,
-            ["runtime.tool_catalog.empty"],
-        )
+        self.assertIn("No authorized Tool", state["result"].message)
 
     def test_confirmation_route_does_not_use_interrupt(self) -> None:
         state = _invoke(

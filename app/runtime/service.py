@@ -19,8 +19,7 @@ from app.observability.logger import (
 from app.orchestration.graph import RuntimeOrchestrator
 from app.policy.service import PolicyService
 from app.runtime.models import RuntimeRequest, RuntimeResult
-from app.runtime.run_store import finish_run_record, insert_run_record
-from app.storage.unit_of_work import SqliteUnitOfWork
+from app.runtime.run_store import fail_run_record, finish_run_record, insert_run_record
 from app.skills.service import SkillService
 from app.tools.calling import ToolCallSelectionClient
 from app.tools.runtime import ToolRuntime
@@ -37,7 +36,7 @@ class RuntimeService:
         conn: sqlite3.Connection | None = None,
         event_log: EventLogWriter | None = None,
         log_root: str | Path | None = None,
-        tool_runtime_factory: Callable[[], ToolRuntime] | None = None,
+        execution_scope_factory: Callable[[], ToolRuntime] | None = None,
         tool_call_selection_client: ToolCallSelectionClient | None = None,
     ) -> None:
         self._intent_service = intent_service or IntentService()
@@ -46,13 +45,13 @@ class RuntimeService:
             intent_service=self._intent_service,
             policy_service=self._policy_service,
             skill_service=skill_service,
-            tool_runtime_factory=tool_runtime_factory,
+            execution_scope_factory=execution_scope_factory,
             tool_call_selection_client=tool_call_selection_client,
         )
         self._conn = conn
         self._event_log = event_log
         self._log_root = Path(log_root) if log_root is not None else None
-        self._session_log: SessionLogWriter | None = None
+        self._session_logs: dict[str, SessionLogWriter] = {}
         ensure_application_logger()
         self._logger = logging.getLogger("lifeops.runtime")
 
@@ -63,16 +62,27 @@ class RuntimeService:
 
         if self._conn is None:
             self._append_request_started(request, trace)
-            self._logger.info("runtime run started run_id=%s", request.run_id)
             return self._handle_core(request, trace=trace)
 
-        with SqliteUnitOfWork(self._conn):
-            insert_run_record(self._conn, request)
+        insert_run_record(self._conn, request)
+        self._conn.commit()
+        try:
             self._append_request_started(request, trace)
-            self._logger.info("runtime run started run_id=%s", request.run_id)
             result = self._handle_core(request, trace=trace)
+        except Exception:
+            self._conn.rollback()
+            fail_run_record(
+                self._conn, request.run_id, "runtime.orchestration_failed"
+            )
+            self._conn.commit()
+            raise
+        try:
             finish_run_record(self._conn, result)
+            self._conn.commit()
             return result
+        except Exception:
+            self._conn.rollback()
+            raise
 
     def close(self) -> None:
         """Close the owned SQLite connection when one is attached."""
@@ -113,7 +123,6 @@ class RuntimeService:
                 {
                     "error_code": result.error_code,
                     "stage": final_state["error_stage"],
-                    "graph_path": list(final_state["graph_path"]),
                 },
             )
             self._logger.error(
@@ -128,13 +137,7 @@ class RuntimeService:
             "runtime.run.completed",
             {
                 "status": result.status.value,
-                "graph_path": list(final_state["graph_path"]),
             },
-        )
-        self._logger.info(
-            "runtime run completed run_id=%s status=%s",
-            request.run_id,
-            result.status.value,
         )
         return result
 
@@ -172,23 +175,19 @@ class RuntimeService:
         trace: OptionalLogAppender,
     ) -> None:
         trace.append("runtime.run.started")
-        trace.append(
-            "runtime.request.created",
-            {
-                "session_id": request.session_id,
-                "turn_id": request.turn_id,
-            },
-        )
 
     def _ensure_session_log(self, request: RuntimeRequest) -> SessionLogWriter:
-        if self._session_log is not None:
-            return self._session_log
+        existing = self._session_logs.get(request.session_id)
+        if existing is not None:
+            configure_application_logging(existing.session_dir)
+            return existing
         if self._log_root is None:
             raise RuntimeError("log_root is not configured.")
-        self._session_log = SessionLogWriter.create(
+        session_log = SessionLogWriter.create(
             self._log_root,
             session_id=request.session_id,
             metadata={"first_run_id": request.run_id},
         )
-        configure_application_logging(self._session_log.session_dir)
-        return self._session_log
+        configure_application_logging(session_log.session_dir)
+        self._session_logs[request.session_id] = session_log
+        return session_log

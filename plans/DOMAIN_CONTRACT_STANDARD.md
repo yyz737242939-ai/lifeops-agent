@@ -47,7 +47,7 @@ Domain 不依赖 LangGraph、Planner、Executor、DAG、具体 MCP server 或 pr
 - Tool input/output 使用受支持的严格 JSON Schema，默认 `additionalProperties=false`。
 - ToolResult 必须结构化表达 status、output 或 ToolError；WRITE success 必须携带 ExecutionEvidence。
 - 所有 Tool 经过 selected Skill candidate、Policy effect、AllowedToolSet、pre/post Guardrails 和 ToolGateway。
-- WRITE retry/resume 必须有幂等语义；confirmation 当前至少绑定 Tool 名，后续 Interaction Safety State 再绑定参数摘要和有效期。
+- WRITE retry/resume 必须有幂等语义；confirmation 绑定 run、Tool call、Tool 名、canonical 参数摘要和有效期，交互层只能传递该结构化授权，不能用自由 metadata 代替。
 
 ## 6. 统一只读接口
 
@@ -71,6 +71,7 @@ DomainMemoryCandidateProvider.query_memory_candidates(
 
 - `scope_id` 是 Domain 自己的稳定业务 scope，例如 Research Topic ID 或 Travel Trip ID。
 - 不支持 scoped query 的 Domain 必须明确拒绝，不能静默忽略。
+- Research 和 Travel 当前都支持 scoped query：Research 使用 Topic ID，Travel 使用 Trip ID；未知 scope 必须失败，不能退化为全局查询。
 - Planning snapshot 只返回已知事实、覆盖情况、缺失信息和待决策项，不生成 PlanStep。
 - Context candidate 必须携带 provenance 和 budget estimate，不组装最终 prompt。
 - Memory candidate 只是候选，不自动写 Memory。
@@ -81,6 +82,7 @@ DomainMemoryCandidateProvider.query_memory_candidates(
 - Plan-and-Execute：Planner 只消费 planning snapshot 和 Tool contract，不读取 repository internals。
 - DAG：可并行 READ 不共享隐式可变状态；汇合节点只消费显式 result/candidate IDs；WRITE 保持独立确认节点。
 - partial success 保留成功 Observation / evidence，不做跨 Domain 全局回滚。
+- typed Port 的 `success`、`no_results`、`partial_failure`、`failed` 必须使用互斥结果形状；retryable 属于结构化 provider failure，不从异常文本推断。只有两个以上 Domain 出现相同候选/失败不变量时才提取共享 model，当前 Port model 继续由各 Domain 拥有。
 - Recovery 不自动重放 external lookup 或 WRITE，只基于 stop reason、evidence 和事实状态提出恢复入口。
 
 ## 8. 统一测试关闭条件

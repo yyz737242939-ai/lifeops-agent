@@ -31,7 +31,7 @@ from app.tools.authorization import resolve_allowed_tools
 from app.tools.gateway import ToolGateway
 from app.tools.models import AllowedToolSet, ToolCall, ToolCallStatus
 from app.tools.registry import ToolRegistry
-from tests.helpers import create_test_connection
+from tests.helpers import confirmed_action, create_test_connection
 
 
 class TravelToolsTest(unittest.TestCase):
@@ -142,7 +142,8 @@ class TravelToolsTest(unittest.TestCase):
             created = self.gateway.execute(
                 create_call,
                 self._allowed("write"),
-                confirmed_tool_name=CREATE_TRIP_TOOL,
+                confirmation=confirmed_action(create_call),
+                run_id="run_test",
             )
 
         self.assertEqual(created.status, ToolCallStatus.SUCCEEDED)
@@ -165,7 +166,8 @@ class TravelToolsTest(unittest.TestCase):
             updated = self.gateway.execute(
                 update_call,
                 self._allowed("write"),
-                confirmed_tool_name=UPDATE_TRIP_CONSTRAINTS_TOOL,
+                confirmation=confirmed_action(update_call),
+                run_id="run_test",
             )
 
         self.assertEqual(updated.status, ToolCallStatus.SUCCEEDED)
@@ -195,7 +197,8 @@ class TravelToolsTest(unittest.TestCase):
             archived = self.gateway.execute(
                 archive_call,
                 self._allowed("write"),
-                confirmed_tool_name=ARCHIVE_TRIP_TOOL,
+                confirmation=confirmed_action(archive_call),
+                run_id="run_test",
             )
 
         self.assertEqual(archived.status, ToolCallStatus.SUCCEEDED)

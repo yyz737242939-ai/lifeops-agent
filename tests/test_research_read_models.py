@@ -112,14 +112,33 @@ class ResearchReadModelsTest(unittest.TestCase):
         self.assertIn("brief", kinds)
         self.assertNotIn("source", kinds)
 
-    def test_invalid_read_limits_fail_before_repository_query(self) -> None:
+    def test_topic_scope_filters_context_and_memory_candidates(self) -> None:
+        other_note = self.repository.create_note(
+            "Agent Other Note", "User-confirmed Agent note outside this topic"
+        )
+
+        context = self.read_service.query_context_candidates(
+            "Agent", 500, scope_id=self.topic.topic_id
+        )
+        memory = self.read_service.query_memory_candidates(
+            "Agent", 10, scope_id=self.topic.topic_id
+        )
+
+        self.assertNotIn(other_note.note_id, {item.candidate_id for item in context})
+        self.assertNotIn(other_note.note_id, {item.candidate_id for item in memory})
+        self.assertEqual(
+            {item.candidate_id for item in memory},
+            {self.note.note_id, self.brief.brief_id},
+        )
+
+    def test_invalid_read_limits_and_unknown_scope_fail_before_query(self) -> None:
         with self.assertRaises(ValueError):
             self.read_service.query_context_candidates("Agent", 0)
         with self.assertRaises(ValueError):
             self.read_service.query_memory_candidates("Agent", 51)
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "topic item is not available"):
             self.read_service.query_context_candidates(
-                "Agent", 120, scope_id=self.topic.topic_id
+                "Agent", 120, scope_id="topic_missing"
             )
 
 

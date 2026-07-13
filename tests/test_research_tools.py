@@ -25,7 +25,7 @@ from app.tools.authorization import resolve_allowed_tools
 from app.tools.gateway import ToolGateway
 from app.tools.models import AllowedToolSet, ToolCall, ToolCallStatus
 from app.tools.registry import ToolRegistry
-from tests.helpers import create_test_connection
+from tests.helpers import confirmed_action, create_test_connection
 
 
 class _FakeContentPort:
@@ -50,7 +50,7 @@ class _FakeContentPort:
 class ResearchToolsTest(unittest.TestCase):
     def setUp(self) -> None:
         self.conn = create_test_connection()
-        service = ResearchService(
+        self.service = ResearchService(
             FixtureResearchSourcePort(
                 {
                     "hf-daily": {
@@ -63,7 +63,7 @@ class ResearchToolsTest(unittest.TestCase):
             ResearchRepository(self.conn),
             content_port=_FakeContentPort(),
         )
-        self.registry = ToolRegistry(build_research_tools(service))
+        self.registry = ToolRegistry(build_research_tools(self.service))
         self.gateway = ToolGateway(self.registry)
 
     def tearDown(self) -> None:
@@ -103,7 +103,8 @@ class ResearchToolsTest(unittest.TestCase):
             saved = self.gateway.execute(
                 save_call,
                 self._allowed("write"),
-                confirmed_tool_name=SAVE_SOURCE_TOOL,
+                confirmation=confirmed_action(save_call),
+                run_id="run_test",
             )
 
         self.assertEqual(saved.status, ToolCallStatus.SUCCEEDED)
@@ -122,18 +123,56 @@ class ResearchToolsTest(unittest.TestCase):
             ToolCall("call_fetch", FETCH_SOURCE_TOOL, {"source_key": "unknown"}),
             self._allowed("external_read"),
         )
+        missing_call = ToolCall(
+            "call_save", SAVE_SOURCE_TOOL, {"observation_id": "observation_unknown"}
+        )
         missing_observation = self.gateway.execute(
-            ToolCall(
-                "call_save",
-                SAVE_SOURCE_TOOL,
-                {"observation_id": "observation_unknown"},
-            ),
+            missing_call,
             self._allowed("write"),
-            confirmed_tool_name=SAVE_SOURCE_TOOL,
+            confirmation=confirmed_action(missing_call),
+            run_id="run_test",
         )
 
         self.assertEqual(missing_source.status, ToolCallStatus.FAILED)
         self.assertEqual(missing_observation.status, ToolCallStatus.FAILED)
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM research_sources").fetchone()[0],
+            0,
+        )
+
+    def test_request_local_observation_cannot_cross_execution_scope(self) -> None:
+        fetched = self.gateway.execute(
+            ToolCall("call_fetch_scope", FETCH_SOURCE_TOOL, {"source_key": "hf-daily"}),
+            self._allowed("external_read"),
+        )
+        isolated_service = ResearchService(
+            FixtureResearchSourcePort({}),
+            ResearchRepository(self.conn),
+            content_port=_FakeContentPort(),
+        )
+        isolated_registry = ToolRegistry(build_research_tools(isolated_service))
+        isolated_gateway = ToolGateway(isolated_registry)
+        save_call = ToolCall(
+            "call_save_cross_scope",
+            SAVE_SOURCE_TOOL,
+            {"observation_id": fetched.output["observation_id"]},
+        )
+
+        result = isolated_gateway.execute(
+            save_call,
+            resolve_allowed_tools(
+                ("research",),
+                PolicyDecision(
+                    action=PolicyAction.ALLOW,
+                    allowed_effects=["write"],
+                ),
+                isolated_registry,
+            ),
+            confirmation=confirmed_action(save_call),
+            run_id="run_test",
+        )
+
+        self.assertEqual(result.status, ToolCallStatus.FAILED)
         self.assertEqual(
             self.conn.execute("SELECT COUNT(*) FROM research_sources").fetchone()[0],
             0,
@@ -201,20 +240,23 @@ class ResearchToolsTest(unittest.TestCase):
         self.assertEqual(confirmation.status, ToolCallStatus.REQUIRES_CONFIRMATION)
 
         with SqliteUnitOfWork(self.conn):
+            source_call = ToolCall(
+                "call_save_brief_source",
+                SAVE_SOURCE_TOOL,
+                {"observation_id": fetched.output["observation_id"]},
+            )
             saved_source = self.gateway.execute(
-                ToolCall(
-                    "call_save_brief_source",
-                    SAVE_SOURCE_TOOL,
-                    {"observation_id": fetched.output["observation_id"]},
-                ),
+                source_call,
                 self._allowed("write"),
-                confirmed_tool_name=SAVE_SOURCE_TOOL,
+                confirmation=confirmed_action(source_call),
+                run_id="run_test",
             )
         with SqliteUnitOfWork(self.conn):
             saved_brief = self.gateway.execute(
                 save_brief_call,
                 self._allowed("write"),
-                confirmed_tool_name=SAVE_BRIEF_TOOL,
+                confirmation=confirmed_action(save_brief_call),
+                run_id="run_test",
             )
 
         self.assertEqual(saved_source.status, ToolCallStatus.SUCCEEDED)
@@ -241,7 +283,8 @@ class ResearchToolsTest(unittest.TestCase):
             saved = self.gateway.execute(
                 call,
                 self._allowed("write"),
-                confirmed_tool_name=CREATE_NOTE_TOOL,
+                confirmation=confirmed_action(call),
+                run_id="run_test",
             )
 
         self.assertEqual(saved.status, ToolCallStatus.SUCCEEDED)

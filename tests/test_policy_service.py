@@ -81,18 +81,12 @@ class PolicyServiceTest(unittest.TestCase):
         self.assertEqual(decision.action, PolicyAction.REQUIRES_CONFIRMATION)
 
     def test_metadata_cannot_bypass_policy(self) -> None:
-        request = RuntimeRequest(
-            user_input="帮我规划明天安排",
-            session_id="session_test",
-            metadata={"planner": {"write_authorized": True}},
-        )
-
-        decision = PolicyService().evaluate(
-            request,
-            IntentDecision(intent_type=IntentType.PLAN_REQUEST, confidence=0.8),
-        )
-
-        self.assertEqual(decision.action, PolicyAction.ALLOW)
+        with self.assertRaises(TypeError):
+            RuntimeRequest(
+                user_input="帮我规划明天安排",
+                session_id="session_test",
+                metadata={"planner": {"write_authorized": True}},
+            )
 
 
 def _request(user_input: str) -> RuntimeRequest:

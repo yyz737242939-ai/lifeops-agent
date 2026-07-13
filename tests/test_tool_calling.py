@@ -55,7 +55,7 @@ class DirectToolExecutionTest(unittest.TestCase):
 
         state = execute_tool(
             _ready_state(["external_read"]),
-            tool_runtime_factory=lambda: ToolRuntime.from_registry(self.registry),
+            execution_scope=ToolRuntime.from_registry(self.registry),
             selection_client=client,
         )
 
@@ -75,7 +75,7 @@ class DirectToolExecutionTest(unittest.TestCase):
 
         state = execute_tool(
             _ready_state(["external_read"]),
-            tool_runtime_factory=lambda: ToolRuntime.from_registry(self.registry),
+            execution_scope=ToolRuntime.from_registry(self.registry),
             selection_client=client,
         )
 

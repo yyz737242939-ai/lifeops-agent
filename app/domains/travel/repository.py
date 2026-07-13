@@ -214,26 +214,36 @@ class TravelRepository:
         ).fetchall()
         return tuple(self._itinerary_from_row(row) for row in rows)
 
+    def get_idempotent_itinerary_save(
+        self, idempotency_key: str, draft_id: str
+    ) -> ItinerarySaveResult | None:
+        existing = self._conn.execute(
+            """SELECT id, destination, transport, lodging, summary,
+                      observed_at, expires_at, provenance, created_at,
+                      trip_id, draft_id, idempotency_key, version
+               FROM travel_itineraries WHERE idempotency_key = ?""",
+            (idempotency_key,),
+        ).fetchone()
+        if existing is None:
+            return None
+        if str(existing["draft_id"]) != draft_id:
+            raise StorageError(
+                "Travel itinerary idempotency key belongs to another draft.",
+                code="travel_itinerary_idempotency_conflict",
+            )
+        return self._load_itinerary_bundle(existing)
+
     def save_itinerary_bundle(
         self,
         itinerary: Itinerary,
         items: tuple[ItineraryItem, ...],
         decision: TravelDecision,
     ) -> ItinerarySaveResult:
-        existing = self._conn.execute(
-            """SELECT id, destination, transport, lodging, summary,
-                      observed_at, expires_at, provenance, created_at,
-                      trip_id, draft_id, idempotency_key, version
-               FROM travel_itineraries WHERE idempotency_key = ?""",
-            (itinerary.idempotency_key,),
-        ).fetchone()
+        existing = self.get_idempotent_itinerary_save(
+            itinerary.idempotency_key, itinerary.draft_id
+        )
         if existing is not None:
-            if str(existing["draft_id"]) != itinerary.draft_id:
-                raise StorageError(
-                    "Travel itinerary idempotency key belongs to another draft.",
-                    code="travel_itinerary_idempotency_conflict",
-                )
-            return self._load_itinerary_bundle(existing)
+            return existing
         try:
             self._conn.execute(
                 """

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from app.tools.errors import ToolNotFoundError, ToolSchemaError
 from app.tools.models import (
     AllowedToolSet,
+    ConfirmedAction,
     GuardrailAction,
     GuardrailDecision,
     GuardrailStage,
@@ -15,6 +14,7 @@ from app.tools.models import (
     ToolEffect,
     ToolResult,
 )
+from datetime import UTC, datetime
 from app.tools.registry import ToolRegistry
 from app.tools.schema import validate_tool_value
 
@@ -24,7 +24,9 @@ def evaluate_pre_execution(
     allowed_tools: AllowedToolSet,
     registry: ToolRegistry,
     *,
-    confirmed_tool_name: str | None = None,
+    confirmation: ConfirmedAction | None = None,
+    run_id: str | None = None,
+    now: datetime | None = None,
 ) -> GuardrailDecision:
     """Decide whether one concrete ToolCall may reach its handler."""
 
@@ -46,7 +48,11 @@ def evaluate_pre_execution(
             "Tool is not in the request-local AllowedToolSet.",
             call.tool_name,
         )
-    if definition.effect == ToolEffect.WRITE and confirmed_tool_name != call.tool_name:
+    if definition.effect == ToolEffect.WRITE and (
+        confirmation is None
+        or run_id is None
+        or not confirmation.matches(run_id, call, now=now or datetime.now(UTC))
+    ):
         return _decision(
             GuardrailAction.REQUIRES_CONFIRMATION,
             GuardrailStage.PRE_EXECUTION,
@@ -63,7 +69,6 @@ def evaluate_pre_execution(
             "arguments_invalid",
             "Tool arguments do not match the input schema.",
             call.tool_name,
-            sanitized_args_summary=_summarize_arguments(call.arguments),
         )
     return _decision(
         GuardrailAction.ALLOW,
@@ -71,10 +76,6 @@ def evaluate_pre_execution(
         "allowed",
         "Policy, confirmation, and input checks passed.",
         call.tool_name,
-        sanitized_args_summary=_summarize_arguments(call.arguments),
-        evidence_requirements=("write_effect",)
-        if definition.effect == ToolEffect.WRITE
-        else (),
     )
 
 
@@ -128,7 +129,6 @@ def evaluate_post_execution(
             "write_evidence_missing",
             "Successful WRITE Tool result requires execution evidence.",
             call.tool_name,
-            evidence_requirements=("write_effect",),
         )
     return _decision(
         GuardrailAction.ALLOW,
@@ -139,19 +139,12 @@ def evaluate_post_execution(
     )
 
 
-def _summarize_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
-    return {name: type(value).__name__ for name, value in sorted(arguments.items())}
-
-
 def _decision(
     action: GuardrailAction,
     stage: GuardrailStage,
     reason_code: str,
     reason: str,
     tool_name: str,
-    *,
-    sanitized_args_summary: dict[str, Any] | None = None,
-    evidence_requirements: tuple[str, ...] = (),
 ) -> GuardrailDecision:
     return GuardrailDecision(
         action=action,
@@ -159,6 +152,4 @@ def _decision(
         reason_code=reason_code,
         reason=reason,
         tool_name=tool_name,
-        sanitized_args_summary=sanitized_args_summary or {},
-        evidence_requirements=evidence_requirements,
     )

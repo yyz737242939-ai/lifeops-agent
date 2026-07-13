@@ -20,8 +20,8 @@
 - 阶段 3：Runtime Core / Intent / Policy 初版已完成，详见 `plans/modules/RUNTIME_CORE_PLAN.md` 和 `plans/modules/INTENT_POLICY_PLAN.md`。
 - 阶段 3.5：Observability 文件日志校正已完成，详见 `plans/modules/OBSERVABILITY_LOGGING_PLAN.md`。
 - 阶段 4：LangGraph Orchestration 骨架已完成，详见 `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md`。
-- 当前阶段：阶段 5 Skill System / Tool System 与 Domains 已完成；Skill System、Tool System、Research 与 Travel 完整初版均已验证关闭。
-- 下一阶段：阶段 6 ReAct Executor；施工前应创建并确认 `plans/modules/EXECUTOR_PLAN.md`。
+- 当前阶段：阶段 5 功能实现与稳定化均已完成；`STAGE5_STABILIZATION_PLAN.md` 已关闭全部 blocking findings，并在 `240/240` 统一离线回归后给出 Stage 6 `go`。
+- 下一阶段：创建并确认 `plans/modules/EXECUTOR_PLAN.md`，随后进入阶段 6 ReAct Executor；计划确认前不开始实现。
 
 核心执行链路：
 
@@ -880,7 +880,7 @@ docs/RUNTIME_CONCEPTS.md
 - graph path trace。
 - route tests。
 
-### 阶段 5：Skill System / Tool System 与 Domains（已完成）
+### 阶段 5：Skill System / Tool System 与 Domains（功能与稳定化均已完成）
 
 目标：
 

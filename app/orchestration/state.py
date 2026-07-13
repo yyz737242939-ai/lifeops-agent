@@ -32,7 +32,6 @@ class GraphState(TypedDict):
     error_code: str | None
     error_stage: str | None
     graph_path: list[str]
-    trace_summary: list[str]
 
 
 def create_graph_state(request: RuntimeRequest) -> GraphState:
@@ -49,7 +48,6 @@ def create_graph_state(request: RuntimeRequest) -> GraphState:
         "error_code": None,
         "error_stage": None,
         "graph_path": [],
-        "trace_summary": [],
     }
 
 

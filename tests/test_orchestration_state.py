@@ -38,7 +38,6 @@ class OrchestrationStateTest(unittest.TestCase):
             "error_code": None,
             "error_stage": None,
             "graph_path": [],
-            "trace_summary": [],
         }
 
         self.assertIs(state["request"], request)

@@ -29,7 +29,7 @@ from app.tools.authorization import resolve_allowed_tools
 from app.tools.gateway import ToolGateway
 from app.tools.models import ToolCall, ToolCallStatus
 from app.tools.registry import ToolRegistry
-from tests.helpers import create_test_connection
+from tests.helpers import confirmed_action, create_test_connection
 
 
 class TravelPlanningWorkflowTest(unittest.TestCase):
@@ -146,13 +146,15 @@ class TravelPlanningWorkflowTest(unittest.TestCase):
             first = self.gateway.execute(
                 save_call,
                 self._allowed("write"),
-                confirmed_tool_name=SAVE_ITINERARY_TOOL,
+                confirmation=confirmed_action(save_call),
+                run_id="run_test",
             )
         with SqliteUnitOfWork(self.conn):
             second = self.gateway.execute(
                 save_call,
                 self._allowed("write"),
-                confirmed_tool_name=SAVE_ITINERARY_TOOL,
+                confirmation=confirmed_action(save_call),
+                run_id="run_test",
             )
 
         self.assertEqual(first.status, ToolCallStatus.SUCCEEDED)
@@ -238,6 +240,21 @@ class TravelPlanningWorkflowTest(unittest.TestCase):
         )
         self.assertEqual(forged_draft.status, ToolCallStatus.FAILED)
 
+    def test_request_local_observation_cannot_cross_execution_scope(self) -> None:
+        result = self._search_candidates()[0]
+        isolated_service = TravelService(TravelRepository(self.conn))
+
+        with self.assertRaisesRegex(ValueError, "not available in this request"):
+            isolated_service.compare_candidates(
+                self.trip.trip_id,
+                (str(result.output["observation"]["observation_id"]),),
+            )
+
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM travel_itineraries").fetchone()[0],
+            0,
+        )
+
     def test_compare_schema_rejects_model_supplied_candidate_facts(self) -> None:
         result = self.gateway.execute(
             ToolCall(
@@ -318,6 +335,68 @@ class TravelPlanningWorkflowTest(unittest.TestCase):
                 (comparison.assessments[0].candidate_id,),
                 "Invalid expired draft.",
             )
+
+    def test_candidate_expiring_after_draft_cannot_be_saved(self) -> None:
+        current_time = ["2026-07-13T00:00:00+00:00"]
+        root = Path("tests/fixtures/travel")
+        service = TravelService(
+            TravelRepository(self.conn),
+            place_port=FixturePlaceSearchAdapter(
+                root / "places_tokyo.json", root / "provider_failures.json"
+            ),
+            clock=lambda: current_time[0],
+        )
+        result = service.search_places(PlaceSearchQuery("Tokyo", "historic places"))
+        comparison = service.compare_candidates(
+            self.trip.trip_id, (result.observation.observation_id,)
+        )
+        draft = service.build_itinerary_draft(
+            comparison.comparison_id,
+            (comparison.assessments[0].candidate_id,),
+            "Draft created before quote expiry.",
+        )
+        current_time[0] = "2027-01-02T00:00:00+00:00"
+
+        with self.assertRaisesRegex(ValueError, "Expired candidates"):
+            with SqliteUnitOfWork(self.conn):
+                service.save_itinerary(draft.draft_id, "expired-draft-save")
+
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM travel_itineraries").fetchone()[0],
+            0,
+        )
+
+    def test_successful_idempotent_retry_survives_later_quote_expiry(self) -> None:
+        current_time = ["2026-07-13T00:00:00+00:00"]
+        root = Path("tests/fixtures/travel")
+        service = TravelService(
+            TravelRepository(self.conn),
+            place_port=FixturePlaceSearchAdapter(
+                root / "places_tokyo.json", root / "provider_failures.json"
+            ),
+            clock=lambda: current_time[0],
+        )
+        result = service.search_places(PlaceSearchQuery("Tokyo", "historic places"))
+        comparison = service.compare_candidates(
+            self.trip.trip_id, (result.observation.observation_id,)
+        )
+        draft = service.build_itinerary_draft(
+            comparison.comparison_id,
+            (comparison.assessments[0].candidate_id,),
+            "Idempotent draft.",
+        )
+        with SqliteUnitOfWork(self.conn):
+            first = service.save_itinerary(draft.draft_id, "stable-retry-key")
+        current_time[0] = "2027-01-02T00:00:00+00:00"
+
+        with SqliteUnitOfWork(self.conn):
+            retried = service.save_itinerary(draft.draft_id, "stable-retry-key")
+
+        self.assertEqual(retried, first)
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM travel_itineraries").fetchone()[0],
+            1,
+        )
 
     def _search_candidates(self):
         calls = (

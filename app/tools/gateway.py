@@ -7,6 +7,7 @@ from app.tools.errors import ToolGatewayError
 from app.tools.guardrails import evaluate_post_execution, evaluate_pre_execution
 from app.tools.models import (
     AllowedToolSet,
+    ConfirmedAction,
     GuardrailAction,
     GuardrailDecision,
     ToolCall,
@@ -36,7 +37,8 @@ class ToolGateway:
         call: ToolCall,
         allowed_tools: AllowedToolSet,
         *,
-        confirmed_tool_name: str | None = None,
+        confirmation: ConfirmedAction | None = None,
+        run_id: str | None = None,
         trace: TraceSink | None = None,
     ) -> ToolResult:
         """Execute one authorized call without exposing handler exceptions."""
@@ -57,7 +59,8 @@ class ToolGateway:
             call,
             allowed_tools,
             self._registry,
-            confirmed_tool_name=confirmed_tool_name,
+            confirmation=confirmation,
+            run_id=run_id,
         )
         _trace_guardrail(trace, pre)
         if pre.action != GuardrailAction.ALLOW:

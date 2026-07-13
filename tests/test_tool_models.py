@@ -98,10 +98,9 @@ class ToolModelsTest(unittest.TestCase):
             reason_code="allowed",
             reason="All deterministic checks passed.",
             tool_name="research.sources_read",
-            sanitized_args_summary={"source_id": "daily-papers"},
-            evidence_requirements=("source_response",),
         )
         self.assertNotIn("arguments", decision.__dict__)
+        self.assertNotIn("daily-papers", repr(decision))
 
 
 if __name__ == "__main__":

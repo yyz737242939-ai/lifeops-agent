@@ -1,4 +1,6 @@
-# Travel Domain 模块计划
+# Travel Domain 最终设计说明
+
+文档状态：阶段 5 实现完成后的稳定设计；真实 booking、HTTP/MCP provider 与上层 Executor/Planner 不属于本 Domain。
 
 本计划遵守 `plans/DOMAIN_CONTRACT_STANDARD.md`。Travel planning/context/memory 的默认 scope ID 都是 Trip ID；具体 snapshot/candidate 类型由 Travel 拥有，但方法名和语义不另行定义。
 
@@ -12,7 +14,7 @@
 - candidate 带 `observed_at`、`expires_at` 和 fixture provenance，并明确不代表 booking；
 - WRITE 只接受当前 service 已生成的 draft ID 与显式 idempotency key，经过 Travel Skill candidate、Policy write effect、Gateway confirmation、transaction 和 `ExecutionEvidence`。
 
-Travel Domain 阶段 5 完整初版已关闭：领域模型、schema v8、Trip / TravelConstraint repository/service/Tools、五个细分 external Port contracts、deterministic fixture adapters、EXTERNAL_READ Tools、request-local candidate compare / itinerary draft、draft-based Itinerary / ItineraryItem / TravelDecision WRITE、通用 KnowledgeReference、三个共享只读接口和小型历史 seed 均已完成。Travel 聚焦测试 33 项、仓库全量 unittest 216 项通过。
+Travel Domain 阶段 5 完整初版已关闭：领域模型、schema v8、Trip / TravelConstraint repository/service/Tools、五个细分 external Port contracts、deterministic fixture adapters、EXTERNAL_READ Tools、request-local candidate compare / itinerary draft、draft-based Itinerary / ItineraryItem / TravelDecision WRITE、通用 KnowledgeReference、三个共享只读接口和小型历史 seed 均已完成。稳定化补充了保存前 expiry 复验、可注入 clock、跨 execution scope 隔离和过期后的幂等重试；当前测试数字以稳定化计划和推进日志为准。
 
 ## 1. 目标
 
@@ -252,4 +254,4 @@ Tools：
 8. [已完成] `travel.save_itinerary` 已迁移为 draft-based WRITE：只接受当前 request-local `draft_id` 与显式 idempotency key，在一次 transaction 中保存 Itinerary、ItineraryItem 和 itinerary TravelDecision；相同 key + draft 返回同一结果，不同 draft 复用 key fail-closed，并保持逐 WRITE confirmation 与 `ExecutionEvidence`。旧 `CandidateOption` / `TravelOptionPort` / `search_options()` 兼容路径已删除。
 9. [已完成] 增加通用 `KnowledgeReference` / `KnowledgeReferenceResolver` / structured resolution contract；schema v8 为 `travel_knowledge_refs` 增加稳定 reference ID，Travel 只保存 domain/item kind/item ID，不复制正文且不依赖 Research repository；resolver unavailable 不阻止读取 Trip 主体。
 10. [已完成] 增加实现三个共享 Protocol 的 `TravelReadService`、`TravelPlanningSnapshot` / `TravelContextCandidate` / `TravelPreferenceCandidate` 与小型 schema-versioned 历史 seed；Planner/DAG 只读取长期事实覆盖与缺失约束，Context 按 Trip scope/budget 返回 provenance candidates，Memory 只返回显式保存的 transport/lodging/other constraints，不把历史 itinerary 自动推断为偏好。
-11. [已完成] Travel 聚焦测试 33 项通过；compiled Graph 已调用真实 `travel.search_places` handler 并返回 typed observation/candidate，external-read Policy 下 catalog 外 `travel.save_itinerary` 被 Guardrail 以 `tool_not_allowed` 拒绝且 SQLite 零写入；仓库全量 unittest 216 项通过，文档已同步，Travel 与阶段 5 完整初版关闭。
+11. [已完成] compiled Graph 已调用真实 `travel.search_places` handler 并返回 typed observation/candidate，external-read Policy 下 catalog 外 `travel.save_itinerary` 被 Guardrail 以 `tool_not_allowed` 拒绝且 SQLite 零写入。历史 `33/216` 仅是完成当时快照；稳定化后的统一结果见 `STAGE5_STABILIZATION_PLAN.md`。

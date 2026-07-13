@@ -1,6 +1,6 @@
-# Research / Personal Knowledge Domain 模块计划
+# Research / Personal Knowledge Domain 最终设计说明
 
-本计划遵守 `plans/DOMAIN_CONTRACT_STANDARD.md`。Research planning scope ID 是 Topic ID；Context / Memory 当前只支持全局 query，对非空 `scope_id` 明确拒绝而不是静默忽略。
+本设计遵守 `plans/DOMAIN_CONTRACT_STANDARD.md`。Research planning/context/memory scope ID 是 Topic ID；Context / Memory 支持全局或 Topic scoped query，未知 Topic 明确失败而不退化为全局查询。
 
 ## 当前实现状态
 
@@ -142,7 +142,7 @@ Tool 方向：
 
 当前还注册 `research.fetch_briefing_source`，用于返回不含 raw HTML 的 request-local document / observation IDs；原 `research.fetch_source` 保留最小 Source 纵向切片兼容。
 
-external fetch 是 EXTERNAL_READ；本地 parse/rank/build/search 是 READ 或 request-local 处理；保存和创建是 WRITE。所有模型可见 Tool 先由 selected Skill candidate 与 Policy effect 求交，再经过 Guardrail 和 Gateway；WRITE 还必须绑定当前确认并产生 evidence。
+external fetch 是 EXTERNAL_READ；本地 parse/rank/build/search 是 READ 或 request-local 处理；保存和创建是 WRITE。所有模型可见 Tool 先由 selected Skill candidate 与 Policy effect 求交，再经过 Guardrail 和 Gateway；WRITE 还必须绑定匹配当前 action 的 `ConfirmedAction` 并产生 evidence。
 
 ## 7. 失败模式
 
@@ -185,7 +185,7 @@ external fetch 是 EXTERNAL_READ；本地 parse/rank/build/search 是 READ 或 r
 3. [已完成] 建立 Research Skill 与 source manifest；`hf_daily_papers` / `hf_blog` 通过稳定 key 映射到 Skill 内 JSON 声明，加载时校验 traversal、严格字段、Hugging Face HTTPS host 和精确 URL allowlist，当前不执行网络访问。
 4. [已完成] 迁移/重写 Hugging Face fetch / parse / rank / dedupe 小机制：`HuggingFaceResearchContentPort` 只抓取 manifest 声明的精确 URL，限制 status、redirect、content type、大小、timeout 和解码失败；`ResearchService` 通过 request-local `document_id` 暂存 `FetchedSourceDocument`；纯处理函数输出 typed `ResearchItem` 并提供 deterministic dedupe/rank。
 5. [已完成] 临时 briefing fetch/parse/rank/build 已打通：`research.fetch_briefing_source` 返回不含 raw HTML 的 document metadata，`research.parse_items` / `research.rank_items` 只接受当前 service 持有的 request-local ID，`research.build_brief_draft` 生成包含来源链接和“基于列表页可见信息”边界的中文 draft；四个 Tool 均经过 Skill candidate、Policy effect、Guardrail 和 Gateway，且不写 SQLite。阶段 5 Direct Executor 尚不能在一个 run 内连续调度四个 Tool。
-6. [已完成] 经授权保存 Source / Brief / Note 已打通：briefing fetch 同时生成 request-local `observation_id`，用户可先经 `research.save_source` 保存列表页 Source；`research.save_brief` 只接受当前 service 持有的 `draft_id`，且所有 draft source URL 必须已存在于 `research_sources`；`research.create_note` 保存确认后的 title/body。三个 WRITE Tool 都要求 Policy write effect、Gateway confirmation、transaction 和对应 `ExecutionEvidence`。当前确认仍只绑定 Tool 名，参数摘要、过期和跨 run token 留给后续 Interaction Safety State。
+6. [已完成] 经授权保存 Source / Brief / Note 已打通：briefing fetch 同时生成 request-local `observation_id`，用户可先经 `research.save_source` 保存列表页 Source；`research.save_brief` 只接受当前 service 持有的 `draft_id`，且所有 draft source URL 必须已存在于 `research_sources`；`research.create_note` 保存确认后的 title/body。三个 WRITE Tool 都要求 Policy write effect、绑定 run/call/tool/arguments/expiry 的 `ConfirmedAction`、transaction 和对应 `ExecutionEvidence`。
 7. [已完成] `ResearchReadService` 实现共享 `DomainPlanningReadModel[ResearchPlanningSnapshot]`、`DomainContextProvider[ResearchContextCandidate]` 和 `DomainMemoryCandidateProvider[ResearchMemoryCandidate]`；fake Planner、Context、Memory consumer contract tests 验证消费者只依赖统一接口。另提供带 kinds、limit、offset 的 `search_saved_items` 只读分页。
 8. [已完成，按确认排除恶意内容 fixtures] 增加 schema version 1 的 380 条 deterministic Source/Note/Brief seed shape、timeout / HTTP 503 / empty parse provider failure fixtures，以及 missing link / unsaved Brief source / duplicate Source 引用完整性 fixtures；验证分页不重叠、预算稳定和失败不写入。按用户当前决定不实现 prompt injection 或其他恶意内容 fixtures。
-9. [已完成] 完成完整 Domain 聚焦测试、真实 briefing handler compiled Graph 成功路径与 catalog 外 WRITE Guardrail 拒绝路径，并同步 README、ARCHITECTURE、PROGRESS_LOG、RUNTIME_CONCEPTS 和本计划。`uv run python -m unittest discover -s tests -v` 共 182 项通过；Research 阶段 5 完整初版关闭。
+9. [已完成] 完成 Domain 聚焦测试、真实 briefing handler compiled Graph 成功路径与 catalog 外 WRITE Guardrail 拒绝路径；稳定化后补充 Topic scoped read 与跨 execution scope 临时 ID 隔离。历史 `182` 项仅是当时快照，当前统一回归数字以稳定化计划和推进日志为准。

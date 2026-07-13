@@ -87,7 +87,7 @@ Persisted PlanRun         != Domain fact
 Checkpoint restore        != side-effect rollback
 ```
 
-当前 Tool Guardrail 的最小语义：authorization 先把 Policy 转换为 `AllowedToolSet`；pre-Guardrail 只消费该集合，检查当前 Tool membership、注册、WRITE Tool 名确认与 input schema，不重复读取 Policy；post-Guardrail 检查 call/result identity、成功状态、output schema 和 WRITE evidence。Guardrail 只能缩小或拒绝既有授权，不能新增 allowed tool。当前 confirmation 只绑定 Tool 名，参数摘要和过期时间留到后续交互状态设计。
+当前 Tool Guardrail 的最小语义：authorization 先把 Policy 转换为 `AllowedToolSet`；pre-Guardrail 只消费该集合，检查当前 Tool membership、注册、input schema，以及 WRITE 的 `ConfirmedAction` 是否绑定 run/call/tool/canonical arguments digest 且未过期，不重复读取 Policy；post-Guardrail 检查 call/result identity、成功状态、output schema 和 WRITE evidence。Guardrail 只能缩小或拒绝既有授权，不能新增 allowed tool。
 
 `ToolGateway` 是唯一允许调用 registry handler 的运行时入口。它不重新计算 Policy 权限，只消费 `AllowedToolSet`，并保证任何 handler 调用都夹在 pre/post Guardrails 之间。handler exception 和 contract violation 被转换为紧凑 `ToolError`，内部异常文本不会进入返回值或语义 event。
 
@@ -204,7 +204,7 @@ RuntimeRequest
 
 输入是已经构造好的 `RuntimeRequest`。
 
-输出是 `RuntimeResult`，其中可以包含 intent / policy 摘要。
+输出是精简 `RuntimeResult`：run/session identity、status、message、可选 Tool result 与稳定 error code。Intent / Policy 解释属于语义事件或未来独立 explanation view，不在公共结果重复。
 
 Runtime Core 不负责自然语言深度理解或授权写入；它委托 orchestration 和 Tool Gateway 执行业务工具，也不把 assistant final answer 升级为事实。
 
@@ -563,7 +563,7 @@ Observability 不负责授权写入，不负责改变业务状态，也不把 as
 - `tests/test_orchestration_graph.py`
 - `tests/test_runtime_service.py`
 
-它们验证 metadata、`events.jsonl`、`llm.jsonl`、`application.log`、logging 幂等性、语义事件顺序、route、最终 graph path 和 payload 脱敏。
+它们验证 metadata、`events.jsonl`、`llm.jsonl`、`application.log`、单 active session handler、语义事件顺序、route、稳定 payload 字段和脱敏。graph path 只用于 graph 内部测试，不进入默认公共 event/result。
 
 ### 面试解释
 

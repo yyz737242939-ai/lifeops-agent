@@ -4,6 +4,7 @@ import sqlite3
 from typing import Any
 
 from app.runtime.models import RuntimeRequest
+from app.tools.models import ConfirmedAction, ToolCall
 from app.skills.models import SkillDefinition
 from app.skills.registry import SkillRegistry
 from app.skills.service import SkillService
@@ -31,6 +32,16 @@ def insert_test_run_record(conn: sqlite3.Connection, run_id: str = "run_1") -> N
 
 def create_test_skill_service() -> SkillService:
     return SkillService(SkillRegistry(), _NoSkillSelectionClient())
+
+
+def confirmed_action(
+    call: ToolCall, *, run_id: str = "run_test"
+) -> ConfirmedAction:
+    return ConfirmedAction.for_call(
+        run_id,
+        call,
+        expires_at="2099-01-01T00:00:00+00:00",
+    )
 
 
 class _NoSkillSelectionClient:

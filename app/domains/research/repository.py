@@ -324,9 +324,11 @@ class ResearchRepository:
         )
 
     def query_context_candidates(
-        self, query: str, budget_hint: int
+        self, query: str, budget_hint: int, *, topic_id: str | None = None
     ) -> tuple[ResearchContextCandidate, ...]:
-        rows = self._query_saved_content(query, include_sources=True, limit=100)
+        rows = self._query_saved_content(
+            query, include_sources=True, limit=100, topic_id=topic_id
+        )
         candidates: list[ResearchContextCandidate] = []
         used_chars = 0
         for row in rows:
@@ -349,7 +351,7 @@ class ResearchRepository:
         return tuple(candidates)
 
     def query_memory_candidates(
-        self, query: str, limit: int
+        self, query: str, limit: int, *, topic_id: str | None = None
     ) -> tuple[ResearchMemoryCandidate, ...]:
         return tuple(
             ResearchMemoryCandidate(
@@ -361,7 +363,7 @@ class ResearchRepository:
                 created_at=str(row["created_at"]),
             )
             for row in self._query_saved_content(
-                query, include_sources=False, limit=limit
+                query, include_sources=False, limit=limit, topic_id=topic_id
             )
         )
 
@@ -425,8 +427,15 @@ class ResearchRepository:
         return int(row["item_count"])
 
     def _query_saved_content(
-        self, query: str, *, include_sources: bool, limit: int
+        self,
+        query: str,
+        *,
+        include_sources: bool,
+        limit: int,
+        topic_id: str | None = None,
     ) -> list[sqlite3.Row]:
+        if topic_id is not None:
+            self._require_item("topic", topic_id)
         source_select = """
             SELECT s.id, 'source' AS item_kind, s.title, ss.summary AS content,
                    ss.provenance, s.created_at
@@ -450,11 +459,25 @@ class ResearchRepository:
             selects.insert(0, source_select)
         union_sql = " UNION ALL ".join(selects)
         return self._conn.execute(
-            f"""SELECT * FROM ({union_sql})
+            f"""SELECT * FROM ({union_sql}) AS saved
                 WHERE instr(lower(title || ' ' || content), lower(?)) > 0
+                AND (? IS NULL OR EXISTS (
+                    SELECT 1 FROM research_links AS link
+                    WHERE (
+                        link.from_kind = saved.item_kind
+                        AND link.from_id = saved.id
+                        AND link.to_kind = 'topic'
+                        AND link.to_id = ?
+                    ) OR (
+                        link.to_kind = saved.item_kind
+                        AND link.to_id = saved.id
+                        AND link.from_kind = 'topic'
+                        AND link.from_id = ?
+                    )
+                ))
                 ORDER BY created_at DESC, item_kind, id
                 LIMIT ?""",
-            (query, limit),
+            (query, topic_id, topic_id, topic_id, limit),
         ).fetchall()
 
     def _require_item(self, item_kind: str, item_id: str) -> None:

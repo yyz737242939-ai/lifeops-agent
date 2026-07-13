@@ -41,10 +41,11 @@ class ResearchReadService(
         require_non_empty_string(query, "query")
         if scope_id is not None:
             require_non_empty_string(scope_id, "scope_id")
-            raise ValueError("Research context scope_id is not supported yet.")
         if not isinstance(budget_hint, int) or isinstance(budget_hint, bool) or budget_hint < 1:
             raise ValueError("budget_hint must be a positive integer.")
-        return self._repository.query_context_candidates(query, budget_hint)
+        return self._repository.query_context_candidates(
+            query, budget_hint, topic_id=scope_id
+        )
 
     def query_memory_candidates(
         self,
@@ -56,10 +57,11 @@ class ResearchReadService(
         require_non_empty_string(query, "query")
         if scope_id is not None:
             require_non_empty_string(scope_id, "scope_id")
-            raise ValueError("Research memory scope_id is not supported yet.")
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 50:
             raise ValueError("limit must be between 1 and 50.")
-        return self._repository.query_memory_candidates(query, limit)
+        return self._repository.query_memory_candidates(
+            query, limit, topic_id=scope_id
+        )
 
     def search_saved_items(
         self,
