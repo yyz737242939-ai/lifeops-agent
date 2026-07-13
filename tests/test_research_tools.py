@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import unittest
 
+from app.common.time import utc_now_iso
+from app.domains.research.models import FetchedSourceDocument
 from app.policy.models import PolicyAction, PolicyDecision
 from app.domains.research.ports import FixtureResearchSourcePort
 from app.domains.research.repository import ResearchRepository
 from app.domains.research.service import ResearchService
 from app.domains.research.tools import (
+    BUILD_BRIEF_DRAFT_TOOL,
+    CREATE_NOTE_TOOL,
+    FETCH_BRIEFING_SOURCE_TOOL,
     FETCH_SOURCE_TOOL,
+    PARSE_ITEMS_TOOL,
+    RANK_ITEMS_TOOL,
+    SAVE_BRIEF_TOOL,
+    SEARCH_KNOWLEDGE_TOOL,
     SAVE_SOURCE_TOOL,
     build_research_tools,
 )
@@ -17,6 +26,25 @@ from app.tools.gateway import ToolGateway
 from app.tools.models import AllowedToolSet, ToolCall, ToolCallStatus
 from app.tools.registry import ToolRegistry
 from tests.helpers import create_test_connection
+
+
+class _FakeContentPort:
+    def fetch(self, source_key: str) -> FetchedSourceDocument:
+        return FetchedSourceDocument(
+            document_id="document_tool_test",
+            observation_id="observation_tool_test",
+            source_key=source_key,
+            title="Daily Papers",
+            url="https://huggingface.co/papers",
+            content_type="text/html",
+            content=(
+                '<a href="/papers/1">Agent workflow research</a>'
+                '<a href="/papers/2">Multimodal vision research</a>'
+            ),
+            content_hash="fixture-hash",
+            fetched_at=utc_now_iso(),
+            provenance="fixture:tool-chain",
+        )
 
 
 class ResearchToolsTest(unittest.TestCase):
@@ -33,6 +61,7 @@ class ResearchToolsTest(unittest.TestCase):
                 }
             ),
             ResearchRepository(self.conn),
+            content_port=_FakeContentPort(),
         )
         self.registry = ToolRegistry(build_research_tools(service))
         self.gateway = ToolGateway(self.registry)
@@ -80,7 +109,9 @@ class ResearchToolsTest(unittest.TestCase):
         self.assertEqual(saved.status, ToolCallStatus.SUCCEEDED)
         self.assertEqual(saved.evidence[0].evidence_type, "research_source_saved")
         row = self.conn.execute(
-            "SELECT url, provenance, summary FROM research_sources"
+            """SELECT s.url, ss.provenance, ss.summary
+               FROM research_sources AS s
+               JOIN research_source_snapshots AS ss ON ss.source_id = s.id"""
         ).fetchone()
         self.assertEqual(row["url"], "https://huggingface.co/papers")
         self.assertEqual(row["provenance"], "fixture:hf-daily")
@@ -107,6 +138,133 @@ class ResearchToolsTest(unittest.TestCase):
             self.conn.execute("SELECT COUNT(*) FROM research_sources").fetchone()[0],
             0,
         )
+
+    def test_briefing_chain_persists_only_after_confirmed_source_and_brief_writes(self) -> None:
+        fetched = self.gateway.execute(
+            ToolCall(
+                "call_brief_fetch",
+                FETCH_BRIEFING_SOURCE_TOOL,
+                {"source_key": "hf_daily_papers"},
+            ),
+            self._allowed("external_read"),
+        )
+        parsed = self.gateway.execute(
+            ToolCall(
+                "call_parse",
+                PARSE_ITEMS_TOOL,
+                {"document_id": fetched.output["document_id"], "limit": 10},
+            ),
+            self._allowed("read"),
+        )
+        ranked = self.gateway.execute(
+            ToolCall(
+                "call_rank",
+                RANK_ITEMS_TOOL,
+                {
+                    "item_set_id": parsed.output["item_set_id"],
+                    "limit": 5,
+                    "topic_filter": "agent",
+                },
+            ),
+            self._allowed("read"),
+        )
+        draft = self.gateway.execute(
+            ToolCall(
+                "call_build",
+                BUILD_BRIEF_DRAFT_TOOL,
+                {
+                    "item_set_id": ranked.output["item_set_id"],
+                    "title": "Hugging Face 简报",
+                },
+            ),
+            self._allowed("read"),
+        )
+
+        self.assertEqual(fetched.status, ToolCallStatus.SUCCEEDED)
+        self.assertEqual(parsed.status, ToolCallStatus.SUCCEEDED)
+        self.assertEqual(ranked.status, ToolCallStatus.SUCCEEDED)
+        self.assertEqual(len(ranked.output["items"]), 1)
+        self.assertEqual(draft.status, ToolCallStatus.SUCCEEDED)
+        self.assertIn("基于 Hugging Face 列表页可见信息", draft.output["body"])
+        self.assertIn("https://huggingface.co/papers/1", draft.output["body"])
+        self.assertEqual(
+            draft.output["source_urls"], ["https://huggingface.co/papers"]
+        )
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM research_briefs").fetchone()[0], 0
+        )
+
+        save_brief_call = ToolCall(
+            "call_save_brief", SAVE_BRIEF_TOOL, {"draft_id": draft.output["draft_id"]}
+        )
+        confirmation = self.gateway.execute(save_brief_call, self._allowed("write"))
+        self.assertEqual(confirmation.status, ToolCallStatus.REQUIRES_CONFIRMATION)
+
+        with SqliteUnitOfWork(self.conn):
+            saved_source = self.gateway.execute(
+                ToolCall(
+                    "call_save_brief_source",
+                    SAVE_SOURCE_TOOL,
+                    {"observation_id": fetched.output["observation_id"]},
+                ),
+                self._allowed("write"),
+                confirmed_tool_name=SAVE_SOURCE_TOOL,
+            )
+        with SqliteUnitOfWork(self.conn):
+            saved_brief = self.gateway.execute(
+                save_brief_call,
+                self._allowed("write"),
+                confirmed_tool_name=SAVE_BRIEF_TOOL,
+            )
+
+        self.assertEqual(saved_source.status, ToolCallStatus.SUCCEEDED)
+        self.assertEqual(saved_brief.status, ToolCallStatus.SUCCEEDED)
+        self.assertEqual(saved_brief.evidence[0].evidence_type, "research_brief_saved")
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM research_briefs").fetchone()[0], 1
+        )
+
+    def test_create_note_requires_confirmation_and_returns_evidence(self) -> None:
+        call = ToolCall(
+            "call_note",
+            CREATE_NOTE_TOOL,
+            {"title": "Guardrail notes", "body": "WRITE requires confirmation."},
+        )
+
+        confirmation = self.gateway.execute(call, self._allowed("write"))
+        self.assertEqual(confirmation.status, ToolCallStatus.REQUIRES_CONFIRMATION)
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM research_notes").fetchone()[0], 0
+        )
+
+        with SqliteUnitOfWork(self.conn):
+            saved = self.gateway.execute(
+                call,
+                self._allowed("write"),
+                confirmed_tool_name=CREATE_NOTE_TOOL,
+            )
+
+        self.assertEqual(saved.status, ToolCallStatus.SUCCEEDED)
+        self.assertEqual(saved.evidence[0].evidence_type, "research_note_created")
+        row = self.conn.execute("SELECT title, body FROM research_notes").fetchone()
+        self.assertEqual(row["title"], "Guardrail notes")
+
+        search = self.gateway.execute(
+            ToolCall(
+                "call_search",
+                SEARCH_KNOWLEDGE_TOOL,
+                {
+                    "query": "Guardrail",
+                    "item_kinds": ["note"],
+                    "limit": 10,
+                    "offset": 0,
+                },
+            ),
+            self._allowed("read"),
+        )
+        self.assertEqual(search.status, ToolCallStatus.SUCCEEDED)
+        self.assertEqual(search.output["items"][0]["item_kind"], "note")
+        self.assertEqual(search.output["next_offset"], 1)
 
     def _allowed(self, effect: str) -> AllowedToolSet:
         return resolve_allowed_tools(

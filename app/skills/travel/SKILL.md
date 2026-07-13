@@ -17,12 +17,12 @@ Help collect trip constraints, compare travel candidates, and prepare itinerary 
 - Do not read or write SQLite, Context, or Memory directly. Future operations must go through Policy-authorized tools and the Tool System.
 - Do not infer durable travel preferences from one request.
 
-## Planned workflow
+## Current workflow
 
 1. Collect destination, dates, budget, travelers, preferences, and constraints.
-2. Use future Policy-authorized fixture-backed read tools to obtain relevant candidates.
+2. Use the Policy-authorized fixture-backed calendar, weather, transport, lodging, and place read tools to obtain relevant candidates.
 3. Compare candidates and surface missing, stale, conflicting, or partial information.
 4. Build a draft itinerary without persisting it.
 5. Save only through an explicitly authorized tool after user confirmation.
 
-Travel tools, external Ports, and fixtures are added in later implementation steps. This skeleton does not authorize or execute tools.
+The current external-read tools return request-local typed observations and candidates. This Skill describes when they are useful; authorization still comes from Policy and the Tool System.

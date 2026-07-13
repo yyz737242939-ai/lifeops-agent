@@ -16,6 +16,8 @@
 
 输入、输出、依赖，以及本模块明确不负责的职责。
 
+如果本模块是业务 Domain，必须遵守 `plans/DOMAIN_CONTRACT_STANDARD.md`，并说明 shared contracts 的具体业务类型、scope ID、Tools、Ports 和明确偏差。
+
 ## 5. 数据模型 / 存储
 
 本模块需要的数据存放在哪里：SQLite 表、repository、JSON / JSONL 文件、普通日志文件、fixture、migration 或 request-local 状态。只有业务事实或适合关系查询的数据才默认进入 SQLite。

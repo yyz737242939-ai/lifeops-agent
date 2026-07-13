@@ -20,8 +20,8 @@
 - 阶段 3：Runtime Core / Intent / Policy 初版已完成，详见 `plans/modules/RUNTIME_CORE_PLAN.md` 和 `plans/modules/INTENT_POLICY_PLAN.md`。
 - 阶段 3.5：Observability 文件日志校正已完成，详见 `plans/modules/OBSERVABILITY_LOGGING_PLAN.md`。
 - 阶段 4：LangGraph Orchestration 骨架已完成，详见 `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md`。
-- 当前阶段：阶段 5 Skill System / Tool System 与 Domains。Skill System、Tool System 和两个最小 Domain 纵向切片已完成；Research / Travel 完整初版仍未完成。
-- 阶段 5 完成后进入阶段 6 ReAct Executor；施工前应创建并确认 `plans/modules/EXECUTOR_PLAN.md`。
+- 当前阶段：阶段 5 Skill System / Tool System 与 Domains 已完成；Skill System、Tool System、Research 与 Travel 完整初版均已验证关闭。
+- 下一阶段：阶段 6 ReAct Executor；施工前应创建并确认 `plans/modules/EXECUTOR_PLAN.md`。
 
 核心执行链路：
 
@@ -392,6 +392,7 @@ main.py
 
 ### 5.1 分层规则
 
+- 所有业务 Domain 遵守 `plans/DOMAIN_CONTRACT_STANDARD.md`；统一 Tool、Port、Planning/Context/Memory contracts 和关闭测试，业务字段仍由各 Domain 自己拥有。
 - `domains/*` 不直接读写 SQLite connection，只通过 repository / service。
 - `domains/*` 不依赖具体 LangChain、MCP 或 HTTP provider 类型；外部能力通过稳定 Port 和 adapter 接入。
 - Skill 只提供 prompt contribution、reference/source 声明和功能工作流说明，不执行工具或参与工具授权。
@@ -879,7 +880,7 @@ docs/RUNTIME_CONCEPTS.md
 - graph path trace。
 - route tests。
 
-### 阶段 5：Skill System / Tool System 与 Domains（进行中）
+### 阶段 5：Skill System / Tool System 与 Domains（已完成）
 
 目标：
 

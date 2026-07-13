@@ -4,13 +4,24 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+from app.common.time import utc_now_iso
+from app.domains.research.models import FetchedSourceDocument
 from app.domains.research.ports import FixtureResearchSourcePort
 from app.domains.research.repository import ResearchRepository
 from app.domains.research.service import ResearchService
 from app.domains.research.tools import (
+    FETCH_BRIEFING_SOURCE_TOOL,
     FETCH_SOURCE_TOOL,
     SAVE_SOURCE_TOOL,
     build_research_tools,
+)
+from app.domains.travel.adapters import FixturePlaceSearchAdapter
+from app.domains.travel.repository import TravelRepository
+from app.domains.travel.service import TravelService
+from app.domains.travel.tools import (
+    SAVE_ITINERARY_TOOL,
+    SEARCH_PLACES_TOOL,
+    build_travel_tools,
 )
 from app.intent.models import IntentDecision, IntentType
 from app.orchestration.graph import RuntimeOrchestrator
@@ -92,6 +103,68 @@ class Stage5GraphE2ETest(unittest.TestCase):
         self.assertEqual(guardrail_events[0]["action"], "deny")
         self.assertEqual(guardrail_events[0]["reason_code"], "tool_not_allowed")
 
+    def test_graph_executes_real_briefing_handler_without_exposing_raw_html(self) -> None:
+        orchestrator = self._orchestrator(
+            ToolCall(
+                "call_briefing_fetch",
+                FETCH_BRIEFING_SOURCE_TOOL,
+                {"source_key": "hf_daily_papers"},
+            )
+        )
+
+        state = orchestrator.invoke(_request(), trace=self.trace)
+
+        result = state["result"].tool_result
+        self.assertEqual(state["result"].status, RuntimeStatus.OK)
+        self.assertEqual(result["tool_name"], FETCH_BRIEFING_SOURCE_TOOL)
+        self.assertEqual(result["output"]["source_key"], "hf_daily_papers")
+        self.assertIn("document_id", result["output"])
+        self.assertIn("observation_id", result["output"])
+        self.assertNotIn("content", result["output"])
+        self.assertNotIn("Agent fixture body", repr(result))
+
+    def test_graph_executes_real_travel_handler_with_typed_observation(self) -> None:
+        orchestrator = self._travel_orchestrator(
+            ToolCall(
+                "call_places",
+                SEARCH_PLACES_TOOL,
+                {"destination": "Tokyo", "query": "historic places"},
+            )
+        )
+
+        state = orchestrator.invoke(_request(), trace=self.trace)
+
+        result = state["result"].tool_result
+        self.assertEqual(state["result"].status, RuntimeStatus.OK)
+        self.assertEqual(result["tool_name"], SEARCH_PLACES_TOOL)
+        self.assertEqual(result["output"]["status"], "success")
+        self.assertTrue(result["output"]["candidates"])
+        self.assertIn("provenance", result["output"]["observation"])
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM travel_itineraries").fetchone()[0],
+            0,
+        )
+
+    def test_graph_rejects_travel_write_hidden_by_external_read_policy(self) -> None:
+        orchestrator = self._travel_orchestrator(
+            ToolCall(
+                "call_save_travel",
+                SAVE_ITINERARY_TOOL,
+                {"draft_id": "forged", "idempotency_key": "forged"},
+            )
+        )
+
+        state = orchestrator.invoke(_request(), trace=self.trace)
+
+        self.assertEqual(state["result"].status, RuntimeStatus.UNSUPPORTED)
+        self.assertEqual(
+            state["result"].tool_result["error"]["code"], "tool_not_allowed"
+        )
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM travel_itineraries").fetchone()[0],
+            0,
+        )
+
     def _orchestrator(self, call: ToolCall) -> RuntimeOrchestrator:
         skill_registry = SkillRegistry(discover_skills(Path("app/skills")))
         return RuntimeOrchestrator(
@@ -114,8 +187,29 @@ class Stage5GraphE2ETest(unittest.TestCase):
                 }
             ),
             ResearchRepository(self.conn),
+            content_port=_FixtureBriefingContentPort(),
         )
         return ToolRuntime.from_registry(ToolRegistry(build_research_tools(service)))
+
+    def _travel_orchestrator(self, call: ToolCall) -> RuntimeOrchestrator:
+        skill_registry = SkillRegistry(discover_skills(Path("app/skills")))
+        return RuntimeOrchestrator(
+            skill_service=SkillService(skill_registry, TravelSkillSelectionClient()),
+            intent_service=ReadIntentService(),
+            policy_service=ExternalReadPolicyService(),
+            tool_runtime_factory=self._travel_tool_runtime,
+            tool_call_selection_client=FixedToolCallSelectionClient(call),
+        )
+
+    def _travel_tool_runtime(self) -> ToolRuntime:
+        root = Path("tests/fixtures/travel")
+        service = TravelService(
+            TravelRepository(self.conn),
+            place_port=FixturePlaceSearchAdapter(
+                root / "places_tokyo.json", root / "provider_failures.json"
+            ),
+        )
+        return ToolRuntime.from_registry(ToolRegistry(build_travel_tools(service)))
 
 
 class ResearchSkillSelectionClient:
@@ -125,6 +219,31 @@ class ResearchSkillSelectionClient:
         skill_metadata: tuple[SkillDefinition, ...],
     ) -> dict[str, Any]:
         return {"selected_skill_ids": ["research"], "reason": "Research applies."}
+
+
+class TravelSkillSelectionClient:
+    def select(
+        self,
+        request: RuntimeRequest,
+        skill_metadata: tuple[SkillDefinition, ...],
+    ) -> dict[str, Any]:
+        return {"selected_skill_ids": ["travel"], "reason": "Travel applies."}
+
+
+class _FixtureBriefingContentPort:
+    def fetch(self, source_key: str) -> FetchedSourceDocument:
+        return FetchedSourceDocument(
+            document_id="document_graph_briefing",
+            observation_id="observation_graph_briefing",
+            source_key=source_key,
+            title="Hugging Face Daily Papers",
+            url="https://huggingface.co/papers",
+            content_type="text/html",
+            content='<a href="/papers/1">Agent fixture body</a>',
+            content_hash="graph-briefing-hash",
+            fetched_at=utc_now_iso(),
+            provenance="fixture:graph-briefing",
+        )
 
 
 class FixedToolCallSelectionClient:

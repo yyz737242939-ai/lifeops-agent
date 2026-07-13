@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "query": {
+    "location": "Tokyo",
+    "starts_on": "2026-10-01",
+    "ends_on": "2026-10-03"
+  },
+  "observation": {
+    "observation_id": "travel-observation-weather-tokyo-october",
+    "provider": "fixture-weather",
+    "source_ref": "fixture:travel:weather:tokyo-october",
+    "observed_at": "2026-07-13T00:00:00+00:00",
+    "expires_at": "2027-01-01T00:00:00+00:00",
+    "provenance": "fixture:travel:weather:tokyo-october:v1"
+  },
+  "candidates": [
+    {
+      "candidate_id": "weather-tokyo-2026-10-01",
+      "location": "Tokyo",
+      "date": "2026-10-01",
+      "condition": "partly cloudy fixture",
+      "temperature_min": 17.0,
+      "temperature_max": 24.0,
+      "temperature_unit": "celsius"
+    }
+  ]
+}

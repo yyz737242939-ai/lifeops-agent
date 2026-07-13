@@ -4,7 +4,7 @@ LifeOps Agent 是一个本地 Python 项目，用来学习和构建 Agent Runtim
 
 当前仓库处于 Runtime 重构。V0 代码、数据、日志、测试、旧计划和旧入口统一保存在 `legacy_v0/`，作为历史对照。当前工作使用清爽的 `app/`、`docs/` 和 `plans/` 结构。
 
-当前进度：阶段 0-4 已完成；阶段 5 的 Skill System、Tool System 和两个最小 Domain 纵向切片已完成，Research / Travel 完整初版仍在施工。
+当前进度：阶段 0-5 已完成；Skill System、Tool System、Research / Personal Knowledge 与 Travel Domain 完整初版均已关闭。下一步是在确认模块计划后进入阶段 6 ReAct Executor。
 
 ## 项目目标
 
@@ -37,6 +37,7 @@ LifeOps Agent 有两个目标：
 - `docs/AGENT_LEARNING_LINKS.md`：已经学到或当前阶段正在学习的权威文档和官方学习链接索引，递增维护，不提前收录未学习主题。
 - `docs/MIGRATION_INDEX.md`：V0 到当前实现的迁移、重写、归档和延后记录。
 - `plans/RUNTIME_REFACTOR_PLAN.md`：总路线图。
+- `plans/DOMAIN_CONTRACT_STANDARD.md`：Research、Travel 和未来业务 Domain 共享的 Port、Tool、只读接口、安全与测试规范。
 - `plans/modules/*_PLAN.md`：聚焦的模块实施计划。
 - `CHANGELOG.md`：里程碑历史，只在明确要求时更新。
 

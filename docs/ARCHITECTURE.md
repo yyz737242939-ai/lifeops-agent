@@ -136,7 +136,7 @@ Skill System 当前实现位于 `app/skills/`。`SkillDefinition`、`LoadedSkill
 
 `discover_skills(root)` 使用 LifeOps 原生薄实现扫描根目录的直接子目录。当前只读取每个 `SKILL.md` frontmatter 中的 `name` 和 `description`，校验 Agent Skills 命名约束、父目录同名、必填项和未知字段；不读取 Markdown body、reference、script 或 asset。Deep Agents / LangChain Skills 只作为文件约定和 progressive disclosure 参考，不是 runtime 依赖。
 
-当前内置 Skill skeleton 是 `research` 和 `travel`。它们的 `SKILL.md` body 只描述领域用途、临时结果与持久化事实边界以及 planned workflow；尚未实现的 source、helper、Travel Port 和 tool 不作为可用功能暴露。
+当前内置 Skills 是 `research` 和 `travel`。它们的 `SKILL.md` body 描述领域用途、临时结果与持久化事实边界以及当前 workflow；Skill 只提供候选能力说明，实际 Tool 暴露仍由 selected Skill 与 Policy effect 求交。
 
 `select_skills(request, skill_metadata, llm)` 把 `RuntimeRequest` 和全量 Skill metadata 交给 `SkillSelectionClient`。该 client 在初始化时从 `.env` 读取 `OPENROUTER_API_KEY`、`OPENROUTER_BASE_URL` 和 `MODEL`，通过 OpenAI-compatible Chat Completions 请求 JSON 结果；请求只包含用户请求以及全部 Skill ID/description。provider 返回值先经过 Pydantic 结构解析，随后由 LifeOps 校验只能包含 `selected_skill_ids` 和非空 `reason`，并拒绝重复或未知 ID。该接口不预先按 Intent、关键词或 Domain 缩小候选集，也不依赖 Agent 框架。
 
@@ -262,9 +262,33 @@ Runtime 的事实来源是：
 
 Research / Travel 是业务逻辑分组：各自拥有 models、service、repository 和 tools。Planner / Executor 位于 Domain 之上，一个 PlanRun 可以交叉调用多个 Domain 的 tools。
 
-Research 当前完成最小 Source 纵向切片，位于 `app/domains/research/`。Research Tool 绑定 `skill_ids=("research",)`；`FixtureResearchSourcePort` 只接受显式声明的 source key，返回带 content hash、fetched time 和 fixture provenance 的 request-local `ExternalObservation`。`ResearchService` 暂存 observation，未确认时不写 SQLite。`research.save_source` 只接收当前 service 已持有的 observation ID，经 Research Skill candidate、Policy write effect、Gateway WRITE confirmation 和 shared SQLite transaction 后由 `ResearchRepository` 保存 `ResearchSource`，并返回 `research_source_saved` evidence。模型不能通过 Tool 参数自行提供 provenance。
+Research 位于 `app/domains/research/`。当前领域模型与 SQLite 基础已包含 Source、SourceSnapshot、Topic、Note、Brief、固定 snapshot 的 Brief-Source 引用、KnowledgeLink 和 append-only Revision；KnowledgeLink / Revision 的多类型引用由 repository 在写入前检查目标存在性。`ResearchBriefDraft` 与 `ExternalObservation` 保持 request-local，只有 service 当前持有的临时对象才能进入后续保存路径。
 
-Travel 当前完成最小 Itinerary 纵向切片，位于 `app/domains/travel/`。Travel Tool 绑定 `skill_ids=("travel",)`；`FixtureTravelOptionPort` 只接受显式声明的 destination，返回带 `observed_at`、一小时 `expires_at` 和 fixture provenance 的 request-local `CandidateOption`，其 summary 明确不代表 booking。`TravelService` 暂存 option，`travel.save_itinerary` 只按当前 option ID 经 Travel Skill candidate、Policy write effect、Gateway confirmation 和 transaction 边界保存 `Itinerary`，成功返回 `travel_itinerary_saved` evidence。Travel 接入没有修改 Tool Runtime 核心。
+Research Source 纵向切片已接入 Tool Runtime。Research Tool 绑定 `skill_ids=("research",)`；`FixtureResearchSourcePort` 只接受显式声明的 source key，返回带 content hash、fetched time 和 fixture provenance 的 request-local `ExternalObservation`。`ResearchService` 暂存 observation，未确认时不写 SQLite。`research.save_source` 只接收当前 service 已持有的 observation ID，经 Research Skill candidate、Policy write effect、Gateway WRITE confirmation 和 shared SQLite transaction 后由 `ResearchRepository` 保存 `ResearchSource`，并返回 `research_source_saved` evidence。模型不能通过 Tool 参数自行提供 provenance。
+
+schema v5 将稳定的 Source identity（URL、source type、title）与每次抓取的 snapshot（summary、content hash、fetched/published metadata、provenance）分表。同 URL 新内容追加 snapshot；全局重复 content hash fail-closed。`research_brief_sources` 同时固定 `source_id` 与保存 Brief 时的 `snapshot_id`，因此后续 Source 刷新不会改变旧 Brief 的引用事实。当前没有删除 Tool；未来若增加删除能力，必须采用归档/软删除并保持这些引用。
+
+Research Skill 当前在 `app/skills/research/sources/` 声明 `hf_daily_papers` 和 `hf_blog`。`load_research_source(...)` 只把稳定 source key 解析成经过 traversal、schema、HTTPS host 和精确 URL allowlist 校验的 `ResearchSourceDefinition`；加载声明不等于执行网络访问，HTTP adapter 与 manifest loader 保持分离。
+
+Research external-read 的 typed 边界已实现为 `ResearchContentPort` / `HuggingFaceResearchContentPort`。adapter 先加载可信 source declaration，再限制 HTTP status、最终 URL redirect、HTML content type、响应大小、timeout 和解码失败，返回含 raw HTML、hash、fetched time 和 provenance 的 request-local `FetchedSourceDocument`。`ResearchService` 只按当前 request 已取得的 `document_id` 调用解析；raw HTML 不进入 SQLite。`parse_research_items`、`dedupe_research_items`、`rank_research_items` 是无网络、无存储副作用的 deterministic 函数，输出 typed `ResearchItem`。
+
+临时 briefing 已暴露 `research.fetch_briefing_source`、`research.parse_items`、`research.rank_items`、`research.build_brief_draft` 四个 Tool，并统一经过 Skill candidate、Policy effect、Guardrail 和 Gateway。rank 支持 deterministic topic filter。Tool 输出不包含 raw HTML；document、item set 和 `ResearchBriefDraft` 都只存在于 request-local `ResearchService`。Draft 保存来源 URL，而不是把临时 item ID 冒充长期 Source ID；保存 Brief 时 repository 只接受已经存在于 `research_sources` 的 URL。当前阶段 5 Direct Executor 每个 run 只选择一个 Tool，因此 compiled Graph 尚不能连续完成四步链路；阶段 6 ReAct Executor 将复用同一 Tool contract 完成循环调度。
+
+Research WRITE 当前包含 `research.save_source`、`research.save_brief` 和 `research.create_note`。briefing fetch 会为同一个 list-page document 生成 request-local observation，使 Source 可以先经过独立 WRITE 保存；Brief WRITE 只接收 request-local `draft_id`，repository 会把 draft 的 source URL 解析到已经保存的 `research_sources`，任何缺失来源都会 fail-closed，不能由 Brief WRITE 隐式创建 Source。Note WRITE 接收 title/body。三个 WRITE 都经过 Policy write effect、Gateway confirmation、shared transaction 和 post-Guardrail evidence；当前 confirmation 仍只绑定 Tool 名，参数摘要、过期和跨 run token 留给后续 Interaction Safety State。
+
+所有业务 Domain 遵守 `plans/DOMAIN_CONTRACT_STANDARD.md`，共享 `DomainPlanningReadModel.get_planning_snapshot(scope_id)`、`DomainContextProvider.query_context_candidates(...)` 和 `DomainMemoryCandidateProvider.query_memory_candidates(...)`。统一的是方法语义和安全边界，snapshot/candidate 业务类型仍归各 Domain 所有。
+
+Research 的 `ResearchReadService` 实现三个共享 contract：planning snapshot 返回 Topic 的资料覆盖计数、最近 Brief 标题和以 `KnowledgeLink(relation="unresolved_question")` 表达的未解决问题；Context 按 query 与字符预算返回带 provenance / estimated size 的 Source、Note、Brief candidates；Memory 只返回用户确认保存的 Note / Brief candidates，不包含 Source，也不写 Memory。Research planning scope 是 Topic ID；Context/Memory 当前只支持全局 query，对非空 scope 明确拒绝。SQL 保持在 `ResearchRepository` 内。Domain 另提供稳定排序的 `list_topics`、`search_saved_items(..., limit, offset)` 和模型可见 `research.search_knowledge` READ Tool。
+
+Travel 位于 `app/domains/travel/`，当前已有 Trip / TravelConstraint 长期事实、五个 typed external Ports 和 fixture-backed EXTERNAL_READ Tools。`travel.check_calendar_availability`、`travel.get_weather`、`travel.search_transport`、`travel.search_lodging`、`travel.search_places` 统一返回 request-local `ExternalLookupResult`，其中 observation 携带 provider、source reference、observed/expires time 和 provenance；candidate 只能引用当前 observation ID，success/no-results/partial-failure/failed 与 retryable provider failure 保持结构化。聚合 `travel.search_options` 已从 Tool Registry 删除，不再与五个细分 Tool 重复暴露。
+
+`travel.compare_options` 只接受当前 request-local observation IDs，把候选按保存的 Trip destination / budget constraints 生成 `CandidateAssessment` 和 `TravelComparison`；无法判断的约束保持 unresolved，不伪装成匹配。`travel.build_itinerary_draft` 再只接受该 comparison 中的 candidate IDs，拒绝伪造、冲突或过期候选，并为同一 Trip 生成 request-local 递增 version。comparison / draft 都不写 SQLite，也不代表 booking。
+
+Itinerary WRITE 已迁移为 draft-based 保存：`travel.save_itinerary` 只接受当前 request-local `draft_id` 与显式 idempotency key，经 Travel Skill candidate、Policy write effect、Gateway confirmation 和 transaction 原子保存 `Itinerary`、`ItineraryItem` 与 itinerary `TravelDecision`，成功返回 `travel_itinerary_saved` evidence。相同 key + draft 返回同一长期事实；不同 draft 复用 key fail-closed。未安排时间的 Place item 保持空时间，不伪造日程。旧 `CandidateOption`、`TravelOptionPort` 和聚合 `search_options()` 路径已删除。Travel 接入没有修改 Tool Runtime 核心。
+
+跨 Domain 资料引用使用 `app/domains/references.py` 的通用 `KnowledgeReference` 与 `KnowledgeReferenceResolver`。Travel 的 `travel_knowledge_refs` 只保存稳定 reference ID、domain、item kind 和 item ID，不复制 Research 正文，也不 import Research repository。resolver 以 structured `resolved/unavailable` 返回只读摘要；解析失败不会阻止读取 Trip 主体。
+
+`TravelReadService` 实现共享 `DomainPlanningReadModel`、`DomainContextProvider` 和 `DomainMemoryCandidateProvider`，scope ID 固定为 Trip ID。Planning snapshot 只表达持久化约束覆盖、缺失约束、已保存 itinerary 与待决策项，不泄漏 request-local candidate/draft；Context candidates 受 budget 限制并携带 provenance；Memory candidates 只来自显式保存的 transport/lodging/other constraints，不从历史 itinerary 自动推断偏好。
 
 PlanStep 不自动转换成长期 Task。只有绑定当前用户授权、通过 Tool Guardrails、成功执行并产生 evidence 的 Domain WRITE，才能创建或修改 Source、Note、ResearchBrief、Trip、Itinerary 等长期事实。
 

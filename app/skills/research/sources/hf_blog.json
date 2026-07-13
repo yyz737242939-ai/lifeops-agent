@@ -1,0 +1,7 @@
+{
+  "source_key": "hf_blog",
+  "name": "Hugging Face Blog",
+  "url": "https://huggingface.co/blog",
+  "content_type": "html",
+  "description": "Hugging Face team and community blog posts."
+}

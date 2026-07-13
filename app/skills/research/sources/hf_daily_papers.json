@@ -1,0 +1,7 @@
+{
+  "source_key": "hf_daily_papers",
+  "name": "Hugging Face Daily Papers",
+  "url": "https://huggingface.co/papers",
+  "content_type": "html",
+  "description": "Trending AI papers listed by Hugging Face Daily Papers."
+}

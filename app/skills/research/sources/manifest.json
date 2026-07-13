@@ -1,0 +1,10 @@
+{
+  "sources": {
+    "hf_daily_papers": {
+      "path": "sources/hf_daily_papers.json"
+    },
+    "hf_blog": {
+      "path": "sources/hf_blog.json"
+    }
+  }
+}

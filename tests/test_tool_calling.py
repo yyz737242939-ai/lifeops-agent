@@ -10,6 +10,7 @@ from app.domains.research.ports import FixtureResearchSourcePort
 from app.domains.research.repository import ResearchRepository
 from app.domains.research.service import ResearchService
 from app.domains.research.tools import (
+    FETCH_BRIEFING_SOURCE_TOOL,
     FETCH_SOURCE_TOOL,
     SAVE_SOURCE_TOOL,
     build_research_tools,
@@ -58,7 +59,10 @@ class DirectToolExecutionTest(unittest.TestCase):
             selection_client=client,
         )
 
-        self.assertEqual([item["name"] for item in client.catalog], [FETCH_SOURCE_TOOL])
+        self.assertEqual(
+            [item["name"] for item in client.catalog],
+            [FETCH_BRIEFING_SOURCE_TOOL, FETCH_SOURCE_TOOL],
+        )
         self.assertNotIn(SAVE_SOURCE_TOOL, repr(client.catalog))
         self.assertEqual(state["result"].status, RuntimeStatus.OK)
         self.assertEqual(state["result"].tool_result["status"], ToolCallStatus.SUCCEEDED)

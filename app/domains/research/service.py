@@ -2,8 +2,27 @@
 
 from __future__ import annotations
 
-from app.domains.research.models import ExternalObservation, ResearchSource
-from app.domains.research.ports import ResearchSourcePort
+from app.domains.research.models import (
+    ExternalObservation,
+    FetchedSourceDocument,
+    KnowledgeLink,
+    ResearchBrief,
+    ResearchBriefDraft,
+    ResearchNote,
+    ResearchItem,
+    ResearchItemSet,
+    ResearchRevision,
+    ResearchSavedItem,
+    ResearchSource,
+    ResearchTopic,
+)
+from app.common.ids import new_id
+from app.common.time import utc_now_iso
+from app.domains.research.ports import ResearchContentPort, ResearchSourcePort
+from app.domains.research.processing import (
+    parse_research_items,
+    rank_research_items,
+)
 from app.domains.research.repository import ResearchRepository
 
 
@@ -14,10 +33,16 @@ class ResearchService:
         self,
         source_port: ResearchSourcePort,
         repository: ResearchRepository,
+        *,
+        content_port: ResearchContentPort | None = None,
     ) -> None:
         self._source_port = source_port
         self._repository = repository
+        self._content_port = content_port
         self._observations: dict[str, ExternalObservation] = {}
+        self._documents: dict[str, FetchedSourceDocument] = {}
+        self._item_sets: dict[str, ResearchItemSet] = {}
+        self._brief_drafts: dict[str, ResearchBriefDraft] = {}
 
     def fetch_source(self, source_key: str) -> ExternalObservation:
         observation = self._source_port.fetch(source_key)
@@ -30,3 +55,141 @@ class ResearchService:
         except KeyError as exc:
             raise ValueError("observation_id is not available in this request.") from exc
         return self._repository.save_source(observation)
+
+    def fetch_content(self, source_key: str) -> FetchedSourceDocument:
+        if self._content_port is None:
+            raise RuntimeError("Research content port is not configured.")
+        document = self._content_port.fetch(source_key)
+        self._documents[document.document_id] = document
+        self._observations[document.observation_id] = ExternalObservation(
+            observation_id=document.observation_id,
+            source_key=document.source_key,
+            title=document.title,
+            url=document.url,
+            summary=f"Fetched declared HTML list page: {document.title}.",
+            content_hash=document.content_hash,
+            fetched_at=document.fetched_at,
+            provenance=document.provenance,
+        )
+        return document
+
+    def parse_items(
+        self, document_id: str, *, limit: int = 20
+    ) -> ResearchItemSet:
+        try:
+            document = self._documents[document_id]
+        except KeyError as exc:
+            raise ValueError("document_id is not available in this request.") from exc
+        items = parse_research_items(document, limit)
+        if not items:
+            raise ValueError("No Research items were parsed from the document.")
+        item_set = ResearchItemSet(
+            item_set_id=new_id("research-item-set"),
+            document_ids=(document.document_id,),
+            items=items,
+            created_at=utc_now_iso(),
+        )
+        self._item_sets[item_set.item_set_id] = item_set
+        return item_set
+
+    def rank_items(
+        self,
+        item_set_id: str,
+        *,
+        limit: int = 20,
+        topic_filter: str | None = None,
+    ) -> ResearchItemSet:
+        item_set = self._get_item_set(item_set_id)
+        ranked = ResearchItemSet(
+            item_set_id=new_id("research-item-set"),
+            document_ids=item_set.document_ids,
+            items=rank_research_items(item_set.items, limit, topic_filter),
+            created_at=utc_now_iso(),
+        )
+        self._item_sets[ranked.item_set_id] = ranked
+        return ranked
+
+    def build_brief_draft(
+        self, item_set_id: str, title: str
+    ) -> ResearchBriefDraft:
+        item_set = self._get_item_set(item_set_id)
+        body_lines = ["基于 Hugging Face 列表页可见信息：", ""]
+        for item in item_set.items:
+            topic = item.topic_hint or "other"
+            body_lines.append(
+                f"- [{item.title}]({item.url})（{item.source_key}；{topic}）"
+            )
+        draft = ResearchBriefDraft(
+            draft_id=new_id("research-brief-draft"),
+            title=title,
+            body="\n".join(body_lines),
+            source_urls=tuple(
+                dict.fromkeys(
+                    self._documents[document_id].url
+                    for document_id in item_set.document_ids
+                )
+            ),
+            provenance="request-local:hugging-face-list-pages",
+            created_at=utc_now_iso(),
+        )
+        self.register_brief_draft(draft)
+        return draft
+
+    def _get_item_set(self, item_set_id: str) -> ResearchItemSet:
+        try:
+            return self._item_sets[item_set_id]
+        except KeyError as exc:
+            raise ValueError("item_set_id is not available in this request.") from exc
+
+    def register_brief_draft(self, draft: ResearchBriefDraft) -> None:
+        """Keep a generated draft request-local until an authorized save runs."""
+        self._brief_drafts[draft.draft_id] = draft
+
+    def create_topic(self, name: str, description: str) -> ResearchTopic:
+        return self._repository.create_topic(name, description)
+
+    def create_note(self, title: str, body: str) -> ResearchNote:
+        return self._repository.create_note(title, body)
+
+    def save_brief(self, draft_id: str) -> ResearchBrief:
+        try:
+            draft = self._brief_drafts[draft_id]
+        except KeyError as exc:
+            raise ValueError("draft_id is not available in this request.") from exc
+        return self._repository.save_brief(draft)
+
+    def link_items(
+        self,
+        from_kind: str,
+        from_id: str,
+        to_kind: str,
+        to_id: str,
+        relation: str,
+    ) -> KnowledgeLink:
+        return self._repository.link_items(
+            from_kind, from_id, to_kind, to_id, relation
+        )
+
+    def append_revision(
+        self, item_kind: str, item_id: str, content: str
+    ) -> ResearchRevision:
+        return self._repository.append_revision(item_kind, item_id, content)
+
+    def list_topics(self, *, limit: int = 50, offset: int = 0) -> tuple[ResearchTopic, ...]:
+        if not 1 <= limit <= 100 or offset < 0:
+            raise ValueError("Topic pagination is invalid.")
+        return self._repository.list_topics(limit, offset)
+
+    def search_saved_items(
+        self,
+        query: str,
+        item_kinds: tuple[str, ...],
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> tuple[ResearchSavedItem, ...]:
+        from app.domains.research.read_models import ResearchReadService
+
+        return ResearchReadService(self._repository).search_saved_items(
+            query, item_kinds, limit=limit, offset=offset
+        )

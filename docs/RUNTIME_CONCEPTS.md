@@ -53,7 +53,7 @@
 
 ## 阶段 5 设计术语表
 
-本节记录阶段 5 已确认、正在用于模块计划的术语。它们是设计边界，不表示对应代码已经实现。
+本节记录阶段 5 已确认并已用于 Skill、Tool、Research 与 Travel 实现的术语。
 
 - `SkillDefinition`：Skill 的轻量声明，包含 ID、说明、routing metadata 和声明式资源索引；不是可执行工具。
 - `PromptContribution`：selected Skill 提供给未来 Context/prompt assembly 的一段有来源、可预算的说明；不是完整 prompt，也不是业务事实。
@@ -64,9 +64,9 @@
 - `ExecutionEvidence`：证明工具真实执行结果的结构化证据。assistant 文本、Planner 输出或 LLM summary 不是 evidence。
 - `External Port`：Domain 声明的外部能力接口，例如天气或交通查询；fixture、MCP 和 HTTP adapter 可以分别实现它。
 - `ExternalObservation`：某个 provider 在某时刻返回的临时观察，带 provenance 和有效期；它不是长期业务事实。
-- `DomainContextProvider`：未来 Context Engine 获取 Domain 候选信息的窄接口；Domain 不负责决定最终 prompt。
+- `DomainContextProvider`：未来 Context Engine 获取 Domain 候选信息的共享窄接口；统一方法是 `query_context_candidates(...)`，Domain 不负责决定最终 prompt。
 - `PlanningReadModel`：为 Planner 准备的只读、稳定、领域化快照；Planner 不读取 repository internals。
-- `MemoryCandidateProvider`：向未来 Memory 模块提供候选的只读接口；候选不会自动成为长期 Memory。
+- `DomainMemoryCandidateProvider`：向未来 Memory 模块提供候选的共享只读接口；候选不会自动成为长期 Memory。
 - `ResearchBriefDraft`：基于临时 source observation 生成的简报草案；只有用户确认保存后才成为 `ResearchBrief` 业务事实。
 - `ItineraryDraft`：基于 Travel constraints 和外部 observation 生成的行程草案；只有用户确认并成功 WRITE 后才成为持久化 Itinerary。
 - `Fixture Adapter`：使用固定测试数据实现 External Port 的 adapter，用于离线开发和 deterministic Eval；不是简单返回任意假值的无契约 mock。
@@ -93,7 +93,7 @@ Checkpoint restore        != side-effect rollback
 
 Tool handler 接收完整 `ToolCall`，而不是只有 arguments；这样 handler 返回的 `ToolResult` 可以绑定原始 `call_id` 和 `tool_name`，post-Guardrail 能验证 result identity。Domain handler 仍只读取 `call.arguments` 作为业务输入，不能绕过 Gateway。
 
-Research 与 Travel 已用两条最小纵向切片验证同一 Tool Runtime：外部 READ 先产生 request-local observation/candidate，WRITE 只接受该临时对象的 ID，用户确认后才由 Domain repository 保存长期事实并产生 evidence。Domain 差异留在 model/service/repository/Port，Policy、Authorization、Guardrail 和 Gateway 不按 Domain 分叉。
+Research 与 Travel 已验证同一 Tool Runtime：外部 READ 先产生 request-local observation/candidate，后续 compare/draft 只消费当前 service 持有的稳定 ID；WRITE 只接受当前 observation/draft ID 与必要幂等 key，用户确认后才由 Domain repository 保存长期事实并产生 evidence。Travel 的 draft-based WRITE 会原子保存 Itinerary/items/decision，未安排时间的 Place item不伪造日程。Domain 差异留在 model/service/repository/Port，Policy、Authorization、Guardrail 和 Gateway 不按 Domain 分叉。
 
 当前不实现 LangChain `StructuredTool` adapter。是否使用框架 adapter 的判断标准不是“框架提供了 Tool 类”，而是项目是否已有真实 LangChain 调用方，以及 adapter 是否能减少 schema/invocation glue。当前 LifeOps 已直接拥有 catalog、ToolCall、Gateway 和 Result；adapter 还必须注入 request-local authorization/confirmation/trace，因此净复杂度更高。未来若引入 agent 或 ToolNode，adapter 只能转换边界，不能成为新的 handler 入口或安全事实源。
 
@@ -637,3 +637,87 @@ Storage 不负责 intent、policy、planning、tool execution 或业务语义。
 - SQLite / Local Persistence 相关链接维护在 `docs/AGENT_LEARNING_LINKS.md`。
 - 本项目：`app/storage/`
 - 本项目：`plans/modules/STORAGE_SQLITE_PLAN.md`
+
+## Domain Read Model 与 Candidate Provider
+
+### 解决什么问题
+
+Planner、Context Engine 和 Memory 都需要读取 Domain 数据，但如果它们直接扫描 Research SQLite 表，就会依赖内部 schema、绕过预算边界，并把业务事实与运行时选择混在一起。
+
+### 核心概念
+
+- Read Model：为特定消费者准备的紧凑、稳定、只读快照，不等同于完整 Domain model。
+- Candidate Provider：按 query、limit 或 budget 返回候选；候选仍不是最终 Context 或 Memory。
+- Fake consumer contract test：用最小假的消费者验证 Protocol 是否足够，不提前实现真正的下游模块。
+
+### 当前 runtime 实现
+
+共享 `DomainPlanningReadModel` 返回 Domain planning snapshot；`DomainContextProvider` 返回带 provenance 和 budget estimate 的 candidates；`DomainMemoryCandidateProvider` 只返回 Memory 评估候选。Research 用 Topic ID 实现 planning scope，并返回 Source / Note / Brief 相关类型。SQLite 查询由 `ResearchRepository` 持有，`ResearchReadService` 实现三个共享 Protocol。
+
+### 输入 / 输出 / 不负责什么
+
+输入是 topic ID，或 query 加 budget / limit。输出是 immutable snapshot 或 candidate tuple。它们不负责规划、不组装最终 Context、不写 Memory、不授权 Tool，也不读取 request-local raw HTML。
+
+### 常见失败模式
+
+- 下游模块直接依赖表结构。
+- Context 查询没有预算上限。
+- 把 candidate 自动升级成 Memory。
+- 将未保存的临时 observation 混入长期候选。
+
+### 如何测试和观察
+
+使用 fake Planner / Context / Memory consumer 做 contract tests，并用 380 条 deterministic seed 验证分页和预算结果稳定。
+
+### 面试解释
+
+可以这样讲：Domain 保留事实所有权，同时为不同 runtime 消费者提供窄只读接口。Planner 得到的是规划快照，Context 得到的是预算内候选，Memory 得到的是可评估候选；三者都不能因为“读到了数据”就获得写入权限。
+
+### 相关项目文件
+
+- `app/domains/research/read_models.py`
+- `app/domains/research/repository.py`
+- `tests/test_research_read_models.py`
+- `tests/test_research_long_term_fixtures.py`
+
+## Source Identity 与 Fetch Snapshot
+
+### 解决什么问题
+
+同一个 URL 会被重复抓取且内容可能变化。如果把 URL identity、摘要、content hash 和 fetched time 放在一行里覆盖更新，旧 Brief 的来源会随最新抓取漂移，无法解释当时依据的版本。
+
+### 核心概念
+
+- Source identity：稳定的来源身份，包含 URL、source type 和标题。
+- Fetch snapshot：一次抓取事实，包含 summary、content hash、fetched/published metadata 和 provenance。
+- Pinned reference：Brief 保存时同时记录 `source_id` 和 `snapshot_id`。
+
+### 当前 runtime 实现
+
+schema v5 使用 `research_sources` 保存 identity，使用 `research_source_snapshots` 保存版本。同 URL 的新 content hash 追加 snapshot；重复 content hash 拒绝。`research_brief_sources.snapshot_id` 固定 Brief 创建时使用的版本。
+
+### 输入 / 输出 / 不负责什么
+
+输入是经过 manifest/Port 获取的 request-local observation；输出是 Source identity 和 snapshot 业务事实。该机制不保存 raw HTML，不自动抓取，也不替代 WRITE 授权。
+
+### 常见失败模式
+
+- 覆盖旧 snapshot，导致历史 Brief 来源漂移。
+- 只按 URL 去重，无法识别相同内容的镜像或重复抓取。
+- Brief 只引用 Source，不引用具体 snapshot。
+
+### 如何测试和观察
+
+v4→v5 migration test 验证旧数据生成 snapshot；repository test 验证同 URL 新内容追加 snapshot，且新旧 Brief 固定不同 snapshot。
+
+### 面试解释
+
+可以这样讲：Source 是“这是什么来源”，Snapshot 是“某次看到的具体版本”。Brief 固定引用 Snapshot，因此后续刷新不会改写历史事实。
+
+### 相关项目文件
+
+- `app/storage/schema.py`
+- `app/domains/research/models.py`
+- `app/domains/research/repository.py`
+- `tests/test_storage_migrations.py`
+- `tests/test_research_knowledge.py`
