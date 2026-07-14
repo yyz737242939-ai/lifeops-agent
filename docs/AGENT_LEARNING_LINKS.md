@@ -42,6 +42,17 @@
 - [OpenAI Agents SDK - Results](https://openai.github.io/openai-agents-python/results/)  
   学习重点：run result、final output、intermediate items 与执行状态的边界。对照本项目为什么 `RuntimeResult` 只是本轮展示结果，不是业务事实来源，也不是写入授权来源。
 
+### SQLite schema / migration baseline
+
+- [SQLite - CREATE TABLE](https://www.sqlite.org/lang_createtable.html)
+  学习重点：表级 / 列级约束、主键、唯一约束、CHECK 与外键声明。对照 LifeOps canonical V1 如何一次建立当前最终表结构。
+
+- [SQLite - Foreign Key Support](https://www.sqlite.org/foreignkeys.html)
+  学习重点：外键启用方式与 `ON DELETE` 行为。对照 `connect_sqlite()` 的 `PRAGMA foreign_keys = ON` 以及 Domain 表的 CASCADE / RESTRICT 边界。
+
+- [SQLite - CREATE INDEX](https://www.sqlite.org/lang_createindex.html)
+  学习重点：普通、唯一和 partial index。对照 itinerary idempotency key 的非空唯一索引。
+
 ### Structured Output / Intent
 
 - [OpenAI API - Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs)  

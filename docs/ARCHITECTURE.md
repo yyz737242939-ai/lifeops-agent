@@ -270,7 +270,7 @@ Research 位于 `app/domains/research/`。当前领域模型与 SQLite 基础已
 
 Research Source 纵向切片已接入 Tool Runtime。Research Tool 绑定 `skill_ids=("research",)`；`FixtureResearchSourcePort` 只接受显式声明的 source key，返回带 content hash、fetched time 和 fixture provenance 的 request-local `ExternalObservation`。`ResearchService` 暂存 observation，未确认时不写 SQLite。`research.save_source` 只接收当前 execution scope 内 service 已持有的 observation ID，经 Research Skill candidate、Policy write effect、结构化 `ConfirmedAction` 和短 SQLite transaction 后由 `ResearchRepository` 保存 `ResearchSource`，并返回 `research_source_saved` evidence。模型不能通过 Tool 参数自行提供 provenance。
 
-schema v5 将稳定的 Source identity（URL、source type、title）与每次抓取的 snapshot（summary、content hash、fetched/published metadata、provenance）分表。同 URL 新内容追加 snapshot；全局重复 content hash fail-closed。`research_brief_sources` 同时固定 `source_id` 与保存 Brief 时的 `snapshot_id`，因此后续 Source 刷新不会改变旧 Brief 的引用事实。当前没有删除 Tool；未来若增加删除能力，必须采用归档/软删除并保持这些引用。
+当前 canonical schema V1 将稳定的 Source identity（URL、source type、title）与每次抓取的 snapshot（summary、content hash、fetched/published metadata、provenance）分表。同 URL 新内容追加 snapshot；全局重复 content hash fail-closed。`research_brief_sources` 同时固定 `source_id` 与保存 Brief 时的 `snapshot_id`，因此后续 Source 刷新不会改变旧 Brief 的引用事实。当前没有删除 Tool；未来若增加删除能力，必须采用归档/软删除并保持这些引用。
 
 Research Skill 当前在 `app/skills/research/sources/` 声明 `hf_daily_papers` 和 `hf_blog`。`load_research_source(...)` 只把稳定 source key 解析成经过 traversal、schema、HTTPS host 和精确 URL allowlist 校验的 `ResearchSourceDefinition`；加载声明不等于执行网络访问，HTTP adapter 与 manifest loader 保持分离。
 

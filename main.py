@@ -7,8 +7,9 @@ from collections.abc import Sequence
 
 from app.common.config import DEFAULT_CONFIG_PATH
 from app.common.errors import AppError
+from app.common.ids import new_id
 from app.runtime.bootstrap import build_runtime_service
-from app.runtime.models import RuntimeRequest, RuntimeSession, RuntimeStatus
+from app.runtime.models import RuntimeRequest, RuntimeStatus
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -26,7 +27,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     had_error = False
     try:
         runtime = build_runtime_service(args.config)
-        session = RuntimeSession()
+        session_id = new_id("session")
 
         print("LifeOps CLI. Type exit or quit to stop.")
         while True:
@@ -44,7 +45,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             try:
                 request = RuntimeRequest(
                     user_input=user_input,
-                    session_id=session.session_id,
+                    session_id=session_id,
                 )
                 result = runtime.handle(request)
             except AppError as exc:

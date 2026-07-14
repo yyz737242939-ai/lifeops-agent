@@ -529,6 +529,10 @@ LangChain 后续即使进入模型或工具层，也不能绕过 LifeOps Skill c
 
 outer compiled graph 负责 Intent → Policy → Skill → Executor；独立 Executor compiled graph 负责 decide → execute Tool → observe → decide。Runtime 每个 run 只创建一个 `ToolRuntime`，整个循环复用同一 Registry/Gateway/Domain service scope。模型只看到 Policy 与 Skill 求交后的 filtered catalog；每个 ToolCall 仍必须经过 pre/post Guardrails。WRITE action 逐次请求 exact synchronous confirmation，不能跨 call 或 run 复用。
 
+### Prompt 分层
+
+outer compiled graph 本身没有 system prompt；它只编排节点。`prepare_skills` 触发的 Skill selector 使用独立路由 prompt，只根据用户输入和 Skill metadata 选择零到多个 Skill，不回答问题、不选择 Tool。Executor model client 使用行动 prompt，并追加 selected Skill instructions；它约束 ToolCall/final 二选一、只使用 filtered catalog、以 Tool Observation 为执行事实、显式 WRITE 意图和失败后的安全处理。两份 prompt 职责不同，不能合并成 outer graph 的全局 prompt。
+
 ### 输入 / 输出 / 不负责什么
 
 输入是 `RuntimeRequest`、Skill prompt contributions、固定 `AllowedToolSet`、request-local `ToolRuntime` 以及 empty/fake Context/Memory providers。输出是结构化 `ExecutorResult`，包含 status、stop reason、step count、ordered observations 和最后一个安全 ToolResult。
@@ -745,7 +749,7 @@ Planner、Context Engine 和 Memory 都需要读取 Domain 数据，但如果它
 
 ### 当前 runtime 实现
 
-schema v5 使用 `research_sources` 保存 identity，使用 `research_source_snapshots` 保存版本。同 URL 的新 content hash 追加 snapshot；重复 content hash 拒绝。`research_brief_sources.snapshot_id` 固定 Brief 创建时使用的版本。
+当前 canonical schema V1 使用 `research_sources` 保存 identity，使用 `research_source_snapshots` 保存版本。同 URL 的新 content hash 追加 snapshot；重复 content hash 拒绝。`research_brief_sources.snapshot_id` 固定 Brief 创建时使用的版本。
 
 ### 输入 / 输出 / 不负责什么
 

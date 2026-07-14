@@ -15,7 +15,7 @@
 - `app/storage/` 已包含 SQLite connection factory、schema、migration runner、repository helper 和 `SqliteUnitOfWork`。
 - `app/observability/` 已包含 event JSONL、LLM JSONL 和 application log 的文件日志 writer。
 - `config/default.json` 已声明默认数据库路径 `data/lifeops.sqlite3`。
-- SQLite 当前 schema version 3 包含 `schema_migrations`、`run_records`、`tool_calls`、`research_sources` 和 `travel_itineraries`；后两者分别由 Research / Travel Domain migration 管理。
+- SQLite 当前以单一 canonical schema V1 建立完整的 Runtime、Research 和 Travel 最终表结构；旧 V1-V8 的中间迁移历史已在 2026-07-14 压缩，不再保留只为开发期演进服务的 `ALTER` / 临时表搬运步骤。
 - 测试数据库 helper 已支持 `:memory:` SQLite 和 migration helper，避免触碰真实 `data/lifeops.sqlite3`。
 - `.gitignore` 已覆盖本地 SQLite、JSON 用户数据、导出目录和 legacy 运行输出。
 - `docs/PROGRESS_LOG.md`、`docs/ARCHITECTURE.md` 和 `docs/RUNTIME_CONCEPTS.md` 已同步阶段 2 边界。
@@ -141,7 +141,7 @@ V0 的主要问题预计是：
 
 ## 5. 数据模型 / 存储
 
-当前 SQLite schema 只保留适合关系查询的基础表。event / LLM / normal 程序日志由文件日志负责，业务表等后续 domain 模块计划再设计和实现。
+当前 SQLite schema 只保留适合关系查询的数据：Runtime 基础记录以及已完成设计的 Research / Travel 业务事实。event / LLM / normal 程序日志继续由文件日志负责；尚未施工的业务模块不提前建表。
 
 当前已实现的基础表：
 
@@ -174,25 +174,36 @@ tool_calls
 
 ```
 
-后续 domain 模块再设计的业务表方向：
+当前 canonical V1 已建立的业务表：
 
-以下名称是后续模块的候选方向。`V1_INITIAL_STORAGE_SCHEMA` 仍只有 `run_records` 和 `tool_calls`；Research Source 已通过 version 2 migration 新增 `research_sources`，Travel Itinerary 已通过 version 3 migration 新增 `travel_itineraries`。其余 Research / Travel / Memory / Eval 表必须在对应模块真正施工时各自新增 migration 和 repository 测试，不能因为本计划列出名称就视为已经落库。
+以下 Research / Travel 表已经由对应 Domain 计划确认，并已合并进 `V1_SCHEMA`。Memory / Eval 等尚未施工的候选表不提前创建；未来确认后从 schema V2 开始追加 migration。
 
 ```text
 research_topics
 research_sources
+research_source_snapshots
 research_notes
 research_briefs
+research_brief_sources
+research_links
+research_revisions
 trips
 travel_constraints
 travel_itineraries
+travel_itinerary_items
 travel_decisions
+travel_knowledge_refs
+```
+
+仍待后续模块确认：
+
+```text
 semantic_memories
 eval_runs
 eval_results
 ```
 
-阶段 2 先不创建这些业务表。这里的判断标准是：没有清晰 service 语义前，不让 schema 反向绑死业务设计。
+其中 `semantic_memories`、`eval_runs`、`eval_results` 仍只是后续方向。判断标准不变：没有清晰 service 语义前，不让 schema 反向绑死业务设计。
 
 Migration 命名说明：
 
@@ -207,6 +218,8 @@ Migration 策略：
 - migration 初版只支持前进，不支持自动回滚。
 - migration 必须幂等：重复运行不会破坏已存在数据库。
 - 任何 schema 变更都需要聚焦测试覆盖。
+- 2026-07-14 将尚未发布的开发期 V1-V8 历史压缩为单一 `V1_SCHEMA`；新空库一次建立当前完整结构，未来真实 schema 变化从 V2 开始追加。
+- 压缩前的本地数据库先执行旧迁移到最终结构，再把 `schema_migrations` 基线重标为 V1；这是一项本地开发数据基线操作，不作为应用启动时的隐藏兼容分支。
 
 Repository 策略：
 
@@ -413,4 +426,4 @@ uv run python -m unittest discover -s tests -v
   - 所有测试通过显式 test DB factory 创建独立数据库；eval 也使用 fixture/test DB，不复用 `data/lifeops.sqlite3`。
 
 - 哪些表现在建，哪些等 domain 计划？
-  - 当前保留 `schema_migrations`、`run_records`、`tool_calls`，由 Research version 2 migration 增加 `research_sources`，由 Travel version 3 migration 增加 `travel_itineraries`。其他业务表等对应模块计划确认后再实现。
+  - canonical V1 当前建立 `schema_migrations`、Runtime 基础表，以及已完成设计的 Research / Travel 表。Memory、Eval 和其他未确认模块仍等对应计划确认后再通过后续 migration 增加。

@@ -7,7 +7,10 @@ from typing import Any
 from unittest.mock import patch
 
 from app.executor.errors import ExecutorModelError, InvalidExecutorModelActionError
-from app.executor.model_adapter import OpenAIExecutorModelClient
+from app.executor.model_adapter import (
+    EXECUTOR_SYSTEM_PROMPT,
+    OpenAIExecutorModelClient,
+)
 from app.executor.models import (
     ExecutorContextContribution,
     ExecutorMemoryContribution,
@@ -64,6 +67,10 @@ class OpenAIExecutorModelClientTest(unittest.TestCase):
         self.assertEqual(call["max_tool_calls"], 1)
         self.assertEqual([item["name"] for item in call["tools"]], ["travel.search_places"])
         self.assertNotIn("previous_response_id", call)
+        self.assertTrue(call["instructions"].startswith(EXECUTOR_SYSTEM_PROMPT))
+        self.assertIn("Tool Observations as the source of truth", call["instructions"])
+        self.assertIn("current user request explicitly asks", call["instructions"])
+        self.assertIn("Selected Skill instructions:\nUse travel tools.", call["instructions"])
         payload = json.loads(call["input"])
         self.assertEqual(payload["step_index"], 2)
         self.assertEqual(payload["context"][0]["source"], "context://1")

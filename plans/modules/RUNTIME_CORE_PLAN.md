@@ -14,7 +14,7 @@
 已完成：
 
 - `main.py` 已作为当前 CLI 骨架入口。
-- `app/runtime/` 已包含 `RuntimeRequest`、`RuntimeSession`、`RuntimeResult`、`RuntimeService`、run record helper 和 bootstrap。
+- `app/runtime/` 已包含 `RuntimeRequest`、`RuntimeResult`、`RuntimeService`、run record helper 和 bootstrap；CLI 在进程内直接持有 `session_id`。
 - `RuntimeService` 已接入 `IntentService` 和 `PolicyService`。
 - 每次 run 可以写入 `run_records`，并把结构化 runtime event 写入 `events.jsonl`。
 - 当前 orchestration / execution 明确保持 stub，并通过 `runtime.orchestration.stubbed` 暴露。
@@ -193,7 +193,7 @@ request-local 状态：
 
 - 原始用户输入。
 - `RuntimeRequest`。
-- `RuntimeSession`。
+- 当前 CLI 进程持有的 `session_id`。
 - `IntentDecision`。
 - `PolicyDecision`。
 - stub orchestration result。
@@ -223,7 +223,6 @@ request-local 状态：
 app/runtime/models.py
 - RuntimeRequest
 - RuntimeResult
-- RuntimeSession
 - RuntimeStatus
 
 app/runtime/service.py
@@ -246,11 +245,6 @@ RuntimeRequest
 - session_id
 - user_input
 - created_at
-
-RuntimeSession
-- session_id
-- started_at
-- metadata
 
 RuntimeResult
 - run_id
@@ -349,7 +343,7 @@ $env:UV_CACHE_DIR='D:\lifeops-agent\.tmp\uv-cache'; uv run python -m compileall 
 
 1. [x] 创建 `plans/modules/RUNTIME_CORE_PLAN.md` 和 `plans/modules/INTENT_POLICY_PLAN.md`。
 2. [x] 创建 `app/runtime/` 空包和 models/service/bootstrap 文件。
-3. [x] 定义 `RuntimeRequest`、`RuntimeSession`、`RuntimeResult` 和 status 枚举。
+3. [x] 定义 `RuntimeRequest`、`RuntimeResult` 和 status 枚举；`session_id` 由调用入口持有并传入 request。
 4. [x] 实现 runtime service 的最小 handle 流程，先使用可注入的 Intent / Policy stub。
 5. [x] 接入 event 文件日志和 `run_records` 写入 helper。
 6. [x] 创建 `main.py`，完成 config、SQLite、migration、runtime service 的启动骨架。

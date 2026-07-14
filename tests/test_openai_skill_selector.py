@@ -10,7 +10,10 @@ from unittest.mock import patch
 from app.runtime.models import RuntimeRequest
 from app.skills.errors import SkillSelectionError
 from app.skills.models import SkillDefinition
-from app.skills.selector import SkillSelectionClient
+from app.skills.selector import (
+    SKILL_SELECTION_SYSTEM_PROMPT,
+    SkillSelectionClient,
+)
 
 
 class SkillSelectionClientTest(unittest.TestCase):
@@ -63,6 +66,12 @@ class SkillSelectionClientTest(unittest.TestCase):
         call = api.chat.completions.calls[0]
         self.assertEqual(call["model"], "test-model")
         self.assertEqual(call["response_format"], {"type": "json_object"})
+        self.assertEqual(
+            call["messages"][0]["content"],
+            SKILL_SELECTION_SYSTEM_PROMPT,
+        )
+        self.assertIn("Select zero Skills", call["messages"][0]["content"])
+        self.assertIn("cross-domain request", call["messages"][0]["content"])
         input_payload = json.loads(call["messages"][1]["content"])
         self.assertEqual(
             [item["skill_id"] for item in input_payload["skills"]],
