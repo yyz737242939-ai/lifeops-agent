@@ -55,9 +55,9 @@ Travel 模型、repository、service、ports 和 fixtures 在当前 runtime 中�
 - 每类外部查询返回 typed candidate / observation，统一携带 provider、observed/quoted time、expires_at、provenance 和 request-local ID。
 - 候选查询、结构化比较、约束匹配和部分失败表达。
 - itinerary draft 是 request-local 执行产物；用户确认后才保存 itinerary/version/decision。
-- 历史 Trip 可归档和只读查询，为阶段 8 Context/Memory 测试提供材料。
+- 历史 Trip 可归档和只读查询，为阶段 9 Context/Memory 测试提供材料。
 - Travel 可用通用 `KnowledgeReference` 引用 Research Domain 保存的资料，只存 ID，不复制正文。
-- 为阶段 6 Executor 提供 Tools；为阶段 7 Planner 实现共享 `DomainPlanningReadModel[TravelPlanningSnapshot]`；为阶段 8 Context / Memory 实现共享 candidate provider 接口。
+- 为阶段 6 Executor 提供 Tools；为阶段 7 Planner 实现共享 `DomainPlanningReadModel[TravelPlanningSnapshot]`；为阶段 9 Context / Memory 实现共享 candidate provider 接口。
 - Tool contract 必须提供稳定、结构化、适合 ReAct 继续判断的 Observation，以及适合 Planner/DAG 判断依赖和部分失败的 typed output；Domain 不记录或解释模型 Thought。
 - 正常、无结果、timeout、rate limit、过期价格、冲突和部分失败 fixtures。
 
@@ -69,7 +69,7 @@ Travel 模型、repository、service、ports 和 fixtures 在当前 runtime 中�
 - 不在阶段 5 接真实天气、交通、住宿 API。
 - 不把旅行偏好自动写为 Memory。
 - 不让 Travel service 直接依赖 MCP/HTTP client。
-- 不实现阶段 6 ReAct loop、阶段 7 Planner、阶段 8 Context/Memory consumer 或阶段 9 Recovery；Domain 只提供稳定 Tool、read model 和 provider contract。
+- 不实现阶段 6 ReAct loop、阶段 7 Planner、阶段 9 Context/Memory consumer 或阶段 10 Recovery；Domain 只提供稳定 Tool、read model 和 provider contract。
 
 ## 4. Runtime 与领域边界
 
@@ -99,21 +99,21 @@ LodgingSearchPort
 PlaceSearchPort
 ```
 
-阶段 5 实现五个 fixture adapters；旧聚合 `TravelOptionPort` 已在 draft-based 保存完成后删除。阶段 10 `CalendarMcpAdapter` 实现同一个 Calendar Port；以后真实 HTTP adapters 独立新增，不修改 Travel Domain。
+阶段 5 实现五个 fixture adapters；旧聚合 `TravelOptionPort` 已在 draft-based 保存完成后删除。Calendar fixture 保持当前 V1；未来若实现 `CalendarMcpAdapter` 或真实 HTTP adapter，它们只实现同一个 Calendar Port，不修改 Travel Domain。
 
-MCP 只是 Port 的一种 adapter 实现，不是 Travel Domain 的依赖。阶段 10 只承诺 Calendar MCP 学习切片；未来地图、地点、天气、交通或住宿如果存在合适 MCP server，也必须实现现有 typed Port，并把 MCP result 转换成 LifeOps-owned model 后再进入 Tool Gateway。不能把 MCP tool schema、server 名称或 provider SDK 类型泄漏到 Domain model/service。
+MCP 只是 Port 的一种 adapter 实现，不是 Travel Domain 的依赖。Calendar MCP 已从当前 V1 施工阶段移除；未来地图、地点、天气、交通、住宿或 Calendar 如果存在合适 MCP server，也必须实现现有 typed Port，并把 MCP result 转换成 LifeOps-owned model 后再进入 Tool Gateway。不能把 MCP tool schema、server 名称或 provider SDK 类型泄漏到 Domain model/service。
 
 ### 4.2 未来适配接口
 
 - Context 通过 `DomainContextProvider[TravelContextCandidate]` 获取当前 Trip、约束、选中候选和有限历史摘要。
-- Memory 通过 `DomainMemoryCandidateProvider[TravelPreferenceCandidate]` 获取候选偏好；只有阶段 8 明确授权后才能成为 Memory。
+- Memory 通过 `DomainMemoryCandidateProvider[TravelPreferenceCandidate]` 获取候选偏好；只有阶段 9 明确授权后才能成为 Memory。
 - Planner 通过 `DomainPlanningReadModel[TravelPlanningSnapshot]` 获取规划所需事实，不读取 repository internals。
 - Executor 通过 ToolGateway 调外部 READ 或 Domain WRITE tools。
 - Travel 不定义 `TravelPlanRun` / `TravelExecutor`；通用 Planner 与 Tool 的匹配方式留到 Planner 模块施工时设计。
 - ReAct Executor 可在同一个 run 中逐步调用约束读取、外部搜索、比较和 draft tools；每步只消费 typed ToolResult / Observation，不直接读取 service internals。
 - Plan-and-Execute 可把跨 Domain 目标拆成 Research / Travel steps；`TravelPlanningSnapshot` 只提供 Trip 事实、缺失约束、候选覆盖、当前 draft/version 和未解决 decision，不生成 PlanStep。
 - Recovery 使用 event/evidence 解释做到哪一步，不自动重放搜索或保存。
-- Calendar MCP 只替换 fixture adapter，不改变 service。
+- 未来 Calendar MCP 只能替换 fixture adapter，不改变 service；当前 V1 不实施该 Adapter。
 - DAG 可表达 calendar/weather/transport/lodging/place 独立读取，汇合后执行 compare → draft；每个节点必须有稳定 input/output、失败和 expiry 语义。阶段 5 不实现 scheduler，也不把 DAG node 写进 Domain。
 - Eval 使用固定 fixtures，真实网络只允许可选 smoke test。
 
@@ -239,7 +239,7 @@ Tools：
 ## 9. 文档更新
 
 - 完成后更新 `docs/ARCHITECTURE.md`、`docs/PROGRESS_LOG.md`、`docs/RUNTIME_CONCEPTS.md`。
-- 阶段 5 学习链接只覆盖 Port/adapter、Tool safety 和 fixture contract；Calendar MCP 链接等阶段 10 再补。
+- 阶段 5 学习链接只覆盖 Port/adapter、Tool safety 和 fixture contract；当前 Stage 8 MCP 学习集中在 Research / Hugging Face，Travel 不新增 Calendar MCP 链接。
 - planning-only 和外部数据边界维护在本模块计划与 `plans/RUNTIME_REFACTOR_PLAN.md`，不新增 decisions / ADR 文档。
 
 ## 10. 实施步骤

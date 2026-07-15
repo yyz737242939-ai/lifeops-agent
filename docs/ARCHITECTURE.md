@@ -91,7 +91,12 @@ RuntimeRequest
 -> classify_intent
 -> decide_policy
 -> policy conditional route
--> prepare_skills -> execute_executor / requires_confirmation / deny
+-> prepare_skills -> route_planning
+   -> direct: execute_executor
+   -> plan: create PlanPreview
+   -> need_user: clarification
+-> structured PlanCommand: confirm / modify / cancel
+   -> confirmed plan: PlanController -> ReactExecutor per PlanStep -> PlanFinalizer
 -> finalize
 -> RuntimeResult
 ```
@@ -109,7 +114,7 @@ LangGraph Orchestration 当前实现位于：
 - `app/orchestration/nodes/`
 - `app/orchestration/graph.py`
 
-`RuntimeService` 仍是唯一外部入口，负责 run lifecycle record、按 session 隔离的 event/application log、Domain WRITE transaction 闭合和最终 `RuntimeResult`。run record 先独立提交；Intent/Skill/LLM/external read 不占用 SQLite 写 transaction。`RuntimeOrchestrator` 负责 outer compiled `StateGraph` 的 Intent、Policy、Skill preparation 和 Executor route；注入的 `ReactExecutor` 拥有独立、无 checkpointer 的 compiled cycle，最终只把 `ExecutorResult` 映射为 `RuntimeResult`。
+`RuntimeService` 仍是唯一外部入口，负责 run lifecycle record、按 session 隔离的 event/application log、Domain WRITE transaction 闭合和最终 `RuntimeResult`。run record 先独立提交；Intent/Skill/LLM/external read 不占用 SQLite 写 transaction。`RuntimeOrchestrator` 负责 outer compiled `StateGraph` 的 Intent、Policy、Skill preparation、Planning route 和 Direct Executor route，也提供结构化 PlanCommand 入口；注入的 `ReactExecutor` 拥有独立、无 checkpointer 的 compiled cycle，最终结果映射为冻结的 `RuntimeResult`。
 
 当前 graph 路径是：
 
@@ -117,18 +122,38 @@ LangGraph Orchestration 当前实现位于：
 START
 -> classify_intent
 -> decide_policy
--> allow -----------------> prepare_skills -> execute_executor \
--> requires_confirmation -> requires_confirmation --+-> finalize -> END
--> deny ------------------> deny -------------------/
+-> allow -> prepare_skills -> route_planning
+   -> direct -> execute_executor -> finalize -> END
+   -> plan / need_user ----------> finalize -> END
+-> requires_confirmation -> requires_confirmation -> finalize -> END
+-> deny -> deny -> finalize -> END
 ```
 
 Intent、Policy 或 Skill preparation 失败时，graph 在对应节点后直接进入 `END`。Skill 失败不会进入 `execute_executor`；Policy-level 确认和拒绝分支不会调用 Skill selector 或 Executor。
 
-`GraphState` 只保存当前 request 的编排数据：request、intent、policy、route、Skill selection、prompt contributions、result、结构化 error stage/code 和 graph-internal path。已加载 Skill ID 可由 prompt contributions 得出，不在 GraphState 重复保存。它不保存 trace summary、`SkillService`、Skill registry/client、长期 Memory、Domain 事实、Tool arguments/result cache 或授权替代来源。
+`GraphState` 只保存当前 request 的编排数据：request、intent、policy、route、Skill selection、prompt contributions、route-level `planning_route`、result、结构化 error stage/code 和 graph-internal path。已加载 Skill ID 可由 prompt contributions 得出，不在 GraphState 重复保存。它不保存 PlanRun、PlanStep、ToolRuntime、Step observations、trace summary、`SkillService`、长期 Memory、Domain 事实、Tool arguments/result cache 或授权替代来源。
 
 `IntentService`、`PolicyService` 和 `SkillService` 是 graph 构建期依赖。`SkillService` 长期持有 `SkillRegistry` 与 `SkillSelectionClient`，统一执行 selection、lazy loading 和 contribution assembly。`OrchestrationContext` 只携带每个 run 不同的应用 `TraceSink`；它通过 LangGraph `context_schema` / `Runtime` 提供给节点，不进入 `GraphState` 或 checkpoint。Intent / Policy node 在真实 service 返回后分别写 `intent.classified` / `policy.decided`，失败时写对应 failed event；Policy 分支确定后写 `orchestration.route.selected`。机械化的 graph/node started/completed 不进入稳定事件契约。
 
 LangGraph 不负责 Policy 决策、业务事实、工具安全、真实执行或持久化；这些边界仍由 LifeOps 自研 runtime 拥有。
+
+## Planning Control Layer
+
+Planning 当前实现位于 `app/planning/`，outer runtime 接线位于 `app/orchestration/planning.py`。它位于 Policy/Skill preparation 之后、通用 `ReactExecutor` 之上，使用同一组过滤后的 Tool capability 描述判断请求应该走：
+
+- `direct`：保持既有 ReAct 路径，不创建 PlanRun；
+- `plan`：生成完整 revision 并返回 preview，等待结构化 confirm/modify/cancel；
+- `need_user`：返回澄清问题，不创建持久化计划。
+
+`PlanningService` 负责 preview-first command lifecycle；`PlanController` 在确认后按 dependency 与 position 稳定串行推进，每次只把一个 `PlanStepExecutionInput` 交给 `ReactExecutor`。一个 PlanRun 共享 request-local execution scope，每个 Step 使用独立 Executor state，并只接收声明依赖的安全结果。正常成功路径不重复调用 Planner；只有结构化 `goal_not_achieved` 可触发一次 bounded replan，新 revision 需要重新确认。
+
+`PlanRun`、revision 和 `PlanStep` 由 `PlanRepository` Protocol 持久化，当前 adapter 是 `SqlitePlanRepository`。schema V2 建立计划表，V3 增加 durable confirmed constraints。取消会原子关闭当前 revision 的 pending Step；modify/replan 保留已确认约束；Finalizer 汇总截至当前 revision 的全部 completed safe summaries/evidence，provider 失败不反转已完成 PlanRun，而是使用 deterministic fallback。
+
+Planner、Router 和 Finalizer 是三个窄模型接口。Planner 只能输出 objective、expected outcome 和 dependencies，不能选择 Tool、构造 arguments 或授予 WRITE；真实 action 仍由当前 Step 内的 ReAct 从 `AllowedToolSet` 选择，并继续经过同步逐 action confirmation、Gateway、Guardrails 和 evidence。
+
+Planning core 不依赖具体 Domain 或 LangGraph。可信 planning snapshot 只能通过 typed scope reference 和可选 `PlanningSnapshotProvider` 注入；未配置 provider 时 fail-closed，不从自然语言伪造稳定 scope。Stage 9 已确认通过 Planner typed input 与 Executor Context/Memory provider 的窄 seam 接入，但生产实现尚未开始；snapshot、Context 或 Memory 都不得变成授权或业务事实。Stage 7 不支持并行 Step、异步 resume、checkpoint replay 或运行中异步 cancel。
+
+Stage 9 的已确认计划边界记录在 `plans/modules/CONTEXT_MEMORY_PLAN.md`。Stage 9A 将 Context 定义为不绑定 Domain 的 session conversation context：每个 RuntimeRequest 只组装一次 bounded ContextAssembly，Direct、Planning 和 PlanStep 复用它；conversation turns 与 rolling summary 使用 session JSONL，不进入 SQLite、GraphState 或 checkpoint。Stage 9B 只增加用户编辑的只读 Profile 和用户显式确认保存的长期 Memory，Memory 全文计划放在不可变文件中，SQLite 只保存索引和 lifecycle。以上仍是计划，不是当前已实现行为。
 
 ## Skill System
 
@@ -158,7 +183,7 @@ Skill root
 -> filtered catalog -> zero or one ToolCall -> ToolGateway
 ```
 
-生产 bootstrap 根据 `config/default.json` 的 `skills.root` 总是执行 discovery，并直接构造 `SkillSelectionClient()`、Registry、必需的 `SkillService` 与使用 OpenAI-compatible adapter 的 `ReactExecutor`；模型和 provider 地址不通过 JSON 配置逐层传参。不存在 Skill 开关或空 service 分支。`prepare_skills` 只位于 Policy allow 路径。稳定 Skill events 只包含 selection/body/reference 语义边界。LLM selection reason 保留在 request-local `SkillSelection` 中，不写 event payload。Skill selection 会参与业务候选 Tool 筛选，但不提供授权；Policy effect 才是动作权限来源。prompt contributions 已进入每步 Executor model input；完整 Context assembly 留到阶段 8。
+生产 bootstrap 根据 `config/default.json` 的 `skills.root` 总是执行 discovery，并直接构造 `SkillSelectionClient()`、Registry、必需的 `SkillService` 与使用 OpenAI-compatible adapter 的 `ReactExecutor`；模型和 provider 地址不通过 JSON 配置逐层传参。不存在 Skill 开关或空 service 分支。`prepare_skills` 只位于 Policy allow 路径。稳定 Skill events 只包含 selection/body/reference 语义边界。LLM selection reason 保留在 request-local `SkillSelection` 中，不写 event payload。Skill selection 会参与业务候选 Tool 筛选，但不提供授权；Policy effect 才是动作权限来源。prompt contributions 已进入每步 Executor model input；完整 Context assembly 留到阶段 9。
 
 ## Tool System
 
@@ -268,17 +293,17 @@ Research / Travel 是业务逻辑分组：各自拥有 models、service、reposi
 
 Research 位于 `app/domains/research/`。当前领域模型与 SQLite 基础已包含 Source、SourceSnapshot、Topic、Note、Brief、固定 snapshot 的 Brief-Source 引用、KnowledgeLink 和 append-only Revision；KnowledgeLink / Revision 的多类型引用由 repository 在写入前检查目标存在性。`ResearchBriefDraft` 与 `ExternalObservation` 保持 request-local，只有 service 当前持有的临时对象才能进入后续保存路径。
 
-Research Source 纵向切片已接入 Tool Runtime。Research Tool 绑定 `skill_ids=("research",)`；`FixtureResearchSourcePort` 只接受显式声明的 source key，返回带 content hash、fetched time 和 fixture provenance 的 request-local `ExternalObservation`。`ResearchService` 暂存 observation，未确认时不写 SQLite。`research.save_source` 只接收当前 execution scope 内 service 已持有的 observation ID，经 Research Skill candidate、Policy write effect、结构化 `ConfirmedAction` 和短 SQLite transaction 后由 `ResearchRepository` 保存 `ResearchSource`，并返回 `research_source_saved` evidence。模型不能通过 Tool 参数自行提供 provenance。
+Research 当前模型可见 Tool 已冻结为 9 个：`search_papers`、`build_brief`、`save_source`、`save_brief`、`create_note`、`create_topic`、`link_items`、`append_revision`、`search_knowledge`。全部绑定 `skill_ids=("research",)` 并经过现有 Policy、filtered catalog、Guardrail 与 Tool Gateway；MCP discovery 不会动态扩大模型可见 Tool 或授权范围。
 
 当前 canonical schema V1 将稳定的 Source identity（URL、source type、title）与每次抓取的 snapshot（summary、content hash、fetched/published metadata、provenance）分表。同 URL 新内容追加 snapshot；全局重复 content hash fail-closed。`research_brief_sources` 同时固定 `source_id` 与保存 Brief 时的 `snapshot_id`，因此后续 Source 刷新不会改变旧 Brief 的引用事实。当前没有删除 Tool；未来若增加删除能力，必须采用归档/软删除并保持这些引用。
 
 Research Skill 当前在 `app/skills/research/sources/` 声明 `hf_daily_papers` 和 `hf_blog`。`load_research_source(...)` 只把稳定 source key 解析成经过 traversal、schema、HTTPS host 和精确 URL allowlist 校验的 `ResearchSourceDefinition`；加载声明不等于执行网络访问，HTTP adapter 与 manifest loader 保持分离。
 
-Research external-read 的 typed 边界已实现为 `ResearchContentPort` / `HuggingFaceResearchContentPort`。adapter 先加载可信 source declaration，再限制 HTTP status、最终 URL redirect、HTML content type、响应大小、timeout 和解码失败，返回含 raw HTML、hash、fetched time 和 provenance 的 request-local `FetchedSourceDocument`。`ResearchService` 只按当前 request 已取得的 `document_id` 调用解析；raw HTML 不进入 SQLite。`parse_research_items`、`dedupe_research_items`、`rank_research_items` 是无网络、无存储副作用的 deterministic 函数，输出 typed `ResearchItem`。
+Research external-read 有两条 typed Port。`ResearchContentPort` 负责声明过的 Hugging Face 列表页抓取；`PaperSearchPort` 负责关键词论文搜索。后者的实际依赖方向是 `ResearchService -> PaperSearchPort -> HuggingFaceMcpPaperSearchAdapter -> OneShotStdioMcpClient -> 本地 Hugging Face Paper MCP Server -> huggingface_hub.HfApi(token=False)`。每次查询都建立并关闭一次 stdio session，依次完成 initialize、`tools/list`、冻结 schema 校验和 `tools/call`；Domain、Planner 与 Executor 不依赖 MCP SDK 或 provider 类型。
 
-临时 briefing 已暴露 `research.fetch_briefing_source`、`research.parse_items`、`research.rank_items`、`research.build_brief_draft` 四个 Tool，并统一经过 Skill candidate、Policy effect、Guardrail 和 Gateway。rank 支持 deterministic topic filter。Tool 输出不包含 raw HTML；document、item set 和 `ResearchBriefDraft` 都只存在于 request-local `ResearchService`。Draft 保存来源 URL，而不是把临时 item ID 冒充长期 Source ID；保存 Brief 时 repository 只接受已经存在于 `research_sources` 的 URL。当前 `ReactExecutor` 已在跨 Domain compiled E2E 中验证同一 execution scope 连续调度 Research 多步 Tool、Travel 多步 Tool，以及 Research READ → Travel READ sequence。
+`research.search_papers` 返回 request-local observation，并显式投影 paper ID、title、bounded authors/summary、published time、canonical URL 与 provenance；混合合法/非法 provider item 时只保留验证通过的论文并返回 `invalid_count`，全部非法则以 `research_paper_result_invalid` fail-closed。默认搜索不写 SQLite；只有随后确认的 `save_source` 才能保存当前 execution scope 内的 observation。模型不能通过 Tool 参数伪造 paper metadata 或 provenance。
 
-Research WRITE 当前包含 `research.save_source`、`research.save_brief` 和 `research.create_note`。briefing fetch 会为同一个 list-page document 生成 request-local observation，使 Source 可以先经过独立 WRITE 保存；Brief WRITE 只接收 request-local `draft_id`，repository 会把 draft 的 source URL 解析到已经保存的 `research_sources`，任何缺失来源都会 fail-closed，不能由 Brief WRITE 隐式创建 Source。Note WRITE 接收 title/body。三个 WRITE 都经过 Policy write effect、结构化 `ConfirmedAction`、短 transaction 和 post-Guardrail evidence；临时 ID 不能跨 execution scope 使用。
+旧的 `fetch_briefing_source` / `parse_items` / `rank_items` / `build_brief_draft` 等五个细粒度 Tool 已从 Registry 删除，底层 fetch/parse/dedupe/rank/draft 函数仍保留并由原子 `research.build_brief` 复用。Research WRITE 现在还包括 Topic、Link 与 append-only Revision 接口；每个 WRITE 都经过 Policy write effect、精确 `ConfirmedAction`、短 transaction 和 post-Guardrail evidence。Stage 8 没有新增 SQLite schema，也没有修改 Planner / Executor 控制骨架。
 
 所有业务 Domain 遵守 `plans/DOMAIN_CONTRACT_STANDARD.md`，共享 `DomainPlanningReadModel.get_planning_snapshot(scope_id)`、`DomainContextProvider.query_context_candidates(...)` 和 `DomainMemoryCandidateProvider.query_memory_candidates(...)`。统一的是方法语义和安全边界，snapshot/candidate 业务类型仍归各 Domain 所有。
 

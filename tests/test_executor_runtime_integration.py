@@ -58,6 +58,11 @@ class ExecutorRuntimeIntegrationTest(unittest.TestCase):
                 RuntimeStatus.ERROR,
             ),
             (
+                ExecutorStatus.STOPPED,
+                ExecutorStopReason.GOAL_NOT_ACHIEVED,
+                RuntimeStatus.ERROR,
+            ),
+            (
                 ExecutorStatus.FAILED,
                 ExecutorStopReason.MODEL_FAILED,
                 RuntimeStatus.ERROR,

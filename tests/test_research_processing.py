@@ -63,6 +63,20 @@ class ResearchProcessingTest(unittest.TestCase):
 
         self.assertEqual(tuple(item.item_id for item in ranked), ("agent",))
 
+    def test_multi_word_topic_filter_can_match_deterministic_topic_hint(self) -> None:
+        items = (
+            ResearchItem(
+                "agent", "hf_blog", "Agent workflows", "https://x/agent", 1, "agent"
+            ),
+            ResearchItem(
+                "vision", "hf_blog", "Vision models", "https://x/vision", 2, "multimodal"
+            ),
+        )
+
+        ranked = rank_research_items(items, topic_filter="Agent Runtime")
+
+        self.assertEqual(tuple(item.item_id for item in ranked), ("agent",))
+
     @staticmethod
     def _document(source_key: str, fixture_name: str) -> FetchedSourceDocument:
         return FetchedSourceDocument(

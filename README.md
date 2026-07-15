@@ -4,7 +4,7 @@ LifeOps Agent 是一个本地 Python 项目，用来学习和构建 Agent Runtim
 
 当前仓库处于 Runtime 重构。V0 代码、数据、日志、测试、旧计划和旧入口统一保存在 `legacy_v0/`，作为历史对照。当前工作使用清爽的 `app/`、`docs/` 和 `plans/` 结构。
 
-当前进度：阶段 0-5 与阶段 6 ReAct Executor 均已完成。Executor 两层 compiled graph、跨 Domain loop、逐 WRITE confirmation、语义 events 与 session `llm.jsonl` 已验证，统一离线回归 `298/298` 通过；Stage 7 gate 为 `go`。下一施工入口是单独创建并确认 `plans/modules/PLANNER_PLAN.md`，当前尚未实施 Planner。
+当前进度：阶段 0-5、阶段 6 ReAct Executor、阶段 7 Plan-and-Execute Planner 与阶段 8 Research External Interfaces / Hugging Face MCP 均已完成。Research 已冻结为 9 个模型可见 Tool；真实论文搜索经过官方 MCP SDK、本地 one-shot stdio Server 与 Hugging Face public API，默认只产生 request-local observation，确认后才允许保存。最终统一离线回归执行 `414` 个测试并通过 `412` 个、跳过 `2` 个显式 live gate；真实 LLM Research MCP happy path 以一次 Tool 请求、零失败、一次成功和 SQLite 零写通过。Stage 9 Context / Memory 的统一设计与 `plans/modules/CONTEXT_MEMORY_PLAN.md` 已确认，生产实现尚未开始；下一施工入口是独立 gate Stage 9A Context Engine，取得 `go` 后才进入 Stage 9B Long-term Memory。
 
 ## 项目目标
 

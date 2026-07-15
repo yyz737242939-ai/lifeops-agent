@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from app.domains.research.ports import (
     HuggingFaceResearchContentPort,
+    MAX_RESEARCH_SOURCE_BYTES,
     ResearchExternalSourceError,
 )
 
@@ -47,6 +48,28 @@ class ResearchContentPortTest(unittest.TestCase):
             port.fetch("hf_blog")
 
         self.assertEqual(non_html.exception.code, "research_source_content_type_invalid")
+        self.assertEqual(oversized.exception.code, "research_source_too_large")
+
+    @patch("app.domains.research.ports.urlopen")
+    def test_default_limit_accepts_current_page_scale_and_remains_bounded(
+        self, urlopen_mock: MagicMock
+    ) -> None:
+        current_page_scale = b"x" * 230_000
+        urlopen_mock.return_value = self._response(
+            current_page_scale,
+            final_url="https://huggingface.co/papers",
+        )
+
+        document = HuggingFaceResearchContentPort(self._skill_root()).fetch(
+            "hf_daily_papers"
+        )
+
+        self.assertEqual(len(document.content), len(current_page_scale))
+        self.assertEqual(MAX_RESEARCH_SOURCE_BYTES, 500_000)
+
+        urlopen_mock.return_value = self._response(b"x" * (MAX_RESEARCH_SOURCE_BYTES + 1))
+        with self.assertRaises(ResearchExternalSourceError) as oversized:
+            HuggingFaceResearchContentPort(self._skill_root()).fetch("hf_blog")
         self.assertEqual(oversized.exception.code, "research_source_too_large")
 
     @patch("app.domains.research.ports.urlopen")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
@@ -10,15 +11,14 @@ from app.domains.research.ports import FixtureResearchSourcePort
 from app.domains.research.repository import ResearchRepository
 from app.domains.research.service import ResearchService
 from app.domains.research.tools import (
-    BUILD_BRIEF_DRAFT_TOOL,
+    BUILD_BRIEF_TOOL,
     CREATE_NOTE_TOOL,
-    FETCH_BRIEFING_SOURCE_TOOL,
-    FETCH_SOURCE_TOOL,
-    PARSE_ITEMS_TOOL,
-    RANK_ITEMS_TOOL,
     SEARCH_KNOWLEDGE_TOOL,
+    SEARCH_PAPERS_TOOL,
     build_research_tools,
 )
+from app.integrations.mcp.models import McpServerConfig
+from app.integrations.research_mcp.adapter import HuggingFaceMcpPaperSearchAdapter
 from app.domains.travel.adapters import FixturePlaceSearchAdapter
 from app.domains.travel.repository import TravelRepository
 from app.domains.travel.service import TravelService
@@ -63,44 +63,25 @@ class ExecutorCrossDomainCompiledE2ETest(unittest.TestCase):
     def tearDown(self) -> None:
         self.conn.close()
 
-    def test_research_fetch_parse_rank_and_draft_run_in_one_compiled_scope(self) -> None:
+    def test_research_build_brief_runs_in_one_compiled_scope(self) -> None:
         def decide(model_input: ExecutorModelInput):
             observations = model_input.observations
             if not observations:
                 return _action(
-                    "research_fetch",
-                    FETCH_BRIEFING_SOURCE_TOOL,
-                    {"source_key": "hf_daily_papers"},
-                )
-            output = observations[-1].output or {}
-            if len(observations) == 1:
-                return _action(
-                    "research_parse",
-                    PARSE_ITEMS_TOOL,
-                    {"document_id": output["document_id"], "limit": 10},
-                )
-            if len(observations) == 2:
-                return _action(
-                    "research_rank",
-                    RANK_ITEMS_TOOL,
+                    "research_brief",
+                    BUILD_BRIEF_TOOL,
                     {
-                        "item_set_id": output["item_set_id"],
+                        "source_keys": ["hf_daily_papers"],
                         "limit": 5,
                         "topic_filter": "agent",
                     },
-                )
-            if len(observations) == 3:
-                return _action(
-                    "research_draft",
-                    BUILD_BRIEF_DRAFT_TOOL,
-                    {"item_set_id": output["item_set_id"], "title": "Agent 简报"},
                 )
             return FinalAnswerDecision("Research draft completed.")
 
         state, model = self._invoke(decide, effects=("read", "external_read"))
 
         self.assertEqual(state["result"].status, RuntimeStatus.OK)
-        self.assertEqual(len(model.inputs[-1].observations), 4)
+        self.assertEqual(len(model.inputs[-1].observations), 1)
         draft = model.inputs[-1].observations[-1]
         self.assertEqual(draft.status, ToolCallStatus.SUCCEEDED)
         self.assertIn("基于 Hugging Face 列表页可见信息", draft.output["body"])
@@ -158,8 +139,8 @@ class ExecutorCrossDomainCompiledE2ETest(unittest.TestCase):
             if not model_input.observations:
                 return _action(
                     "cross_research",
-                    FETCH_SOURCE_TOOL,
-                    {"source_key": "hf-daily"},
+                    SEARCH_PAPERS_TOOL,
+                    {"query": "agent", "limit": 3},
                 )
             if len(model_input.observations) == 1:
                 return _action(
@@ -175,7 +156,7 @@ class ExecutorCrossDomainCompiledE2ETest(unittest.TestCase):
         self.assertEqual(state["result"].status, RuntimeStatus.OK)
         self.assertEqual(
             [item.tool_name for item in observations],
-            [FETCH_SOURCE_TOOL, SEARCH_PLACES_TOOL],
+            [SEARCH_PAPERS_TOOL, SEARCH_PLACES_TOOL],
         )
         self.assertEqual(self._count("research_sources"), 0)
         self.assertEqual(self._count("travel_itineraries"), 0)
@@ -230,18 +211,22 @@ class ExecutorCrossDomainCompiledE2ETest(unittest.TestCase):
         def decide(model_input: ExecutorModelInput):
             if not model_input.observations:
                 return _action(
-                    "forged_parse",
-                    PARSE_ITEMS_TOOL,
-                    {"document_id": "document_forged", "limit": 5},
+                    "empty_brief",
+                    BUILD_BRIEF_TOOL,
+                    {
+                        "source_keys": ["hf_daily_papers"],
+                        "limit": 5,
+                        "topic_filter": "does-not-match",
+                    },
                 )
             if len(model_input.observations) == 1:
                 self.assertEqual(
                     model_input.observations[0].status, ToolCallStatus.FAILED
                 )
                 return _action(
-                    "fallback_fetch",
-                    FETCH_SOURCE_TOOL,
-                    {"source_key": "hf-daily"},
+                    "fallback_search",
+                    SEARCH_PAPERS_TOOL,
+                    {"query": "agent", "limit": 3},
                 )
             return FinalAnswerDecision("Recovered with an alternate read.")
 
@@ -415,6 +400,20 @@ class ExecutorCrossDomainCompiledE2ETest(unittest.TestCase):
             ),
             ResearchRepository(self.conn),
             content_port=_FixtureBriefingContentPort(),
+            paper_search_port=HuggingFaceMcpPaperSearchAdapter(
+                McpServerConfig(
+                    server_id="cross-domain-hf-fixture",
+                    command=sys.executable,
+                    args=(
+                        "-m",
+                        "app.integrations.research_mcp.server",
+                        "--fixture",
+                        str(Path("tests/fixtures/research/hf_papers.json").resolve()),
+                    ),
+                    cwd=Path.cwd(),
+                    timeout_seconds=5.0,
+                )
+            ),
         )
         root = Path("tests/fixtures/travel")
         place_options = (

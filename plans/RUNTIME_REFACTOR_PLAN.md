@@ -21,8 +21,8 @@
 - 阶段 3.5：Observability 文件日志校正已完成，详见 `plans/modules/OBSERVABILITY_LOGGING_PLAN.md`。
 - 阶段 4：LangGraph Orchestration 骨架已完成，详见 `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md`。
 - 当前阶段：阶段 5 功能实现与稳定化均已完成；`STAGE5_STABILIZATION_PLAN.md` 已关闭全部 blocking findings，并在 `240/240` 统一离线回归后给出 Stage 6 `go`。
-- 当前阶段：阶段 6 ReAct Executor 实施步骤 1-12 已全部完成，统一离线回归 `298/298` 通过，Stage 7 gate 为 `go`。
-- 下一阶段：创建并确认 `plans/modules/PLANNER_PLAN.md` 后实施阶段 7 Plan-and-Execute Planner；当前尚未创建或实施 Planner。
+- 当前阶段：阶段 7 Plan-and-Execute Planner 步骤 1-16 已全部完成；Planner 聚焦回归 `79/79`、统一离线回归 `379/379` 通过，Direct/Plan/NeedUser 与 Research happy-path 真实模型验证已有证据。
+- 当前阶段：阶段 8 Research External Interfaces / Hugging Face MCP 已完成。Stage 9 Context / Memory 的统一设计和 `plans/modules/CONTEXT_MEMORY_PLAN.md` 已确认，生产实现尚未开始；下一施工入口是 Stage 9A Context Engine，取得独立 `go` 并冻结接口后才进入 Stage 9B Long-term Memory。
 
 核心执行链路：
 
@@ -87,7 +87,7 @@ User Input
 当前 runtime 要求：
 
 - LangGraph 接入真实主流程，但不吞掉自研 runtime。
-- MCP 至少支持 Calendar fixture 读取工具，真实 OAuth 只读可作为后续增强。
+- MCP 至少支持 Research 公开论文搜索：LifeOps 通过本地 stdio MCP Server 调用 Hugging Face paper API；Calendar MCP 不属于当前 V1。
 - Recovery 先做解释型恢复，不做自动 replay。
 - Task / Plan / Recovery 三者边界必须有测试证明。
 
@@ -123,7 +123,7 @@ User Input
 - Runtime context assembly 初版。
 - Memory 初版。
 - Research / Personal Knowledge + Travel 内部 domain。
-- Calendar MCP fixture read integration。
+- Research Hugging Face paper MCP read integration。
 - Planner / Executor / ExecutionFeedback。
 - Trace / Inspector。
 - Eval Harness v0。
@@ -319,17 +319,20 @@ app/
       client.py
       parser.py
       adapter.py
+    mcp/
+      models.py
+      errors.py
+      client.py
+    research_mcp/
+      server.py
+      provider.py
+      adapter.py
     travel_fixture/
       calendar.py
       weather.py
       transport.py
       lodging.py
       places.py
-    calendar_mcp/
-      server_fixture.py
-      client.py
-      tools.py
-      models.py
 
   context/
     assembler.py
@@ -459,7 +462,7 @@ SQLite 存储：
 
 - research_topics / research_sources / research_notes / research_briefs。
 - trips / travel_constraints / travel_itineraries / travel_decisions。
-- semantic_memories。
+- memory_index（Stage 9B 计划新增；只保存索引和 lifecycle metadata，不保存 Memory 全文）。
 - tool_calls。
 - eval_runs。
 - eval_results。
@@ -472,7 +475,8 @@ SQLite 存储：
 
 继续使用 Markdown / JSON / fixture 文件的内容：
 
-- `profile.md` 和 `profile.example.md`。
+- 每 session 的 conversation turns.jsonl 与 summaries.jsonl（Stage 9A 计划）。
+- `profile.md` 和不可变 Memory version 文件（Stage 9B 计划）。
 - skill / source manifest。
 - eval fixture。
 - calendar fixture data。
@@ -498,8 +502,7 @@ SQLite 存储：
 | Skill System | 已有 skill routing / reference loader 经验，当前重构计划缺少独立位置 | 兼容 Agent Skills / Deep Agents 文件约定；LifeOps 保留 routing / prompt contribution / progressive references，Skill 不参与工具授权 | `plans/modules/SKILL_SYSTEM_PLAN.md` |
 | Tool System | registry 和 business tool 偏大 | LifeOps 原生 definition / registry / Policy authorization / Guardrail / gateway / result；LangChain 只做可选 adapter | `plans/modules/TOOL_SYSTEM_PLAN.md` |
 | Policy / Safety | write policy、interaction policy 分散 | 统一 PolicyDecision 和 confirmation model | `plans/modules/INTENT_POLICY_PLAN.md` |
-| Context | 功能强但复杂 | 初版精简 request context，后续版本迁移压缩/ref/index | `plans/modules/CONTEXT_PLAN.md` |
-| Memory | JSON store + 简单检索 | SQLite semantic memory + profile markdown + request-local injection | `plans/modules/MEMORY_PLAN.md` |
+| Context / Memory | V0 有 context budget/summary 与 profile/authorized memory 经验，但聚合和存储偏复杂 | Stage 9A 用 session JSONL + rolling summary 组装一次 bounded conversation context；Stage 9B 用只读 profile + immutable Memory files + SQLite index 接入冻结接口 | `plans/modules/CONTEXT_MEMORY_PLAN.md` |
 | Research / Personal Knowledge | V0 Hugging Face News Skill + 临时 source/helper loop | SQLite knowledge facts + provenance + Hugging Face 外部只读 briefing + future Context/Memory ports | `plans/modules/RESEARCH_KNOWLEDGE_DOMAIN_PLAN.md` |
 | Travel | 无完整 V0 domain | SQLite Trip / Itinerary facts + fixture-backed external ports + planning-only confirmation boundary | `plans/modules/TRAVEL_DOMAIN_PLAN.md` |
 | Planner | V0 transient plan | 保留跨 Domain PlanRun / PlanStep；step 如何匹配候选 tools 留到 Planner 模块设计，Planner 不授权、不执行、不自动写 Domain facts | `plans/modules/PLANNER_PLAN.md` |
@@ -507,7 +510,7 @@ SQLite 存储：
 | Observability Logging | V0 已有三通道文件日志经验，当前重构阶段误放进 SQLite | event JSONL / LLM JSONL / application.log 三通道文件日志 | `plans/modules/OBSERVABILITY_LOGGING_PLAN.md` |
 | Recovery | run/action JSON 摘要 | 基于 event logs 和必要业务状态生成解释型 recovery context，不自动 replay | `plans/modules/RECOVERY_PLAN.md` |
 | LangGraph | 尚未正式接入 | StateGraph 主编排，自研节点 | `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md` |
-| MCP Calendar | 旧 mock package MCP | Calendar fixture 读取 MCP + optional OAuth 只读| `plans/modules/CALENDAR_MCP_PLAN.md` |
+| Research MCP | 旧 mock package MCP | 官方 SDK stdio client/server + Hugging Face paper search + LifeOps Research Port/Adapter | `plans/modules/RESEARCH_MCP_PLAN.md` |
 | DAG | 尚未实现 | 独立串行 DAG Scheduler | `plans/modules/DAG_SCHEDULER_PLAN.md` |
 | Eval | 零散 tests | eval case / runner / assertions / reports | `plans/modules/EVAL_HARNESS_PLAN.md` |
 | Inspector | log viewer / context inspector 分散 | trace reader + runtime report CLI | `plans/modules/INSPECTOR_PLAN.md` |
@@ -693,10 +696,10 @@ Research / Personal Knowledge
 Travel
 ```
 
-外部 integration：
+当前 V1 外部 integration：
 
 ```text
-Calendar MCP 只读
+Hugging Face Paper MCP 只读
 ```
 
 选择标准：
@@ -717,6 +720,7 @@ Research / Personal Knowledge 适合：
 - 大 Context、progressive reference、检索和 summarization 测试。
 - Domain fact、临时 Context、LLM synthesis 与长期 Memory 的边界。
 - fetch -> parse -> dedupe -> rank -> brief -> confirm save 的 Plan-and-Execute / DAG 场景。
+- keyword paper search -> request-local observation -> confirm save -> Topic link 的 MCP 场景。
 - source failure、内容变化和引用完整性的 Recovery / Eval 场景。
 
 Travel 适合：
@@ -725,15 +729,15 @@ Travel 适合：
 - Calendar / weather / transport / lodging / place 的 fixture-backed external Port。
 - 外部 READ、业务 WRITE、confirmation、过期数据和副作用真实性。
 - 并行查询、部分失败、DAG、Recovery 和长期历史 Trip Context。
-- 阶段 10 Calendar MCP 通过 adapter 替换 fixture，不修改 Travel Domain。
+- Calendar fixture 保持当前 V1；未来若接真实 HTTP/MCP provider，只替换 typed Port Adapter，不修改 Travel Domain。
 
-Calendar MCP 适合：
+Hugging Face Paper MCP 适合：
 
 - 外部只读工具。
-- MCP 学习。
-- Planning context。
-- Fixture / OAuth fallback。
-- 隐私和 permission 讨论。
+- stdio MCP initialize / discovery / `tools/call` 学习。
+- request-local paper observation、provenance 与确认保存。
+- deterministic fixture / public provider smoke 分层验证。
+- MCP Tool、LifeOps Tool、Policy 与 Domain fact 的边界讨论。
 
 ## 11. Eval Harness 总设计
 
@@ -890,7 +894,7 @@ docs/RUNTIME_CONCEPTS.md
 - Skill routing 支持一次选择多个 Skill并形成业务候选 Tool；空 Skill 绑定的通用 Tool 独立加入候选。Policy 只按 effect 决定动作权限，二者与 registry 求交得到 `AllowedToolSet`，Guardrail 再检查 confirmation 和具体调用。
 - Tool System 再处理 tool definition、Policy authorization resolution、pre/post Guardrails、Tool Gateway、execution evidence 和 domain tool 的运行时边界。
 - Skill 文件兼容 Agent Skills / Deep Agents 的 `SKILL.md` 与 progressive disclosure 约定；Tool 使用 LifeOps 原生安全核心和可选 LangChain adapter。
-- 两个 Domain 必须为阶段 6-11 的 Executor、Planner、Context、Memory、Recovery、Feedback、Calendar MCP、Inspector、Eval 和 DAG 提供稳定 Port / read model / evidence 接口，但不提前实现这些模块。
+- 两个 Domain 必须为阶段 6-11 的 Executor、Planner、Context、Memory、Recovery、Feedback、Inspector、Eval 和 DAG 提供稳定 Port / read model / evidence 接口；Research 在阶段 8 通过既有 Tool / Port 边界增加 MCP Adapter，不建立专用执行循环。
 
 交付：
 
@@ -923,6 +927,8 @@ docs/RUNTIME_CONCEPTS.md
 
 ### 阶段 7：Plan-and-Execute Planner
 
+状态：已完成。Direct/Plan/NeedUser route、preview-first PlanRun、revision command、串行 PlanController、一次 bounded replan、PlanFinalizer、语义 observability、Research 主 E2E、最小 cross-domain E2E 与真实模型 smoke 均已验证；最终 Planner 聚焦回归 `79/79`、统一离线回归 `379/379` 通过，Stage 8 gate 为 `go`。
+
 目标：
 
 - 在阶段 6 ReAct Executor 之上实现跨 Domain Plan-and-Execute：简单请求直接进入 Executor，复杂、多步骤或有依赖请求由 Planner 生成计划并逐步调度同一个 Executor。
@@ -932,25 +938,45 @@ docs/RUNTIME_CONCEPTS.md
 - `plans/modules/PLANNER_PLAN.md`。
 - 可持久化但不作为业务事实的 PlanRun / PlanStep。
 - Planner route、计划生成、逐 step 调度和 final answer handoff。
-- PlanStep 与候选 Tool 的匹配模型。
-- bounded replan 的控制接口；正式 Recovery / ExecutionFeedback 在阶段 9 接入。
-- Context / Memory 只通过阶段 6 预留接口提供 empty/fake 数据，不把尚未实现的模块写进 Planner 核心。
+- PlanStep 到 Executor 的窄输入，以及 Executor 基于 filtered catalog 的候选 Tool 选择。
+- bounded replan 的控制接口；正式 Recovery / ExecutionFeedback 在阶段 10 接入。
+- Context / Memory 只通过阶段 6 预留接口提供 empty/fake 数据，阶段 9 再接真实 provider，不把尚未实现的模块写进 Planner 核心。
 
-### 阶段 8：Context / Memory
+### 阶段 8：Research External Interfaces / Hugging Face MCP
+
+状态：已完成。`plans/modules/RESEARCH_MCP_PLAN.md` 步骤 1-14、最终 9 Tool contract、offline regression、真实 Hugging Face provider smoke、真实 LLM happy path 与文档 gate 均已关闭；Stage 9 gate 为 `go`。
 
 目标：
 
-- 在不改写 Executor / Planner 控制骨架的前提下，实现 request-local context assembly 和受控 memory injection。
+- 在不改写 Executor / Planner 控制骨架、不升级 SQLite schema 的前提下，补齐 Research 用户业务 Tool，并用官方 MCP SDK、本地短生命周期 stdio Server 和 Hugging Face paper API 实现真实论文搜索。
+- 把 MCP result 转换为 request-local `ExternalObservation`；只有确认后的 `save_source` / `link_items` 才形成长期事实。
+- 把模型可见 Research Tool 收敛为 9 个，合并 briefing workflow，但保留底层 fetch / parse / rank / draft 机制和独立测试。
 
 交付：
 
-- `plans/modules/CONTEXT_PLAN.md`。
-- `plans/modules/MEMORY_PLAN.md`。
-- Context report / budget / assembly。
-- Memory repository / retriever / profile。
-- 多轮 session context，并接入阶段 6/7 已定义的 provider 接口。
+- `plans/modules/RESEARCH_MCP_PLAN.md`。
+- 通用 one-shot stdio MCP client、Hugging Face Paper MCP Server 和 Research Adapter。
+- `research.search_papers`、`research.build_brief`、Topic/Link/Revision Tools 与最终 9 Tool contract。
+- deterministic/offline MCP E2E 与真实 Hugging Face provider smoke。
 
-### 阶段 9：Recovery / Feedback
+### 阶段 9：Context / Memory
+
+状态：统一设计与 `plans/modules/CONTEXT_MEMORY_PLAN.md` 已确认，生产实现尚未开始。下一施工入口是 Stage 9A；Stage 9A 独立取得 `go` 并冻结交接接口前，不得开始 Stage 9B。
+
+目标：
+
+- Stage 9A 在不改写 Executor / Planner 控制骨架的前提下，实现不绑定 Domain 的 session conversation Context：每个 RuntimeRequest 一次 bounded assembly，Direct、Planning 与 PlanStep 共享；turns/summary 只写 session JSONL。
+- Stage 9B 只实现用户编辑的只读 Profile 和用户明确确认保存的长期 Memory；全文写不可变文件，SQLite 只写 index/lifecycle。
+- Context、Memory、Planner output、MCP result、conversation summary 和模型文本都不能成为 Tool 授权或 Domain 事实来源。
+
+交付：
+
+- `plans/modules/CONTEXT_MEMORY_PLAN.md`。
+- Stage 9A：conversation JSONL repository、rolling summary、Context report/budget/assembly、empty/fake Profile/Memory provider、5 个真实 LLM happy paths和独立 go/no-go。
+- Stage 9B：read-only Profile、immutable Memory files、SQLite index、retriever、save/list/search/update/archive Tools、5 个真实 LLM happy paths和独立 go/no-go。
+- Stage 9A 不调用 Research/Travel Domain candidate provider；现有 provider contract 保留，但不是 session conversation assembly 的 production 输入。
+
+### 阶段 10：Recovery / Feedback
 
 目标：
 
@@ -963,20 +989,6 @@ docs/RUNTIME_CONCEPTS.md
 - session event logs / recovery context。
 - bounded replan 的真实反馈接入。
 - LangGraph checkpoint / persistence 作为暂停、恢复、fault tolerance 的候选实现；不承担外部副作用回滚。
-
-### 阶段 10：Calendar MCP
-
-目标：
-
-- 实现外部只读工具边界和 MCP 学习切片。
-
-交付：
-
-- `plans/modules/CALENDAR_MCP_PLAN.md`。
-- fixture MCP server。
-- read tools。
-- 可选 OAuth adapter 设计。
-- calendar eval fixture。
 
 ### 阶段 11：Inspector / Eval / DAG
 
@@ -1018,7 +1030,7 @@ docs/RUNTIME_CONCEPTS.md
 - Intent / Policy 能阻止 plan 关键词误路由 和未授权写入。
 - LangGraph 编排真实接入。
 - Research / Personal Knowledge + Travel 可 read/write。
-- Calendar fixture 读取可用于 planning context。
+- Hugging Face paper search 可经 MCP 产生 request-local observation，并在确认后保存/关联到 Research Topic。
 - Domain fact / PlanRun / Context / Memory 边界有测试。
 - 一个 PlanRun 可交叉调用 Research 与 Travel tools，并在部分成功后从失败步骤恢复或 replan。
 - Executor 返回 结构化反馈。

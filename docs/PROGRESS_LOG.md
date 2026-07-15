@@ -23,7 +23,7 @@
 
 项目已完成阶段 4：LangGraph Orchestration 骨架。
 
-阶段 5 功能实现与稳定化均已完成。Stage 6 ReAct Executor 实施步骤 1-12 已全部完成，完成标准与统一离线回归通过，Stage 7 gate 为 `go`。下一阶段可以创建并确认 `plans/modules/PLANNER_PLAN.md`，当前尚未实施 Planner。
+阶段 5 功能实现与稳定化、Stage 6 ReAct Executor、Stage 7 Plan-and-Execute Planner 和 Stage 8 Research External Interfaces / Hugging Face MCP 均已完成。Stage 9 Context / Memory 的统一设计和模块计划已于 2026-07-15 确认，生产实现尚未开始；下一施工入口是 Stage 9A Context Engine，独立取得 `go` 后才能进入 Stage 9B Long-term Memory。
 
 - Storage schema 开发基线已在 2026-07-14 从旧 V1-V8 压缩为单一 canonical V1：新空库一次建立当前 Runtime、Research、Travel 的最终表、约束和索引，不再保留开发期 `ALTER` / 临时表搬运。迁移聚焦测试 `6/6`、统一离线回归 `299/299` 与 compileall 通过；本地旧库先备份并升级到最终结构，再重标 V1，`PRAGMA integrity_check=ok` 且原有 `7` 条 run record 保留。未来真实 schema 变化从 V2 开始追加。
 
@@ -40,6 +40,17 @@
 - Stage 6 日志收口已完成：新增 request-local `LlmInteractionSink` / `RequestLlmLog`，Skill selection 与每步 Executor model decision 都把实际 provider request、结构化 response、provider/model、status 和安全 error code 写入 session `llm.jsonl`；interaction 使用独立 `seq`，provider exception text 不落盘，日志写失败不改变主结果。file-backed offline smoke 已验证 current Runtime → Skill → Executor → Gateway → final 的 `events.jsonl` 顺序，以及 `1` 次 Skill selection + `2` 次 Executor decision 的 `llm.jsonl` 落盘；active `application.log` handler 在 service close 时释放。
 - Prompt 分层已补强：outer graph 继续只负责编排且不新增全局 prompt；Skill selector prompt 固定零/多 Skill、跨 Domain、精确 ID 和严格 JSON 路由契约；Executor prompt 吸收 V0 中仍适用于当前能力的 LifeOps 身份、Tool evidence、临时上下文、显式 WRITE、失败处理和简洁回答规则，同时继续保持 ToolCall/final 二选一、filtered catalog 与 private reasoning 边界。相关 adapter、selector 和 orchestration 聚焦测试 `17/17` 通过。
 - Stage 6 Executor 实施步骤 12 已完成：两层 compiled graph、bounded loop、filtered catalog、Gateway-only execution、逐 WRITE confirmation、safe observation/evidence、request-local hooks 与三类日志边界均已同步到当前文档。最终统一离线回归 `298/298`（`2.753s`）通过；真实 LLM/provider E2E 未运行，作为非阻塞外部可用性验证单独保留。Stage 6 结论为 `go`。
+
+- Stage 7 PlanningRouter、Planner、PlanRepository、PlanningService、PlanController 与 PlanFinalizer 已完成：简单请求保持 Direct ReAct，复杂请求生成 preview-first revision，信息不足返回 NeedUser；Planner 输出不包含 Tool、arguments 或授权。
+- PlanRun/PlanStep 已通过 schema V2/V3 持久化，支持跨连接 preview 读取、revision-aware confirm/modify/cancel、durable confirmed constraints、原子 Step result/budget、interrupted stop 与一次 bounded replan。Planning core 依赖 `PlanRepository` Protocol，不直接绑定 SQLite、Domain 或 LangGraph。
+- confirmed PlanRun 共享一个 request-local Tool execution scope，每个 Step 使用独立 ReAct state且只接收声明依赖结果；WRITE 继续逐 action confirmation 并以 Gateway evidence 为事实。Finalizer 只读取全部 revision 的 completed safe summaries/evidence，provider 失败使用 deterministic fallback。
+- Stage 7 E2E 已覆盖 Research 主链路、Research READ → Travel READ、preview/confirm、request-local handoff、WRITE/零写、replan/reconfirm/exhausted、预算、安全拒绝、stale revision、restart/interrupted 和 Finalizer fallback。Direct/Plan/NeedUser 与 Research happy-path 已完成真实模型 smoke。
+- Stage 7 稳定化关闭 cancel 终态、约束丢失、跨 revision Finalizer 汇总和具体 Repository 耦合问题；Executor Context/Memory/Feedback/Recovery hooks 可接收可选 PlanStep identity，PlanningSnapshotProvider 已成为显式可信 scope seam。本轮没有实现 Stage 8/9 业务。
+- Stage 7 最终验证为新增/受影响层 `82/82`、Planner 聚焦回归 `79/79`、统一离线回归 `379/379`、`compileall` 和 `git diff --check` 全部通过。完成标准逐项成立，Stage 8 gate 为 `go`。
+- Stage 8 Research MCP 计划在 2026-07-15 完成确认并实施关闭：MCP 主线使用本地短生命周期 stdio Server 包装 Hugging Face public paper search，不使用 OpenAlex/API key；论文复用 `ExternalObservation`、Source/Snapshot 和确认保存链，不新增 schema，不修改 Planner/Executor。模型可见 Research Tool 已原子收敛为 9 个；Context / Memory 后移到 Stage 9，Recovery / Feedback 后移到 Stage 10，Calendar MCP 从当前 V1 路线移除。
+- Stage 8 实现了通用 one-shot stdio MCP client、只暴露 `search_papers` 的本地 Server、Hugging Face provider façade、Research `PaperSearchPort`/Adapter 与最终业务 Tool surface。`research.search_papers` 显式输出 paper ID、bounded authors/summary、published time、canonical URL 和 provenance；混合非法 provider item 保留合法 observation 并报告 `invalid_count`，全部非法 fail-closed。搜索默认零写，只有确认后的 `save_source` / `link_items` 才形成长期事实。
+- Stage 8 最终验证：新增契约收口聚焦测试 `28/28` 通过；统一离线回归执行 `414` 个测试，`412` 通过、`2` 个显式 live gate 跳过；真实 LLM → Direct route → Executor → Gateway → `research.search_papers` → one-shot stdio MCP → Hugging Face public API happy path 在一次 Tool 请求、零 Tool failure、一次成功和 SQLite 零写条件下通过。`compileall` 与 `git diff --check` 通过后，Stage 8 结论为 `go`，Stage 9 gate 为 `go`。
+- Stage 9 设计已于 2026-07-15 确认并记录到 `plans/modules/CONTEXT_MEMORY_PLAN.md`：Context 定义为不绑定 Domain 的 session conversation context，原始 turns/summary 使用每 session JSONL 而不写 SQLite；Stage 9A 一次请求冻结一份 bounded assembly，并用 empty/fake Memory provider。Stage 9B 只支持用户编辑的只读 Profile 和用户明确确认保存的 Memory，全文使用不可变文件、SQLite 只保存索引/lifecycle。两阶段各有 5 个真实 LLM happy paths，当前均未开始生产实现。
 
 - Stage 5 稳定化步骤 6-11 已完成：公共 Tool schema、依赖方向、Runtime/Tool/Domain contract 与事件 payload 已增加兼容性门禁；每个 run 显式拥有一个 execution scope，同 run 复用、跨 run 隔离。
 - Runtime 公共结果已精简，内部 exception、Intent/Policy 摘要和 trace summary 不再进入 `RuntimeResult`；run lifecycle record 与 Domain WRITE transaction 已分离，LLM/external read 不占用 SQLite 写 transaction，异常 run record 可闭合。
@@ -88,7 +99,7 @@
 - Travel 先定义 typed external Ports 并使用 fixture adapters；真实 Calendar MCP 仍在阶段 10 接入。
 - 阶段 5 后的施工顺序已调整为：阶段 6 ReAct Executor、阶段 7 Plan-and-Execute Planner、阶段 8 Context / Memory、阶段 9 Recovery / Feedback，再进入 Calendar MCP 与 Inspector / Eval / DAG。Executor / Planner 先建立外层控制框架和窄扩展接口，后续状态模块通过接口接入。
 - Domain 已明确为业务 models/service/repository/tools 的逻辑分组，不是独立 Agent 或执行边界；同一通用 PlanRun 可以交叉调用 Research 与 Travel tools。
-- 简单请求未来走 ReAct Executor；复杂、多步骤或有依赖请求走 Planner → Executor。PlanStep 的字段和 Tool 匹配方式留到 Planner 模块施工时设计，WRITE 默认逐 action / step 授权。
+- 简单请求走 Direct ReAct；复杂、多步骤或有依赖请求走 Planner preview → confirm → Controller → Executor。PlanStep 只表达 objective、expected outcome 和 dependencies，不绑定 Tool；WRITE 保持逐 action 授权。
 - PlanRun / PlanStep 可为跨进程恢复而持久化，但不是业务事实；跨 Domain 部分成功时不做全局回滚，保留成功 evidence，从失败 step 恢复或 bounded replan。
 - LangGraph checkpoint 是未来保存 graph/thread state、interrupt、fault tolerance 和 time travel 的候选机制，不负责撤销已经提交的 Domain WRITE 或外部副作用。
 
@@ -99,6 +110,7 @@
 - Observability 文件日志已完成阶段 3.5 初版。
 - LangGraph Orchestration 已完成阶段 4 初版。
 - 阶段 5 的 Skill System、Tool System、Research、Travel 与稳定化步骤 1-15 均已完成，Stage 6 gate 为 `go`。
+- 阶段 6 ReAct Executor、阶段 7 Plan-and-Execute Planner 与 Stage 8 Research MCP 均已完成；Stage 9 Context / Memory 模块计划已确认，下一实现入口是 Stage 9A Context Engine。
 - 旧 runtime 已归档到 `legacy_v0/app/`。
 - 当前代码放在 `app/`。
 - 当前计划放在 `plans/`。
@@ -114,6 +126,7 @@
 - `app/intent/`：intent models、规则 classifier、LLM classifier 空实现和 `IntentService`。
 - `app/policy/`：policy models 和 `PolicyService`；`allowed_effects` 是动作授权结果。
 - `app/orchestration/`：`GraphState`、policy route、普通 node 函数、compiled `StateGraph`、`RuntimeOrchestrator` 和 Intent / Policy / route 语义事件。
+- `app/planning/`：Planning route、typed plan models/limits、preview command lifecycle、SQLite repository adapter、串行 Controller、bounded replan、Finalizer 和 Planning 语义事件。
 - `app/observability/logger.py`：应用拥有的 request-local `TraceSink` 接口；Graph 外关键阶段可继续使用同一事件边界。
 - `config/default.json`：声明默认数据库路径 `data/lifeops.sqlite3` 和默认日志根目录 `logs/sessions`。
 - `main.py`：当前 CLI 骨架入口，负责 config、SQLite、migration、文件日志 bootstrap 和单轮输入输出。
@@ -135,7 +148,7 @@
 uv run python main.py
 ```
 
-`main.py` 已存在并接入阶段 5 最小 Direct Executor，但还不是包含 ReAct、Planner、Context 和 Memory 的完整产品 CLI。
+`main.py` 已接入 ReAct、Plan-and-Execute 与真实 Research MCP，支持普通输入以及 `confirm-plan`、`modify-plan`、`cancel-plan` 结构化命令；Context / Memory 与异步恢复尚未实现，因此仍不是最终产品 CLI。
 
 当前 `main.py` 已接入 `config/default.json`、SQLite migration 和 `RuntimeService`。`RuntimeService` 当前执行：
 
@@ -145,7 +158,12 @@ RuntimeRequest
 -> classify_intent
 -> decide_policy
 -> policy conditional route
--> prepare_skills -> execute_tool / requires_confirmation / deny
+-> prepare_skills -> route_planning
+   -> direct: execute_executor
+   -> plan: PlanPreview
+   -> need_user: clarification
+-> PlanCommand confirm/modify/cancel
+   -> PlanController -> ReactExecutor per Step -> PlanFinalizer
 -> finalize
 -> RuntimeResult
 ```
@@ -161,7 +179,7 @@ RuntimeRequest
 - `docs/ARCHITECTURE.md` 已记录 Runtime Core、Intent / Policy、LangGraph Orchestration、Skill、Tool Gateway、Guardrails 和 Domain 纵向切片边界。
 - `docs/RUNTIME_CONCEPTS.md` 已记录 Runtime Core、Intent Layer、Policy / Permission Layer、Write Safety、LangGraph Orchestrator、LangGraph vs LangChain、Observability 和 SQLite Local Persistence 学习章节。
 - `plans/modules/STORAGE_SQLITE_PLAN.md`、`plans/modules/RUNTIME_CORE_PLAN.md`、`plans/modules/INTENT_POLICY_PLAN.md`、`plans/modules/OBSERVABILITY_LOGGING_PLAN.md` 和 `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md` 已记录完成状态。
-- Stage 6 已关闭。下一施工入口是为 Stage 7 单独创建并确认 `plans/modules/PLANNER_PLAN.md`；本次未创建或实施 Planner。
+- Stage 6、Stage 7 与 Stage 8 均已关闭；Stage 9 统一模块计划已确认但尚未实施。下一施工入口是 `plans/modules/CONTEXT_MEMORY_PLAN.md` 的 Stage 9A 步骤 1。
 
 当前有效测试命令：
 

@@ -49,6 +49,23 @@ class MainCliTest(unittest.TestCase):
         self.assertTrue(runtime.closed)
         output.assert_any_call("error: turn failed")
 
+    def test_terminal_plan_result_clears_current_preview(self) -> None:
+        current = {"type": "plan_preview", "plan_id": "plan_1", "revision": 1}
+        result = RuntimeResult(
+            "run_1",
+            "session_1",
+            RuntimeStatus.OK,
+            "Plan cancelled.",
+            tool_result={
+                "type": "plan_result",
+                "plan_id": "plan_1",
+                "revision": 1,
+                "plan_status": "cancelled",
+            },
+        )
+
+        self.assertIsNone(cli._updated_current_plan(current, result))
+
 
 class _RecordingRuntime:
     def __init__(self, *, error: AppError | None = None) -> None:

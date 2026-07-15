@@ -190,7 +190,9 @@ def _request(run_id: str = "run_test") -> RuntimeRequest:
 
 
 class _ExplodingContextProvider:
-    def load(self, request: RuntimeRequest) -> tuple[ExecutorContextContribution, ...]:
+    def load(
+        self, request: RuntimeRequest, *, plan_step=None
+    ) -> tuple[ExecutorContextContribution, ...]:
         raise RuntimeError("private-context-path")
 
 

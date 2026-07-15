@@ -20,13 +20,20 @@
 - LifeOps 原生 Tool Gateway、Policy authorization resolution、pre/post Guardrails 和 execution evidence。
 - LangChain tool schema / ToolNode / middleware 作为可选 adapter，不替代 Policy、Guardrail 或业务事实来源。
 - Hugging Face 白名单外部来源、provenance、临时 observation 与用户确认保存边界。
-- Travel typed Port + fixture adapter；真实 Calendar MCP 仍留在阶段 10。
+- Travel typed Port + fixture adapter；Calendar MCP 不属于当前 V1，未来仍只能作为 Calendar Port 的可选 Adapter。
+
+阶段 8 的模块计划把学习范围扩展到：
+
+- MCP stdio client/server 的短生命周期 session、initialize 和可靠关闭。
+- MCP `tools/list`、Tool schema 校验、`tools/call` 与 structured result。
+- MCP Adapter 把 provider result 转换成 LifeOps-owned `ExternalObservation`，同时保留 Policy / Guardrail / Gateway 边界。
+- Hugging Face public paper search 的 no-results、timeout、rate limit、invalid result 和 provenance。
 
 ## 选择标准
 
 - 优先官方文档、正式 specification 和成熟开源项目的核心文档。
 - 每个链接都必须能解释当前阶段已实现、正在实现或明确准备学习的 runtime 边界。
-- 不提前收录 MCP、Eval Harness、DAG Scheduler、长期 Memory 或完整多轮 human-in-the-loop 的实现资料。
+- 不提前收录 Eval Harness、DAG Scheduler、复杂 RAG/向量服务或完整多轮 human-in-the-loop 的实现资料；MCP 当前只收录 Stage 8 已确认的 stdio Tool 调用切片，Memory 只收录 Stage 9 已确认的轻量边界。
 - 如果一个主题只是后续扩展点，而不是当前阶段的学习重点，先放在“暂不收录”。
 
 ## 阶段 3：Runtime Core / Intent / Policy
@@ -42,16 +49,6 @@
 - [OpenAI Agents SDK - Results](https://openai.github.io/openai-agents-python/results/)  
   学习重点：run result、final output、intermediate items 与执行状态的边界。对照本项目为什么 `RuntimeResult` 只是本轮展示结果，不是业务事实来源，也不是写入授权来源。
 
-### SQLite schema / migration baseline
-
-- [SQLite - CREATE TABLE](https://www.sqlite.org/lang_createtable.html)
-  学习重点：表级 / 列级约束、主键、唯一约束、CHECK 与外键声明。对照 LifeOps canonical V1 如何一次建立当前最终表结构。
-
-- [SQLite - Foreign Key Support](https://www.sqlite.org/foreignkeys.html)
-  学习重点：外键启用方式与 `ON DELETE` 行为。对照 `connect_sqlite()` 的 `PRAGMA foreign_keys = ON` 以及 Domain 表的 CASCADE / RESTRICT 边界。
-
-- [SQLite - CREATE INDEX](https://www.sqlite.org/lang_createindex.html)
-  学习重点：普通、唯一和 partial index。对照 itinerary idempotency key 的非空唯一索引。
 
 ### Structured Output / Intent
 
@@ -192,9 +189,6 @@ LifeOps 自研 runtime
 - [LangChain Tools](https://docs.langchain.com/oss/python/langchain/tools)
   学习重点：tool schema、结构化输入输出、`ToolRuntime` 和 `ToolNode`。阶段 5 已评估 `StructuredTool`，当前因为没有真实 LangChain 调用方且不会减少 schema/invocation glue而不实现 adapter；LifeOps `ToolGateway` 仍负责 Policy authorization、Guardrail 和 execution evidence。未来接入时尤其要避免让 framework callable 或 store 绕过 Gateway 保存业务事实或 Memory。
 
-- [Python typing.Protocol](https://docs.python.org/3/library/typing.html#typing.Protocol)
-  学习重点：用 structural subtyping 定义小而稳定的 external Port。Travel 的 Calendar、Weather、Transport、Lodging、Place adapters 应能用 fixture 和未来真实实现共享 contract，而不让 Domain 依赖具体 provider。
-
 ### Guardrails / Human Approval 对照
 
 - [LangChain Guardrails](https://docs.langchain.com/oss/python/langchain/guardrails)
@@ -237,16 +231,87 @@ LifeOps 自研 runtime
 - [LangGraph interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)
   学习重点：理解暂停、恢复、checkpointer 和 side-effect 重放风险。本阶段只实现同 run synchronous confirmation provider，不提前实现跨进程/跨 run pending execution；未来若引入 interrupt，必须重新证明 execution scope、幂等和已提交副作用边界。
 
+## 阶段 7：Plan-and-Execute Planner
+
+### Plan-and-Execute 与 ReAct 分工
+
+- [Plan-and-Solve Prompting](https://aclanthology.org/2023.acl-long.147/)
+  学习重点：理解“先把复杂目标拆成较小子目标，再逐步执行”的基本动机。LifeOps 不保存模型 private reasoning；落地对象是可验证的 `PlanStep` 目标、预期结果和显式依赖。
+
+- [ReAct: Synergizing Reasoning and Acting in Language Models](https://arxiv.org/abs/2210.03629)
+  学习重点：对照 Planner 与 ReAct 的不同时间尺度。Planner 负责跨 Step 的目标分解，`ReactExecutor` 仍负责一个 Step 内的 action → observation 循环和 Tool 选择。
+
+### Planner 控制链与串行依赖编排
+
+- [LangGraph workflows and agents](https://docs.langchain.com/oss/python/langgraph/workflows-agents)
+  学习重点：对照 prompt chaining、routing、orchestrator-worker 与 evaluator-optimizer workflow。Stage 7 采用显式 route、完整计划、确定性 next-step 和一次 bounded replan，但不引入 worker 并发或额外 outcome judge。
+
+- [LangGraph Graph API](https://docs.langchain.com/oss/python/langgraph/graph-api)
+  学习重点：使用 node、edge、conditional route 和 cycle 表达 `PlanningRouter → Planner → PlanController → ReactExecutor → PlanFinalizer`，同时保持持久化 Plan state 与 request-local graph state 分离。
+
+### 当前明确延后的能力
+
+- [LangGraph persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
+  学习重点：只用来解释 Stage 7 为什么不配置 checkpointer。Plan state 可被读取不代表 Executor state、Domain temporary artifact 或已经提交的副作用可以自动恢复。
+
+- [LangGraph interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)
+  学习重点：只理解异步暂停/恢复所需的 durable execution 边界。Stage 7 保持同步 action confirmation，不实现跨请求 Executor resume、并行 Step 或 DAG Scheduler。
+
+## 阶段 8：Research External Interfaces / Hugging Face MCP
+
+### MCP stdio client/server 生命周期
+
+- [Model Context Protocol specification - Transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
+  学习重点：stdio 与 Streamable HTTP 的进程/连接模型、消息边界和 stdout 约束。LifeOps Stage 8 只实现本地短生命周期 stdio；Server stdout 只承载 MCP 消息，普通日志不污染协议流。
+
+- [MCP Python SDK](https://py.sdk.modelcontextprotocol.io/)
+  学习重点：官方 SDK 的 client/server 能力和标准 transport。当前实现使用官方 `mcp` 包，不迁移 V0 手写 JSON-RPC 或硬编码 protocol version。
+
+- [MCP Python SDK - Building servers](https://py.sdk.modelcontextprotocol.io/server/)
+  学习重点：用 `FastMCP` 定义 typed Tool 和 stdio Server，并理解 structured result、Server 生命周期和错误边界。LifeOps 本地 Server 只暴露 `search_papers`，不承载 Domain persistence 或授权。
+
+### MCP Tool discovery / call / structured result
+
+- [MCP Python SDK - Writing clients](https://py.sdk.modelcontextprotocol.io/client/)
+  学习重点：`ClientSession.initialize()`、`list_tools()`、`call_tool()`、stdio client context 和 structuredContent 解析。LifeOps 每次 `research.search_papers` 都新建一次 session，校验已配置 Tool schema 后只调用一次并可靠关闭。
+
+项目边界：
+
+- `tools/list` 是能力校验，不会把 MCP Server 动态发现的 Tool 加入 `AllowedToolSet`。
+- MCP `search_papers` 与模型可见 `research.search_papers` 是两个 contract；后者仍由 LifeOps Registry、Policy、Guardrail 和 Gateway 控制。
+- MCP SDK / provider 类型只存在于 integration 层，Adapter 输出必须是 LifeOps-owned `ExternalObservation`。
+
+### Hugging Face public paper provider
+
+- [Hugging Face HfApi Client](https://huggingface.co/docs/huggingface_hub/main/en/package_reference/hf_api)
+  学习重点：`list_papers(query, limit, token=False)`、`list_daily_papers(...)` 与 `paper_info(...)` 的 public-read contract。Stage 8 只用论文搜索/必要详情读取，结果经过 bounded validation 后成为 request-local observation；不下载全文或 PDF。
+
+- [Hugging Face Papers CLI](https://huggingface.co/docs/huggingface_hub/main/en/guides/cli#hf-papers)
+  学习重点：对照官方提供的 papers list/search/info/read 业务能力。LifeOps 只实现 search metadata 主线，不把 CLI、全文 markdown 或 Hub token 直接暴露给模型。
+
+本阶段明确不学习或实现：远程 Streamable HTTP、SSE、OAuth、MCP authorization、Resources、Prompts、Sampling、Roots、全文/PDF ingestion 和常驻 session pool。
+
+## 阶段 9：Context / Memory
+
+### short-term conversation 与 long-term memory
+
+- [LangChain Memory overview](https://docs.langchain.com/oss/python/concepts/memory)
+  学习重点：区分 thread/session 内 short-term memory 与跨 session 的 long-term memory，并理解长对话会带来模型注意力和成本问题。LifeOps 不直接采用框架 store，而是用自己的 JSONL conversation repository、rolling summary 和明确 Memory Tool 保持边界可解释。
+
+- [LangGraph Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
+  学习重点：理解 thread/checkpoint 与跨 thread store 是不同持久化问题。LifeOps Stage 9 明确不把 conversation 或长期 Memory 放进 outer GraphState/checkpoint，避免把可恢复 graph state 误当事实或授权。
+
+
 ## 暂不收录
 
 以下主题已经在总路线图或后续模块中规划，但不属于当前阶段学习链接范围。等对应模块施工时，再按模块 plan 补充权威链接：
 
-- MCP / Calendar external integration。
+- MCP remote Streamable HTTP / OAuth / authorization 与 Calendar integration。
 - Eval Harness。
 - DAG Scheduler。
 - Inspector / Debugger 的正式 UI 或 CLI。
 - 多轮 human-in-the-loop / pending confirmation state。
-- 长期 Memory、RAG、conversation summary。
+- 复杂 RAG、向量数据库、embedding/reranker 服务、后台自动 Memory 提取和多 Agent 共享 Memory。
 - Pydantic 或其他 schema validation 框架替换。
 
 ## 后续维护规则

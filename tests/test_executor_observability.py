@@ -111,12 +111,12 @@ class RecordingTrace:
 
 
 class _ExplodingFeedbackSink:
-    def record(self, step_or_result) -> None:
+    def record(self, step_or_result, *, plan_step=None) -> None:
         raise RuntimeError("private-hook-path")
 
 
 class _ExplodingRecoveryHook:
-    def on_stop(self, result) -> None:
+    def on_stop(self, result, *, plan_step=None) -> None:
         raise RuntimeError("private-hook-path")
 
 

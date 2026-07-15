@@ -16,6 +16,9 @@ from app.executor.models import (
     ExecutorMemoryContribution,
     ExecutorModelInput,
     FinalAnswerDecision,
+    GoalNotAchievedDecision,
+    PlanStepDependencyResult,
+    PlanStepExecutionInput,
     ToolActionDecision,
     ToolObservation,
 )
@@ -68,6 +71,7 @@ class OpenAIExecutorModelClientTest(unittest.TestCase):
         self.assertEqual([item["name"] for item in call["tools"]], ["travel.search_places"])
         self.assertNotIn("previous_response_id", call)
         self.assertTrue(call["instructions"].startswith(EXECUTOR_SYSTEM_PROMPT))
+        self.assertIn("Do not also emit a", call["instructions"])
         self.assertIn("Tool Observations as the source of truth", call["instructions"])
         self.assertIn("current user request explicitly asks", call["instructions"])
         self.assertIn("Selected Skill instructions:\nUse travel tools.", call["instructions"])
@@ -98,7 +102,6 @@ class OpenAIExecutorModelClientTest(unittest.TestCase):
     ) -> None:
         cases = (
             _response(),
-            _response(output_text="answer", calls=[_function_call("call_1", "travel.search_places", {})]),
             _response(calls=[_function_call("call_1", "travel.search_places", {}), _function_call("call_2", "travel.search_places", {})]),
             _response(calls=[_function_call("call_1", "unknown.tool", {})]),
             _response(calls=[SimpleNamespace(type="function_call", call_id="call_1", name="travel.search_places", arguments="[]")]),
@@ -110,6 +113,28 @@ class OpenAIExecutorModelClientTest(unittest.TestCase):
                 client = _configured_client()
                 with self.assertRaises(InvalidExecutorModelActionError):
                     client.decide(_model_input())
+
+    @patch("app.executor.model_adapter.load_dotenv")
+    @patch("app.executor.model_adapter.OpenAI")
+    def test_single_function_call_owns_decision_when_provider_adds_progress_text(
+        self, openai_type: Any, _load_dotenv: Any
+    ) -> None:
+        openai_type.return_value = _FakeOpenAIClient(
+            _response(
+                output_text="正在查询地点。",
+                calls=[
+                    _function_call(
+                        "call_1", "travel.search_places", {"query": "Tokyo"}
+                    )
+                ],
+            )
+        )
+
+        decision = _configured_client().decide(_model_input())
+
+        self.assertIsInstance(decision, ToolActionDecision)
+        self.assertEqual(decision.call.tool_name, "travel.search_places")
+        self.assertEqual(decision.call.arguments, {"query": "Tokyo"})
 
     @patch("app.executor.model_adapter.load_dotenv")
     @patch("app.executor.model_adapter.OpenAI")
@@ -161,6 +186,33 @@ class OpenAIExecutorModelClientTest(unittest.TestCase):
             "executor_invalid_model_action",
         )
 
+    @patch("app.executor.model_adapter.load_dotenv")
+    @patch("app.executor.model_adapter.OpenAI")
+    def test_plan_step_can_report_goal_not_achieved_but_direct_cannot(
+        self, openai_type: Any, _load_dotenv: Any
+    ) -> None:
+        response = _response(
+            calls=[
+                _function_call(
+                    "control_1", "report_goal_not_achieved", {"reason_code": "missing_scope"}
+                )
+            ]
+        )
+        api = _FakeOpenAIClient(response)
+        openai_type.return_value = api
+        decision = _configured_client().decide(_model_input(plan_step=_plan_step_input()))
+
+        self.assertEqual(decision, GoalNotAchievedDecision("missing_scope"))
+        call = api.responses.calls[0]
+        self.assertEqual(call["tools"][-1]["name"], "report_goal_not_achieved")
+        payload = json.loads(call["input"])
+        self.assertEqual(payload["plan_step"]["current_objective"], "形成摘要")
+        self.assertEqual(payload["plan_step"]["dependency_results"][0]["step_id"], "read")
+
+        openai_type.return_value = _FakeOpenAIClient(response)
+        with self.assertRaises(InvalidExecutorModelActionError):
+            _configured_client().decide(_model_input())
+
 
 def _configured_client() -> OpenAIExecutorModelClient:
     with patch.dict(
@@ -175,7 +227,7 @@ def _configured_client() -> OpenAIExecutorModelClient:
         return OpenAIExecutorModelClient()
 
 
-def _model_input() -> ExecutorModelInput:
+def _model_input(*, plan_step: PlanStepExecutionInput | None = None) -> ExecutorModelInput:
     return ExecutorModelInput(
         request=RuntimeRequest(
             user_input="查找东京地点",
@@ -199,6 +251,20 @@ def _model_input() -> ExecutorModelInput:
             ),
         ),
         step_index=2,
+        plan_step=plan_step,
+    )
+
+
+def _plan_step_input() -> PlanStepExecutionInput:
+    return PlanStepExecutionInput(
+        "plan_1",
+        1,
+        "write",
+        "完成研究",
+        "形成摘要",
+        "得到摘要",
+        (PlanStepDependencyResult("read", "读取完成。"),),
+        3,
     )
 
 

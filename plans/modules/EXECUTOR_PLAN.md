@@ -12,7 +12,7 @@
 - 让同一个 run 可以连续调用 Research、Travel 或通用 Tool，并始终复用 Runtime 创建的同一个 execution scope。
 - 允许模型在没有 Tool、Tool 成功或 Tool 失败后生成最终回答；最终回答不替代 Tool evidence，也不证明副作用成功。
 - 为阶段 7 Planner 提供可复用的 `ReactExecutor` 公共入口，而不是把循环只写死在当前 outer graph node 中。
-- 为阶段 8 Context / Memory 和阶段 9 Recovery / Feedback 预留窄 Protocol，并以 empty/no-op/fake 实现证明可插拔性；本阶段不实现这些模块。
+- 为阶段 9 Context / Memory 和阶段 10 Recovery / Feedback 预留窄 Protocol，并以 empty/no-op/fake 实现证明可插拔性；本阶段不实现这些模块。Stage 8 已在 2026-07-15 重排为 Research MCP，但继续复用现有 Tool/Gateway 边界。
 - 保持 deterministic、离线、可分层测试；任何模型、Tool、confirmation 或 loop failure 都收敛成结构化 stop reason 与安全 Runtime 结果。
 
 本阶段成功的标准不是“循环次数更多”，而是多步执行仍然遵守前五阶段已经建立的事实源、授权源、状态所有权、Gateway 和 observability 边界。
@@ -248,7 +248,7 @@ ExecutorContextProvider.load(request) -> tuple[ExecutorContextContribution, ...]
 ExecutorMemoryProvider.load(request) -> tuple[ExecutorMemoryContribution, ...]
 ```
 
-本阶段 production 使用 empty provider，测试使用 fake provider。它们不能修改 request、Policy、AllowedToolSet、Domain facts 或 execution scope。Stage 8 可以在不修改 Executor loop 的前提下提供真实实现；具体 retrieval、budget 和 compaction 仍由 Stage 8 设计。
+本阶段 production 使用 empty provider，测试使用 fake provider。它们不能修改 request、Policy、AllowedToolSet、Domain facts 或 execution scope。Stage 9 可以在不修改 Executor loop 的前提下提供真实实现；具体 retrieval、budget 和 compaction 仍由 Stage 9 设计。
 
 ### 7.4 confirmation provider
 
@@ -412,7 +412,7 @@ Gateway 已拥有 `tool.call.*` 与 `tool.guardrail.decided`，Executor 不重�
 
 每一步只做一个小范围变更；先写目标 contract，再修改对应实现，不通过放宽断言隐藏边界问题。
 
-1. **[已完成] 确认计划与冻结目标。** 用户已确认两层 graph、`max_steps=8`、不保存 reasoning、synchronous confirmation provider、Stage 8/9 empty hooks 和本阶段排除项；确认前未修改生产代码。
+1. **[已完成] 确认计划与冻结目标。** 用户已确认两层 graph、`max_steps=8`、不保存 reasoning、synchronous confirmation provider、Context/Memory 与 Recovery/Feedback empty hooks 和本阶段排除项；确认前未修改生产代码。后续路线图已把这些消费者调整到 Stage 9/10。
 2. **[已完成] 建立 Executor models 与 contract tests。** 新增 status、stop reason、limits、decision、observation、result 和最小 internal state；冻结字段、不变量、dependency direction 和敏感字段禁区。
 3. **[已完成] 建立 ports 与 empty/no-op/fake adapters。** 定义 model、Context、Memory、confirmation、Recovery 和 Feedback 接口；先证明它们不能授权、写业务事实或 replay。
 4. **[已完成] 实现纯 Executor graph 与 routes。** 建立独立 compiled cycle、step counting、final/tool/continue/stop/error route；使用 fake model 和 fake Gateway 完成 bounded-loop 单测。

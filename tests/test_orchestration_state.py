@@ -34,6 +34,7 @@ class OrchestrationStateTest(unittest.TestCase):
             "route": None,
             "skill_selection": None,
             "prompt_contributions": [],
+            "planning_route": None,
             "result": None,
             "error_code": None,
             "error_stage": None,

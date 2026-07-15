@@ -11,6 +11,9 @@ from app.executor.models import (
     ExecutorStatus,
     ExecutorStopReason,
     FinalAnswerDecision,
+    GoalNotAchievedDecision,
+    PlanStepDependencyResult,
+    PlanStepExecutionInput,
     ToolActionDecision,
     ToolObservation,
 )
@@ -30,6 +33,27 @@ class ExecutorContractTest(unittest.TestCase):
         self.assertEqual(
             tuple(item.name for item in fields(FinalAnswerDecision)),
             ("message",),
+        )
+        self.assertEqual(
+            tuple(item.name for item in fields(GoalNotAchievedDecision)),
+            ("reason_code",),
+        )
+        self.assertEqual(
+            tuple(item.name for item in fields(PlanStepDependencyResult)),
+            ("step_id", "safe_result_summary", "observations"),
+        )
+        self.assertEqual(
+            tuple(item.name for item in fields(PlanStepExecutionInput)),
+            (
+                "plan_id",
+                "revision",
+                "step_id",
+                "plan_goal",
+                "current_objective",
+                "expected_outcome",
+                "dependency_results",
+                "max_steps",
+            ),
         )
         self.assertEqual(
             tuple(item.name for item in fields(ToolObservation)),
@@ -68,6 +92,7 @@ class ExecutorContractTest(unittest.TestCase):
                 "final_answer",
                 "confirmation_required",
                 "limit_reached",
+                "goal_not_achieved",
                 "safety_denied",
                 "model_failed",
                 "invalid_model_action",
@@ -83,6 +108,9 @@ class ExecutorContractTest(unittest.TestCase):
                 ExecutionLimits,
                 ToolActionDecision,
                 FinalAnswerDecision,
+                GoalNotAchievedDecision,
+                PlanStepDependencyResult,
+                PlanStepExecutionInput,
                 ToolObservation,
                 ExecutorResult,
             )

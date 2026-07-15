@@ -566,6 +566,126 @@ Executor 不授权、不持久化 GraphState、不自动 retry/replay WRITE、�
 - `tests/test_runtime_observability_e2e.py`
 - `plans/modules/EXECUTOR_PLAN.md`
 
+## Plan-and-Execute Planner（Stage 7 已实现）
+
+### 解决什么问题
+
+ReAct 适合在一个局部目标内根据 Tool observation 继续选择下一次 action，但复杂目标还需要更高一层控制：先形成完整的小目标序列，再逐个把当前目标交给 ReAct。Planner 解决的是跨 Step 的目标分解和依赖，不接管 Tool 选择。
+
+### 核心概念
+
+- `PlanningRouter`：决定当前请求走 Direct ReAct、Plan-and-Execute 或先向用户澄清。
+- `PlanRun`：围绕一个复杂用户目标的通用 Runtime 执行策略，不是 Research / Travel 业务事实。
+- plan revision：初始计划或一次 bounded replan 形成的完整版本；旧版本不被原地改写。
+- `PlanStep`：一个小目标，包含 objective、expected outcome 和 dependency step IDs，不包含 Tool 名或 arguments。
+- `PlanController`：按依赖和稳定顺序一次选择一个 ready Step，并把它交给 `ReactExecutor`。
+- `PlanFinalizer`：所有 Step 结束后，只根据安全 Step 结果生成整份计划的最终回答。
+- bounded replan：只有当前目标结构化地未完成时，才允许修改一次尚未完成的计划部分。
+
+### 当前 Runtime 形状
+
+```text
+PlanningRouter
+    ├─ direct → ReactExecutor
+    ├─ need_user → clarification
+    └─ plan → Planner
+                 ↓
+             PlanRun / PlanStep
+                 ↓ one ready step
+             ReactExecutor
+                 ↓ structured outcome
+             deterministic next step
+                 ↓
+             bounded replan / PlanFinalizer
+```
+
+一个 PlanRun 执行期间共享一个 execution scope，使前一步产生的 request-local document、candidate 或 draft ID 可以由明确依赖它的后一步继续使用。每个 Step 仍启动独立的 ReAct state，只收到当前目标和依赖结果，不看到后续 Step。
+
+### 输入 / 输出 / 不负责什么
+
+Planner 输入是复杂目标、当前可用能力描述和可信 planning snapshot；输出是完整的 Step 依赖结构。Planner 不选择 Tool，实际 action 仍由 ReAct 从当前 `AllowedToolSet` 中决定。
+
+Stage 7 实现的是串行依赖调度。它不负责并行 Step、条件分支、DAG Scheduler、LangGraph checkpoint、异步 Executor resume、后台执行或自动重放。进程退出后可以读取 PlanRun，但不能假装 request-local execution scope 仍然存在；显式 interrupted recovery 只会安全停止遗留 running Step。
+
+preview-first 是这一层的重要安全边界：模型生成的 plan revision 先持久化为 `awaiting_confirmation`，只有 session、plan ID、revision 都匹配的结构化 command 才能 confirm、modify 或 cancel。modify 产生新 revision 并持久化用户确认约束；`goal_not_achieved` 最多触发一次自动 replan，且新 revision 必须再次确认。
+
+`PlanRepository` 是 Planning core 依赖的持久化 Port，SQLite 只是当前 adapter。outer `GraphState` 只保存 route-level planning decision，不复制 PlanRun、PlanStep、ToolRuntime 或 observations。这让 Planner lifecycle 可以跨请求读取，同时不把 request-local Executor 状态伪装成可恢复事实。
+
+### 常见失败模式
+
+- Planner 逐步退化成另一个 Tool-calling Executor。
+- 每个成功 Step 后都重新调用 Planner，导致已确定的计划不断漂移。
+- 把整个计划交给 ReAct，导致第一个 Step 越界执行后续目标。
+- 后一步看不到前一步的 request-local ID，计划结构正确但执行链断裂。
+- 把可读取的 PlanRun 误解为可自动恢复的 Executor state。
+- 为未来 DAG 提前引入并行、汇合和复杂调度状态。
+
+### 如何测试和观察
+
+Stage 7 已使用 Research 作为主要业务场景，验证 fetch / parse / rank / draft 等目标跨 Step 推进，并保留一个不扩展 Travel 的最小跨 Domain 离线场景。纯状态测试验证依赖存在、无环、稳定 ready ordering、预算和一次 replan；集成测试验证每次只把一个 Step 交给 ReAct。Direct/Plan/NeedUser route 和 Research happy-path 另有真实模型 smoke 证据，最终 Planner 聚焦回归 `79/79`、统一离线回归 `379/379` 通过。
+
+### 面试解释
+
+可以这样讲：ReAct 解决“当前小目标下一步调用什么工具”，Plan-and-Execute 解决“复杂目标应该拆成哪些小目标、按什么依赖顺序推进”。LifeOps 没有让 Planner 绑定 Tool，而是让 Controller 确定性调度、让已有 ReAct 继续负责局部执行，因此两个循环不会互相吞掉职责。
+
+### 相关项目文件
+
+- `plans/modules/PLANNER_PLAN.md`
+- `plans/modules/EXECUTOR_PLAN.md`
+- `plans/DOMAIN_CONTRACT_STANDARD.md`
+- `app/planning/`
+- `app/executor/`
+- `app/orchestration/planning.py`
+
+## Context / Memory 生命周期（Stage 9 已确认，未实现）
+
+### 为什么统一设计、分两轮实施
+
+Context 与 Memory 都会进入模型输入，因此需要共享预算、provenance、日志隐私和“不产生授权”的边界。但它们的数据生命周期不同：Context Engine 先解决同一 session 的对话连续性；Long-term Memory 再解决用户明确希望长期保留的信息。Stage 9A 必须先独立测试并冻结接口，Stage 9B 只能实现这些预留接口，不能反向改写 Planner / Executor。
+
+### 三种生命周期
+
+- request-local：一次 RuntimeRequest 产生一份 frozen ContextAssembly 和 content-free ContextReport。Direct、PlanningRouter、Planner 与同一 confirmed plan 的所有 PlanStep 复用 assembly_id。
+- session-local：用户可见 ConversationTurn 和 rolling ConversationSummary。它们按 session 写入独立 JSONL，支持进程重启后继续对话，但不写 SQLite。
+- durable：用户自己编辑的 Profile Markdown，以及用户明确要求记住并确认后保存的 Explicit Memory。
+
+Context 在这里专指 session conversation context，不绑定 Research 或 Travel。现有 DomainContextProvider 和 DomainMemoryCandidateProvider 继续保留为共享只读契约，但 Stage 9A 不调用它们；PlanningSnapshotProvider 也仍是独立的 trusted Domain read seam。
+
+### Context assembly
+
+Stage 9A 计划按固定顺序组装 rolling summary、summary 未覆盖的 recent original turns、current input，再预留 Profile/Memory slots。Stage 9B 渲染时把 Profile/Memory 放在 conversation 之前，并让 current input 保持最后；预算仍优先保护 current input 和 recent turns。V1 使用本地确定性 token 估算、一个总预算和少量固定 cap；current input 必须保留，超上限时在模型调用前失败。只有 history 超预算时才调用 Summarizer，输入是 previous valid summary 加本次新增的连续 turns；invalid/partial summary 不落盘，原始 turns 不删除。
+
+ContextAssembly 与完整 report 留在 request runtime context/result-local 对象，不进入 outer GraphState、ExecutorState、PlanRepository 或 checkpoint。实际 bounded content 会进入模型 prompt 和现有 llm.jsonl；events.jsonl 只记录 assembly_id、计数、估算 token、summary version、裁剪和安全 error code。
+
+### Profile 与 Explicit Memory
+
+Stage 9B 第一版只支持两种长期来源：
+
+- Profile：固定 Markdown，由用户自己编辑，Agent 只读，不提供 Profile WRITE Tool，也不进入 Memory index。
+- Explicit Memory：只有用户明确要求记住时，才允许模型提出 memory.save；用户确认 exact preview 后，Tool 才能经过 Policy/AllowedToolSet、Guardrails、Gateway 和 evidence 写入。
+
+Memory 全文计划保存为不可变版本文件，SQLite 只保存 ID、version、status、相对路径、hash、tags、provenance 和 confirmation/evidence refs。update 生成新 version 并 supersede 旧 version；archive 保留文件和历史但从普通 retrieval 排除。V1 用 tag、substring 和 keyword 的确定性检索，不使用 embedding、FTS5 或 vector database。
+
+### 最重要的来源边界
+
+- current input 决定当前意图，但不会静默改写 Profile/Memory。
+- 成功 ToolResult 和 Domain repository 是业务事实。
+- Profile 是用户编辑的稳定说明。
+- active Memory 是用户确认的长期补充。
+- conversation summary 只提供连续性，不能自动升级为 Memory。
+- Context、Memory、Planner output、MCP result、summary 和模型文本都不能授权 Tool。
+
+### 如何验证
+
+Stage 9A 与 Stage 9B 各自保留 5 个真实 LLM happy paths，并在它们之前完成 focused unit/integration、compiled E2E 和统一离线 regression。Stage 9A 重点证明 recent/compacted/restart/Planner/shared-PlanStep context；Stage 9B 重点证明 Profile、explicit save、restart retrieval、conflict update 和 archive lifecycle。
+
+### 相关项目文件
+
+- `plans/modules/CONTEXT_MEMORY_PLAN.md`
+- `plans/modules/EXECUTOR_PLAN.md`
+- `plans/modules/PLANNER_PLAN.md`
+- `docs/ARCHITECTURE.md`
+
 ## Observability
 
 ### 解决什么问题
@@ -776,3 +896,35 @@ v4→v5 migration test 验证旧数据生成 snapshot；repository test 验证�
 - `app/domains/research/repository.py`
 - `tests/test_storage_migrations.py`
 - `tests/test_research_knowledge.py`
+
+## MCP、Domain Port 与 request-local observation
+
+### 解决什么问题
+
+Research 需要读取真实外部论文，但不能让 MCP Server、provider SDK 或动态发现的 Tool 绕过 LifeOps 已有的业务接口与授权链。
+
+### 当前 runtime 实现
+
+`research.search_papers` 仍是一个固定的 LifeOps Tool。Handler 调用 Research `PaperSearchPort`，Adapter 再通过通用 one-shot stdio client 启动本地 MCP Server；Server 使用 `huggingface_hub.HfApi(token=False)` 读取公开论文。一次调用完成 initialize、`tools/list`、schema 校验、`tools/call` 和关闭，MCP SDK 类型只存在于 integration 边界。
+
+论文先转换成 request-local `ExternalObservation`。Tool 向模型返回 paper ID、作者、摘要、发布时间、canonical URL 和 provenance；合法与非法条目混合时保留合法项并报告 `invalid_count`，全部非法时 fail-closed。搜索阶段不写 SQLite，只有经过确认的 `research.save_source` 才能形成 Source/Snapshot 事实。
+
+### 边界与失败分类
+
+- MCP 是外部调用通道，不是 Tool 授权来源，也不是新的 Planner / Executor。
+- `mcp_timeout`、server/protocol/schema failure 与 provider rate-limit/unavailable 分层返回稳定 code，不把异常正文或原始 payload交给模型。
+- MCP no-results 是成功空结果；模型不能据此编造论文。
+- 动态 MCP catalog 不进入模型可见的 9 个 Research Tool surface。
+
+### 面试解释
+
+可以这样讲：MCP 解决“如何标准化连接外部工具”，Domain Port 解决“业务层需要什么能力”，Tool Gateway 解决“当前请求是否允许调用”。三者职责不同；本项目用 Adapter 把 MCP 结果转换成业务拥有的临时 observation，再由确认写入链决定是否持久化。
+
+### 相关项目文件
+
+- `app/integrations/mcp/`
+- `app/integrations/research_mcp/`
+- `app/domains/research/ports.py`
+- `app/domains/research/tools.py`
+- `tests/test_research_mcp_e2e.py`
+- `tests/test_research_mcp_real_llm_smoke.py`

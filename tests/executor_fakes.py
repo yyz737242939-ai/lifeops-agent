@@ -9,6 +9,7 @@ from app.executor.models import (
     ExecutorMemoryContribution,
     ExecutorModelInput,
     ExecutorResult,
+    PlanStepExecutionInput,
 )
 from app.runtime.models import RuntimeRequest
 from app.tools.models import ConfirmedAction, ToolCall, ToolDefinition
@@ -45,11 +46,16 @@ class FakeExecutorContextProvider:
     ) -> None:
         self._contributions = contributions
         self.requests: list[RuntimeRequest] = []
+        self.plan_steps: list[PlanStepExecutionInput | None] = []
 
     def load(
-        self, request: RuntimeRequest
+        self,
+        request: RuntimeRequest,
+        *,
+        plan_step: PlanStepExecutionInput | None = None,
     ) -> tuple[ExecutorContextContribution, ...]:
         self.requests.append(request)
+        self.plan_steps.append(plan_step)
         return self._contributions
 
 
@@ -59,11 +65,16 @@ class FakeExecutorMemoryProvider:
     ) -> None:
         self._contributions = contributions
         self.requests: list[RuntimeRequest] = []
+        self.plan_steps: list[PlanStepExecutionInput | None] = []
 
     def load(
-        self, request: RuntimeRequest
+        self,
+        request: RuntimeRequest,
+        *,
+        plan_step: PlanStepExecutionInput | None = None,
     ) -> tuple[ExecutorMemoryContribution, ...]:
         self.requests.append(request)
+        self.plan_steps.append(plan_step)
         return self._contributions
 
 
@@ -85,14 +96,28 @@ class FakeActionConfirmationProvider:
 class RecordingExecutorRecoveryHook:
     def __init__(self) -> None:
         self.results: list[ExecutorResult] = []
+        self.plan_steps: list[PlanStepExecutionInput | None] = []
 
-    def on_stop(self, result: ExecutorResult) -> None:
+    def on_stop(
+        self,
+        result: ExecutorResult,
+        *,
+        plan_step: PlanStepExecutionInput | None = None,
+    ) -> None:
         self.results.append(result)
+        self.plan_steps.append(plan_step)
 
 
 class RecordingExecutorFeedbackSink:
     def __init__(self) -> None:
         self.items: list[ExecutorFeedbackItem] = []
+        self.plan_steps: list[PlanStepExecutionInput | None] = []
 
-    def record(self, step_or_result: ExecutorFeedbackItem) -> None:
+    def record(
+        self,
+        step_or_result: ExecutorFeedbackItem,
+        *,
+        plan_step: PlanStepExecutionInput | None = None,
+    ) -> None:
         self.items.append(step_or_result)
+        self.plan_steps.append(plan_step)

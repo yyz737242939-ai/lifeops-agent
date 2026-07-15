@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -12,11 +13,13 @@ from app.domains.research.ports import FixtureResearchSourcePort
 from app.domains.research.repository import ResearchRepository
 from app.domains.research.service import ResearchService
 from app.domains.research.tools import (
-    FETCH_BRIEFING_SOURCE_TOOL,
-    FETCH_SOURCE_TOOL,
+    BUILD_BRIEF_TOOL,
+    SEARCH_PAPERS_TOOL,
     SAVE_SOURCE_TOOL,
     build_research_tools,
 )
+from app.integrations.mcp.models import McpServerConfig
+from app.integrations.research_mcp.adapter import HuggingFaceMcpPaperSearchAdapter
 from app.domains.travel.adapters import FixturePlaceSearchAdapter
 from app.domains.travel.repository import TravelRepository
 from app.domains.travel.service import TravelService
@@ -49,7 +52,11 @@ class Stage5GraphE2ETest(unittest.TestCase):
 
     def test_graph_executes_authorized_domain_tool_through_guardrails(self) -> None:
         orchestrator = self._orchestrator(
-            ToolCall("call_fetch", FETCH_SOURCE_TOOL, {"source_key": "hf-daily"})
+            ToolCall(
+                "call_fetch",
+                SEARCH_PAPERS_TOOL,
+                {"query": "agent", "limit": 3},
+            )
         )
 
         state = orchestrator.invoke(_request(), trace=self.trace)
@@ -66,10 +73,11 @@ class Stage5GraphE2ETest(unittest.TestCase):
         )
         self.assertEqual(state["result"].status, RuntimeStatus.OK)
         self.assertEqual(
-            state["result"].tool_result["tool_name"], FETCH_SOURCE_TOOL
+            state["result"].tool_result["tool_name"], SEARCH_PAPERS_TOOL
         )
         self.assertEqual(
-            state["result"].tool_result["output"]["source_key"], "hf-daily"
+            state["result"].tool_result["output"]["observations"][0]["source_key"],
+            "hf_paper",
         )
         self.assertEqual(
             [
@@ -113,8 +121,8 @@ class Stage5GraphE2ETest(unittest.TestCase):
         orchestrator = self._orchestrator(
             ToolCall(
                 "call_briefing_fetch",
-                FETCH_BRIEFING_SOURCE_TOOL,
-                {"source_key": "hf_daily_papers"},
+                BUILD_BRIEF_TOOL,
+                {"source_keys": ["hf_daily_papers"], "limit": 5},
             )
         )
 
@@ -122,12 +130,12 @@ class Stage5GraphE2ETest(unittest.TestCase):
 
         result = state["result"].tool_result
         self.assertEqual(state["result"].status, RuntimeStatus.OK)
-        self.assertEqual(result["tool_name"], FETCH_BRIEFING_SOURCE_TOOL)
-        self.assertEqual(result["output"]["source_key"], "hf_daily_papers")
-        self.assertIn("document_id", result["output"])
-        self.assertIn("observation_id", result["output"])
+        self.assertEqual(result["tool_name"], BUILD_BRIEF_TOOL)
+        self.assertEqual(result["output"]["item_count"], 1)
+        self.assertIn("draft_id", result["output"])
+        self.assertIn("source_observation_ids", result["output"])
         self.assertNotIn("content", result["output"])
-        self.assertNotIn("Agent fixture body", repr(result))
+        self.assertNotIn("<a href=", repr(result))
 
     def test_graph_executes_real_travel_handler_with_typed_observation(self) -> None:
         orchestrator = self._travel_orchestrator(
@@ -196,6 +204,20 @@ class Stage5GraphE2ETest(unittest.TestCase):
             ),
             ResearchRepository(self.conn),
             content_port=_FixtureBriefingContentPort(),
+            paper_search_port=HuggingFaceMcpPaperSearchAdapter(
+                McpServerConfig(
+                    server_id="stage5-e2e-hf-fixture",
+                    command=sys.executable,
+                    args=(
+                        "-m",
+                        "app.integrations.research_mcp.server",
+                        "--fixture",
+                        str(Path("tests/fixtures/research/hf_papers.json").resolve()),
+                    ),
+                    cwd=Path.cwd(),
+                    timeout_seconds=5.0,
+                )
+            ),
         )
         return ToolRuntime.from_registry(ToolRegistry(build_research_tools(service)))
 

@@ -8,6 +8,9 @@ from app.executor.models import (
     ExecutorStatus,
     ExecutorStopReason,
     FinalAnswerDecision,
+    GoalNotAchievedDecision,
+    PlanStepDependencyResult,
+    PlanStepExecutionInput,
     ToolActionDecision,
     ToolObservation,
 )
@@ -112,6 +115,29 @@ class ExecutorModelsTest(unittest.TestCase):
         for values in invalid_cases:
             with self.subTest(values=values), self.assertRaises(ValueError):
                 ExecutorResult(run_id="run_1", step_count=1, **values)
+
+    def test_plan_step_input_is_narrow_bounded_and_dependency_safe(self) -> None:
+        dependency = PlanStepDependencyResult("read", "读取完成。")
+        step_input = PlanStepExecutionInput(
+            "plan_1",
+            2,
+            "write",
+            "完成研究",
+            "形成摘要",
+            "得到可保存摘要",
+            (dependency,),
+            4,
+        )
+        self.assertEqual(step_input.dependency_results, (dependency,))
+        self.assertEqual(GoalNotAchievedDecision("missing_scope").reason_code, "missing_scope")
+        with self.assertRaises(ValueError):
+            PlanStepExecutionInput(
+                "plan_1", 1, "write", "goal", "objective", "outcome", (dependency, dependency)
+            )
+        with self.assertRaises(ValueError):
+            PlanStepExecutionInput(
+                "plan_1", 1, "write", "goal", "objective", "outcome", max_steps=17
+            )
 
 
 if __name__ == "__main__":

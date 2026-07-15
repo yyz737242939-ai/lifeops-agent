@@ -4,7 +4,7 @@ import unittest
 
 from app.common.errors import MigrationError
 from app.storage.migrations import get_schema_version, migrate
-from app.storage.schema import CURRENT_SCHEMA_VERSION, SchemaMigration
+from app.storage.schema import CURRENT_SCHEMA_VERSION, MIGRATIONS, SchemaMigration
 from tests.helpers import create_test_connection
 
 
@@ -23,7 +23,7 @@ class StorageMigrationsTest(unittest.TestCase):
 
         self.assertEqual(report.previous_version, 0)
         self.assertEqual(report.current_version, CURRENT_SCHEMA_VERSION)
-        self.assertEqual(report.applied_versions, (1,))
+        self.assertEqual(report.applied_versions, (1, 2, 3))
         self.assertEqual(get_schema_version(self.conn), CURRENT_SCHEMA_VERSION)
         self.assert_tables_exist(
             "schema_migrations",
@@ -43,19 +43,46 @@ class StorageMigrationsTest(unittest.TestCase):
             "travel_itinerary_items",
             "travel_decisions",
             "travel_knowledge_refs",
+            "plan_runs",
+            "plan_steps",
         )
 
     def test_migrate_is_idempotent(self) -> None:
         first = migrate(self.conn)
         second = migrate(self.conn)
 
-        self.assertEqual(first.applied_versions, (1,))
+        self.assertEqual(first.applied_versions, (1, 2, 3))
         self.assertEqual(second.previous_version, CURRENT_SCHEMA_VERSION)
         self.assertEqual(second.current_version, CURRENT_SCHEMA_VERSION)
         self.assertEqual(second.applied_versions, ())
 
         rows = self.conn.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()
-        self.assertEqual(rows["count"], 1)
+        self.assertEqual(rows["count"], 3)
+
+    def test_v1_database_migrates_to_current_without_rewriting_v1(self) -> None:
+        first = migrate(self.conn, MIGRATIONS[:1])
+        second = migrate(self.conn)
+
+        self.assertEqual(first.applied_versions, (1,))
+        self.assertEqual(second.applied_versions, (2, 3))
+        self.assertEqual(get_schema_version(self.conn), CURRENT_SCHEMA_VERSION)
+        self.assert_tables_exist("plan_runs", "plan_steps")
+        self.assertIn("confirmed_constraints_json", self.column_names("plan_runs"))
+
+    def test_v2_database_adds_confirmed_constraints_without_rewriting_plan_tables(self) -> None:
+        migrate(self.conn, MIGRATIONS[:2])
+        before_sql = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'plan_steps'"
+        ).fetchone()["sql"]
+
+        report = migrate(self.conn)
+
+        after_sql = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'plan_steps'"
+        ).fetchone()["sql"]
+        self.assertEqual(report.applied_versions, (3,))
+        self.assertEqual(before_sql, after_sql)
+        self.assertIn("confirmed_constraints_json", self.column_names("plan_runs"))
 
     def test_squashed_v1_has_the_final_research_and_travel_shapes(self) -> None:
         migrate(self.conn)

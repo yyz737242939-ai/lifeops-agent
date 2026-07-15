@@ -250,11 +250,85 @@ CREATE INDEX IF NOT EXISTS idx_travel_knowledge_refs_trip
 ON travel_knowledge_refs(trip_id, created_at, id);
 """
 
+V2_SCHEMA = """
+CREATE TABLE IF NOT EXISTS plan_runs (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    goal TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN (
+            'awaiting_confirmation', 'running', 'awaiting_replan_confirmation',
+            'completed', 'stopped', 'failed', 'cancelled'
+        )
+    ),
+    current_revision INTEGER NOT NULL CHECK (current_revision >= 1),
+    replan_count INTEGER NOT NULL CHECK (replan_count >= 0),
+    executor_steps_used INTEGER NOT NULL CHECK (executor_steps_used >= 0),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    confirmed_at TEXT,
+    completed_at TEXT,
+    last_error_code TEXT,
+    last_command_id TEXT UNIQUE
+);
+
+CREATE INDEX IF NOT EXISTS idx_plan_runs_session
+ON plan_runs(session_id, created_at, id);
+
+CREATE TABLE IF NOT EXISTS plan_steps (
+    plan_id TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK (revision >= 1),
+    step_id TEXT NOT NULL,
+    position INTEGER NOT NULL CHECK (position >= 1),
+    objective TEXT NOT NULL,
+    expected_outcome TEXT NOT NULL,
+    dependency_step_ids_json TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN (
+            'pending', 'running', 'completed', 'goal_not_achieved',
+            'stopped', 'failed', 'superseded', 'cancelled'
+        )
+    ),
+    stop_reason TEXT,
+    safe_result_summary TEXT,
+    error_code TEXT,
+    evidence_refs_json TEXT NOT NULL,
+    executor_steps_used INTEGER NOT NULL CHECK (executor_steps_used >= 0),
+    started_at TEXT,
+    completed_at TEXT,
+    PRIMARY KEY (plan_id, revision, step_id),
+    UNIQUE (plan_id, revision, position),
+    FOREIGN KEY (plan_id) REFERENCES plan_runs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_plan_steps_revision
+ON plan_steps(plan_id, revision, position);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_plan_steps_one_running
+ON plan_steps(plan_id, revision)
+WHERE status = 'running';
+"""
+
+V3_SCHEMA = """
+ALTER TABLE plan_runs
+ADD COLUMN confirmed_constraints_json TEXT NOT NULL DEFAULT '[]';
+"""
+
 MIGRATIONS = (
     SchemaMigration(
         version=1,
         name="initial_canonical_schema",
         sql=V1_SCHEMA,
+    ),
+    SchemaMigration(
+        version=2,
+        name="plan_and_execute",
+        sql=V2_SCHEMA,
+    ),
+    SchemaMigration(
+        version=3,
+        name="plan_confirmed_constraints",
+        sql=V3_SCHEMA,
     ),
 )
 

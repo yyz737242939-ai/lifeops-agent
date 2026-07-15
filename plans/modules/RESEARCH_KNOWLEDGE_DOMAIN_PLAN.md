@@ -15,6 +15,8 @@ Research / Personal Knowledge Domain 阶段 5 完整初版已完成并通过验�
 
 Research Skill 已声明 Hugging Face Daily Papers / Blog 两个稳定 source key，并通过严格 JSON manifest、相对路径和精确 URL allowlist 校验。typed HTML adapter、deterministic parse/dedupe/topic-filter/rank、中文 brief draft、知识搜索和经确认的 Source / Brief / Note WRITE 已打通。PlanningReadModel 已包含覆盖计数、最近 Brief 和 unresolved questions；Context/Memory candidate provider、380 条 deterministic seed、provider failure 和引用完整性 fixtures 已完成。真实 briefing handler 已通过 compiled Graph 与 Guardrail 回归。按当前确认范围不实现恶意内容 fixtures；完整多 Tool briefing 循环仍属于阶段 6 ReAct Executor。
 
+2026-07-15 Stage 8 增量计划 `plans/modules/RESEARCH_MCP_PLAN.md` 已实施完成：模型可见 Research Tool 已原子收敛为 9 个，并通过本地 one-shot stdio MCP 接入 Hugging Face paper search。本文件下方保留 Stage 5 设计形成过程作为历史边界；当前 Tool surface 以 Stage 8 增量计划、`app/domains/research/tools.py` 和冻结 contract tests 为准。
+
 ## 1. 目标
 
 本模块建立可长期积累、可追溯来源的个人研究知识域，并恢复 Hugging Face Daily Papers / Blog 热点简报作为第一个真实外部只读场景。Domain 只从业务角度组织 Research models、service、repository 和 tools，不拥有独立 Planner / Executor；它可以与 Travel tools 出现在同一个通用 PlanRun 中。
@@ -44,7 +46,7 @@ V0 已验证的流程：读取 briefing/source/copyright reference，白名单�
 - 临时 observation / briefing 默认只属于当前 run；用户明确保存后才成为 `Source` / `ResearchBrief`。
 - Source 保存 URL、source type、fetched/published metadata、content hash/summary 和 provenance；原始 HTML 不进 SQLite 或 event payload。
 - Note 可以关联 Topic、Source 和其他 Note。
-- 为阶段 6 Executor 提供 Tools；为阶段 7 Planner 提供 `DomainPlanningReadModel[ResearchPlanningSnapshot]`；为阶段 8 Context / Memory 提供共享只读 candidate provider 接口。
+- 为阶段 6 Executor 提供 Tools；为阶段 7 Planner 提供 `DomainPlanningReadModel[ResearchPlanningSnapshot]`；为阶段 9 Context / Memory 提供共享只读 candidate provider 接口。
 - 固定 fixture 和批量 seed 形状，支持几百条 Source/Note 的长期 Context 测试。
 
 ### 3.2 阶段 5 不做
@@ -55,7 +57,7 @@ V0 已验证的流程：读取 briefing/source/copyright reference，白名单�
 - 不自动把 Source / Note / Brief 升级为 Memory。
 - 不让模型 summary 覆盖来源事实。
 - 不抓取任意 URL；只允许声明来源。
-- 不实现阶段 6 ReAct loop、阶段 7 Planner、阶段 8 Context/Memory consumer 或阶段 9 Recovery；Domain 只提供稳定 Tool、read model 和 candidate provider contract。
+- 不实现阶段 6 ReAct loop、阶段 7 Planner、阶段 9 Context/Memory consumer 或阶段 10 Recovery；Domain 只提供稳定 Tool、read model 和 candidate provider contract。
 
 ## 4. Runtime 与领域边界
 
@@ -72,7 +74,7 @@ ResearchBrief / Source（业务事实）
 ```text
 Source / Note / ResearchBrief = 用户明确保存的 Domain 事实
 ContextSelection             = 当前 run 的临时选择
-MemoryRecord                 = 阶段 8 的跨 session 记忆
+MemoryRecord                 = 阶段 9 的跨 session 记忆
 LLM synthesis               = 临时生成物，未确认前不是事实
 ```
 

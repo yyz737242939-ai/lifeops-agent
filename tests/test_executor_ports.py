@@ -19,6 +19,7 @@ from app.executor.models import (
     ExecutorStatus,
     ExecutorStopReason,
     FinalAnswerDecision,
+    PlanStepExecutionInput,
 )
 from app.executor.ports import (
     ActionConfirmationProvider,
@@ -47,16 +48,16 @@ class ExecutorPortsTest(unittest.TestCase):
     def test_port_method_shapes_are_narrow_and_frozen(self) -> None:
         expected = {
             ExecutorModelClient.decide: ("self", "model_input", "llm_log"),
-            ExecutorContextProvider.load: ("self", "request"),
-            ExecutorMemoryProvider.load: ("self", "request"),
+            ExecutorContextProvider.load: ("self", "request", "plan_step"),
+            ExecutorMemoryProvider.load: ("self", "request", "plan_step"),
             ActionConfirmationProvider.confirm: (
                 "self",
                 "run_id",
                 "call",
                 "tool_definition",
             ),
-            ExecutorRecoveryHook.on_stop: ("self", "result"),
-            ExecutorFeedbackSink.record: ("self", "step_or_result"),
+            ExecutorRecoveryHook.on_stop: ("self", "result", "plan_step"),
+            ExecutorFeedbackSink.record: ("self", "step_or_result", "plan_step"),
         }
         for method, parameters in expected.items():
             with self.subTest(method=method.__qualname__):
@@ -83,6 +84,7 @@ class ExecutorPortsTest(unittest.TestCase):
                 "tool_catalog",
                 "observations",
                 "step_index",
+                "plan_step",
             ),
         )
         self.assertTrue(
@@ -151,15 +153,20 @@ class ExecutorPortsTest(unittest.TestCase):
         confirmation = FakeActionConfirmationProvider(None)
         recovery = RecordingExecutorRecoveryHook()
         feedback = RecordingExecutorFeedbackSink()
+        plan_step = PlanStepExecutionInput(
+            "plan_1", 1, "step_1", "goal", "objective", "outcome"
+        )
 
         self.assertIsNone(confirmation.confirm(request.run_id, call, definition))
         self.assertEqual(
             confirmation.requests, [(request.run_id, call, definition)]
         )
-        self.assertIsNone(recovery.on_stop(result))
-        self.assertIsNone(feedback.record(result))
+        self.assertIsNone(recovery.on_stop(result, plan_step=plan_step))
+        self.assertIsNone(feedback.record(result, plan_step=plan_step))
         self.assertEqual(recovery.results, [result])
         self.assertEqual(feedback.items, [result])
+        self.assertEqual(recovery.plan_steps, [plan_step])
+        self.assertEqual(feedback.plan_steps, [plan_step])
 
 
 def _completed_result() -> ExecutorResult:

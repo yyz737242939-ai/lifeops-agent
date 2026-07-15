@@ -13,6 +13,8 @@ from app.executor.models import (
     ExecutorStatus,
     ExecutorStopReason,
     FinalAnswerDecision,
+    GoalNotAchievedDecision,
+    PlanStepExecutionInput,
     ToolActionDecision,
 )
 from app.executor.state import create_executor_state
@@ -224,6 +226,30 @@ class ExecutorGraphTest(unittest.TestCase):
                 self.assertEqual(result.error_code, error_code)
                 self.assertNotIn("private-provider-path", repr(result))
 
+    def test_goal_not_achieved_is_only_valid_for_plan_step_invocation(self) -> None:
+        model = FakeExecutorModelClient([GoalNotAchievedDecision("missing_scope")])
+        state = _invoke(
+            model,
+            FakeExecutorToolGateway([]),
+            plan_step=PlanStepExecutionInput(
+                "plan_1", 1, "step_1", "goal", "objective", "outcome"
+            ),
+        )
+        self.assertEqual(state["result"].status, ExecutorStatus.STOPPED)
+        self.assertEqual(
+            state["result"].stop_reason, ExecutorStopReason.GOAL_NOT_ACHIEVED
+        )
+        self.assertEqual(state["result"].error_code, "plan_step_goal_not_achieved")
+        self.assertIsNotNone(model.inputs[0].plan_step)
+
+        direct = _invoke(
+            FakeExecutorModelClient([GoalNotAchievedDecision("invalid_direct")]),
+            FakeExecutorToolGateway([]),
+        )
+        self.assertEqual(
+            direct["result"].stop_reason, ExecutorStopReason.INVALID_MODEL_ACTION
+        )
+
 
 def _invoke(
     model,
@@ -231,6 +257,7 @@ def _invoke(
     *,
     limits: ExecutionLimits | None = None,
     tool_catalog: tuple[dict[str, object], ...] = (),
+    plan_step: PlanStepExecutionInput | None = None,
 ):
     graph = build_executor_graph()
     return invoke_executor_graph(
@@ -240,6 +267,7 @@ def _invoke(
             model_client=model,
             tool_executor=gateway,
             limits=limits or ExecutionLimits(),
+            plan_step_input=plan_step,
         ),
     )
 

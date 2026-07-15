@@ -28,7 +28,7 @@
 | `legacy_v0/app/memory/*` | `app/memory/*` | rewrite | Semantic memory 迁移到 SQLite，profile 保持 markdown。 |
 | `legacy_v0/app/tasks/*` | 无直接当前替代 | archive/defer | 不迁移通用 Task 业务 Domain。阶段 7 使用跨 Domain `PlanRun` / `PlanStep` 保存执行状态；长期业务事实由 Research / Travel 在授权 WRITE 成功后各自保存。 |
 | `legacy_v0/app/runtime/recovery_*` | `app/recovery/*` | rewrite | 保留解释型 recovery，不做 replay。 |
-| `legacy_v0/app/mcp/*` | `app/integrations/calendar_mcp/*` | rewrite | 当前 runtime 先使用 Calendar fixture read MCP。 |
+| `legacy_v0/app/mcp/*` | `app/integrations/mcp/*` + `app/integrations/research_mcp/*` | rewrite | Stage 8 只参考 V0 的 stdio config/error taxonomy，协议改用官方 MCP SDK；业务切片改为 Hugging Face paper search，Calendar MCP 不属于当前 V1。 |
 | `legacy_v0/entrypoints/log_viewer_legacy.py`, `legacy_v0/app/log_viewer/*` | `app/inspector/*` | archive/defer | Inspector 读取 trace evidence，不复用旧 log viewer UI。 |
 | `legacy_v0/entrypoints/product_ui_legacy.py`, `legacy_v0/app/product_ui/*` | 未来 product UI | archive/defer | UI 不属于初版runtime core。 |
 

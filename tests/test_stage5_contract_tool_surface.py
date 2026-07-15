@@ -14,15 +14,15 @@ from app.tools.models import ExecutionEvidence, GuardrailDecision
 
 
 EXPECTED_TOOL_CONTRACTS = {
-    "research.build_brief_draft": ("read", "low", ("research",), "9ff67100eafc47b374fc3a13ed6c89e9f0e130b667d4ecf86a3073d568b9c1de"),
+    "research.append_revision": ("write", "medium", ("research",), "cf3de9e9e46e98efbd174668f0f7abfa559f2cb5731b7289302fea155e604701"),
+    "research.build_brief": ("external_read", "low", ("research",), "f9bc5597911a3eb622aa9255e4cbe378ea18b0b57f9583fe333b4a0c3eae4f55"),
     "research.create_note": ("write", "medium", ("research",), "23bdc899780b70aa56017c777fcacbe461aeb1343b0ff82174e3860bb1e69e21"),
-    "research.fetch_briefing_source": ("external_read", "low", ("research",), "9445512ec159f5dbfa0e27cdad9148696c5b25e1d05912b63b95785553d31f2b"),
-    "research.fetch_source": ("external_read", "low", ("research",), "12bb091eb64cccbed8e52ec095f8fe3034701d4c343ebf82dea0ac8489eeb6c0"),
-    "research.parse_items": ("read", "low", ("research",), "672db0480ee002616d4143e7d03c33beb93471e11d7ac25454268e0f2903f285"),
-    "research.rank_items": ("read", "low", ("research",), "8e8a6ca7b674fe2f0640820f9e3bf4a25ee19e671b4ae09f4738d5d1e0c0b29e"),
+    "research.create_topic": ("write", "medium", ("research",), "64c0ae3c6a4509b3e49740377814ca6636a64bc2b6543b6d101d2ba518f86135"),
+    "research.link_items": ("write", "medium", ("research",), "67fb77798db815e5a936ab25b77e4de7e75bde5669497bd74bda1c794f487e1b"),
     "research.save_brief": ("write", "medium", ("research",), "6222a558a7a7ae4a9189b6b7660630089200ce04a1dea36f183f1f6db2f6d568"),
     "research.save_source": ("write", "medium", ("research",), "d184920e9702ce8617af946616ce4257f880051d56ed8cd136aeaf804db8129c"),
-    "research.search_knowledge": ("read", "low", ("research",), "fe28a1b2ae0be13d5b529537911d2b991065abd7bda5ca4a0627581b45fb2129"),
+    "research.search_knowledge": ("read", "low", ("research",), "d9368858ea8b2e240d17ff8f097adcc5375dece2c8b65356a278165b2b4d6f1c"),
+    "research.search_papers": ("external_read", "low", ("research",), "a993ffc48fe071d12020a32fd7a1ece320bf32058c59479bdb4ebe17aacc7b9f"),
     "travel.archive_trip": ("write", "medium", ("travel",), "ce0b1bb432ab0fe76236b84049a265fcc66cf42215633bc7a4c376978a71cf9b"),
     "travel.build_itinerary_draft": ("read", "low", ("travel",), "03d71634d2a0bb089559840f2d610f76a50c92f07730261fcc559832808a4546"),
     "travel.check_calendar_availability": ("external_read", "low", ("travel",), "459e4e47c0bc9713e01ec233d1a5097fdfbfccb890ef2dacde04f6e6761bd9bb"),
