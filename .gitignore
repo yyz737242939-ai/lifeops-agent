@@ -236,3 +236,4 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+plans/modules/TRAVEL_DOMAIN_PLAN.md

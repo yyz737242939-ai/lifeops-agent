@@ -19,6 +19,10 @@ from app.observability.logger import (
     ensure_application_logger,
 )
 from app.orchestration.graph import RuntimeOrchestrator
+from app.planning.controller import PlanController
+from app.planning.models import PlanCommand, PlanningLimits
+from app.planning.ports import PlanningRouteClient
+from app.planning.service import PlanningService
 from app.policy.service import PolicyService
 from app.runtime.models import RuntimeRequest, RuntimeResult
 from app.runtime.run_store import fail_run_record, finish_run_record, insert_run_record
@@ -39,6 +43,10 @@ class RuntimeService:
         log_root: str | Path | None = None,
         execution_scope_factory: Callable[[], ToolRuntime] | None = None,
         executor: ReactExecutor | None = None,
+        planning_route_client: PlanningRouteClient | None = None,
+        planning_service: PlanningService | None = None,
+        plan_controller: PlanController | None = None,
+        planning_limits: PlanningLimits | None = None,
     ) -> None:
         self._intent_service = intent_service or IntentService()
         self._policy_service = policy_service or PolicyService()
@@ -48,6 +56,10 @@ class RuntimeService:
             skill_service=skill_service,
             execution_scope_factory=execution_scope_factory,
             executor=executor,
+            planning_route_client=planning_route_client,
+            planning_service=planning_service,
+            plan_controller=plan_controller,
+            planning_limits=planning_limits,
         )
         self._conn = conn
         self._event_log = event_log
@@ -93,6 +105,34 @@ class RuntimeService:
             self._conn.close()
         if self._log_root is not None:
             close_application_logging()
+
+    def handle_plan_command(
+        self, command: PlanCommand, request: RuntimeRequest
+    ) -> RuntimeResult:
+        """Run one structured plan command with an explicit goal request."""
+
+        trace = OptionalLogAppender(self._build_event_appender(request))
+        llm_log = self._build_llm_log(request)
+        if self._conn is None:
+            self._append_request_started(request, trace)
+            return self._handle_plan_command_core(
+                command, request, trace=trace, llm_log=llm_log
+            )
+        insert_run_record(self._conn, request)
+        self._conn.commit()
+        try:
+            self._append_request_started(request, trace)
+            result = self._handle_plan_command_core(
+                command, request, trace=trace, llm_log=llm_log
+            )
+            finish_run_record(self._conn, result)
+            self._conn.commit()
+            return result
+        except Exception:
+            self._conn.rollback()
+            fail_run_record(self._conn, request.run_id, "runtime.orchestration_failed")
+            self._conn.commit()
+            raise
 
     def _handle_core(
         self,
@@ -151,6 +191,29 @@ class RuntimeService:
                 "status": result.status.value,
             },
         )
+        return result
+
+    def _handle_plan_command_core(
+        self,
+        command: PlanCommand,
+        request: RuntimeRequest,
+        *,
+        trace: OptionalLogAppender,
+        llm_log: RequestLlmLog | None,
+    ) -> RuntimeResult:
+        final_state = self._orchestrator.invoke_plan_command(
+            request, command, trace=trace, llm_log=llm_log
+        )
+        result = final_state["result"]
+        if result is None:
+            raise RuntimeError("plan command completed without a result.")
+        if result.error_code is not None:
+            trace.append(
+                "runtime.run.failed",
+                {"error_code": result.error_code, "stage": "planning"},
+            )
+        else:
+            trace.append("runtime.run.completed", {"status": result.status.value})
         return result
 
     def _build_event_appender(
