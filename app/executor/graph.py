@@ -19,6 +19,8 @@ from app.executor.models import (
     ExecutorStatus,
     ExecutorStopReason,
     FinalAnswerDecision,
+    GoalNotAchievedDecision,
+    PlanStepExecutionInput,
     ToolActionDecision,
     ToolObservation,
 )
@@ -55,6 +57,7 @@ class ExecutorGraphContext:
     )
     trace: TraceSink | None = None
     llm_log: LlmInteractionSink | None = None
+    plan_step_input: PlanStepExecutionInput | None = None
 
 
 def build_executor_graph() -> CompiledStateGraph:
@@ -122,6 +125,7 @@ def _decide(
         tool_catalog=state["tool_catalog"],
         observations=tuple(state["observations"]),
         step_index=step_count,
+        plan_step=context.plan_step_input,
     )
     next_state = _updated(
         state,
@@ -148,13 +152,29 @@ def _decide(
             ExecutorStopReason.MODEL_FAILED,
             "executor_model_failed",
         )
-    if not isinstance(decision, (ToolActionDecision, FinalAnswerDecision)):
+    if not isinstance(
+        decision, (ToolActionDecision, FinalAnswerDecision, GoalNotAchievedDecision)
+    ):
         return _finish_failure(
             next_state,
             ExecutorStopReason.INVALID_MODEL_ACTION,
             "executor_invalid_model_action",
         )
     next_state = _updated(next_state, current_decision=decision)
+    if isinstance(decision, GoalNotAchievedDecision):
+        if context.plan_step_input is None:
+            return _finish_failure(
+                next_state,
+                ExecutorStopReason.INVALID_MODEL_ACTION,
+                "executor_invalid_model_action",
+            )
+        _trace_action(context.trace, step_count, "goal_not_achieved")
+        return _finish(
+            next_state,
+            status=ExecutorStatus.STOPPED,
+            stop_reason=ExecutorStopReason.GOAL_NOT_ACHIEVED,
+            error_code="plan_step_goal_not_achieved",
+        )
     if isinstance(decision, FinalAnswerDecision):
         _trace_action(context.trace, step_count, "final_answer")
         return _finish(
@@ -216,7 +236,9 @@ def _execute_tool(
     )
     _trace_observation(context.trace, observation)
     try:
-        context.feedback_sink.record(observation)
+        context.feedback_sink.record(
+            observation, plan_step=context.plan_step_input
+        )
     except Exception:
         _trace_hook_failure(context.trace, "feedback")
     next_state = _updated(

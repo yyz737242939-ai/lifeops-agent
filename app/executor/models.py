@@ -28,6 +28,7 @@ class ExecutorStopReason(StrEnum):
     FINAL_ANSWER = "final_answer"
     CONFIRMATION_REQUIRED = "confirmation_required"
     LIMIT_REACHED = "limit_reached"
+    GOAL_NOT_ACHIEVED = "goal_not_achieved"
     SAFETY_DENIED = "safety_denied"
     MODEL_FAILED = "model_failed"
     INVALID_MODEL_ACTION = "invalid_model_action"
@@ -71,7 +72,17 @@ class FinalAnswerDecision:
         require_non_empty_string(self.message, "message")
 
 
-ExecutorDecision = ToolActionDecision | FinalAnswerDecision
+@dataclass(frozen=True)
+class GoalNotAchievedDecision:
+    """Planner-step-only control result when the current goal cannot be completed."""
+
+    reason_code: str
+
+    def __post_init__(self) -> None:
+        require_non_empty_string(self.reason_code, "reason_code")
+
+
+ExecutorDecision = ToolActionDecision | FinalAnswerDecision | GoalNotAchievedDecision
 
 
 @dataclass(frozen=True)
@@ -152,6 +163,56 @@ class ToolObservation:
 
 
 @dataclass(frozen=True)
+class PlanStepDependencyResult:
+    """Safe result from one explicitly declared dependency Step."""
+
+    step_id: str
+    safe_result_summary: str
+    observations: tuple[ToolObservation, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        require_non_empty_string(self.step_id, "step_id")
+        require_non_empty_string(self.safe_result_summary, "safe_result_summary")
+        _require_tuple_of(self.observations, ToolObservation, "observations")
+
+
+@dataclass(frozen=True)
+class PlanStepExecutionInput:
+    """Narrow Planner-owned input for exactly one Executor invocation."""
+
+    plan_id: str
+    revision: int
+    step_id: str
+    plan_goal: str
+    current_objective: str
+    expected_outcome: str
+    dependency_results: tuple[PlanStepDependencyResult, ...] = field(default_factory=tuple)
+    max_steps: int = 6
+
+    def __post_init__(self) -> None:
+        require_non_empty_string(self.plan_id, "plan_id")
+        if not isinstance(self.revision, int) or isinstance(self.revision, bool) or self.revision < 1:
+            raise ValueError("revision must be a positive integer.")
+        require_non_empty_string(self.step_id, "step_id")
+        require_non_empty_string(self.plan_goal, "plan_goal")
+        require_non_empty_string(self.current_objective, "current_objective")
+        require_non_empty_string(self.expected_outcome, "expected_outcome")
+        _require_tuple_of(
+            self.dependency_results, PlanStepDependencyResult, "dependency_results"
+        )
+        if len({item.step_id for item in self.dependency_results}) != len(
+            self.dependency_results
+        ):
+            raise ValueError("dependency_results must not contain duplicate steps.")
+        if (
+            not isinstance(self.max_steps, int)
+            or isinstance(self.max_steps, bool)
+            or not 1 <= self.max_steps <= 16
+        ):
+            raise ValueError("max_steps must be an integer from 1 through 16.")
+
+
+@dataclass(frozen=True)
 class ExecutorModelInput:
     """Typed, request-local input rebuilt for each model decision."""
 
@@ -168,6 +229,7 @@ class ExecutorModelInput:
     tool_catalog: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     observations: tuple[ToolObservation, ...] = field(default_factory=tuple)
     step_index: int = 1
+    plan_step: PlanStepExecutionInput | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.request, RuntimeRequest):
@@ -198,6 +260,10 @@ class ExecutorModelInput:
             or self.step_index < 1
         ):
             raise ValueError("step_index must be a positive integer.")
+        if self.plan_step is not None and not isinstance(
+            self.plan_step, PlanStepExecutionInput
+        ):
+            raise ValueError("plan_step must be PlanStepExecutionInput when provided.")
 
 
 def _require_tuple_of(values: object, item_type: type, field_name: str) -> None:
@@ -211,6 +277,7 @@ _STATUS_BY_STOP_REASON = {
     ExecutorStopReason.FINAL_ANSWER: ExecutorStatus.COMPLETED,
     ExecutorStopReason.CONFIRMATION_REQUIRED: ExecutorStatus.STOPPED,
     ExecutorStopReason.LIMIT_REACHED: ExecutorStatus.STOPPED,
+    ExecutorStopReason.GOAL_NOT_ACHIEVED: ExecutorStatus.STOPPED,
     ExecutorStopReason.SAFETY_DENIED: ExecutorStatus.STOPPED,
     ExecutorStopReason.MODEL_FAILED: ExecutorStatus.FAILED,
     ExecutorStopReason.INVALID_MODEL_ACTION: ExecutorStatus.FAILED,

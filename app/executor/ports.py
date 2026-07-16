@@ -11,6 +11,7 @@ from app.executor.models import (
     ExecutorMemoryContribution,
     ExecutorModelInput,
     ExecutorResult,
+    PlanStepExecutionInput,
 )
 from app.observability.logger import LlmInteractionSink
 from app.runtime.models import RuntimeRequest
@@ -29,14 +30,20 @@ class ExecutorModelClient(Protocol):
 
 class ExecutorContextProvider(Protocol):
     def load(
-        self, request: RuntimeRequest
+        self,
+        request: RuntimeRequest,
+        *,
+        plan_step: PlanStepExecutionInput | None = None,
     ) -> tuple[ExecutorContextContribution, ...]:
         ...
 
 
 class ExecutorMemoryProvider(Protocol):
     def load(
-        self, request: RuntimeRequest
+        self,
+        request: RuntimeRequest,
+        *,
+        plan_step: PlanStepExecutionInput | None = None,
     ) -> tuple[ExecutorMemoryContribution, ...]:
         ...
 
@@ -52,10 +59,20 @@ class ActionConfirmationProvider(Protocol):
 
 
 class ExecutorRecoveryHook(Protocol):
-    def on_stop(self, result: ExecutorResult) -> None:
+    def on_stop(
+        self,
+        result: ExecutorResult,
+        *,
+        plan_step: PlanStepExecutionInput | None = None,
+    ) -> None:
         ...
 
 
 class ExecutorFeedbackSink(Protocol):
-    def record(self, step_or_result: ExecutorFeedbackItem) -> None:
+    def record(
+        self,
+        step_or_result: ExecutorFeedbackItem,
+        *,
+        plan_step: PlanStepExecutionInput | None = None,
+    ) -> None:
         ...

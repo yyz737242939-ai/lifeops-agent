@@ -7,6 +7,7 @@ from app.executor.models import (
     ExecutorFeedbackItem,
     ExecutorMemoryContribution,
     ExecutorResult,
+    PlanStepExecutionInput,
 )
 from app.runtime.models import RuntimeRequest
 from app.tools.models import ConfirmedAction, ToolCall, ToolDefinition
@@ -14,14 +15,20 @@ from app.tools.models import ConfirmedAction, ToolCall, ToolDefinition
 
 class EmptyExecutorContextProvider:
     def load(
-        self, request: RuntimeRequest
+        self,
+        request: RuntimeRequest,
+        *,
+        plan_step: PlanStepExecutionInput | None = None,
     ) -> tuple[ExecutorContextContribution, ...]:
         return ()
 
 
 class EmptyExecutorMemoryProvider:
     def load(
-        self, request: RuntimeRequest
+        self,
+        request: RuntimeRequest,
+        *,
+        plan_step: PlanStepExecutionInput | None = None,
     ) -> tuple[ExecutorMemoryContribution, ...]:
         return ()
 
@@ -39,10 +46,20 @@ class NoOpActionConfirmationProvider:
 
 
 class NoOpExecutorRecoveryHook:
-    def on_stop(self, result: ExecutorResult) -> None:
+    def on_stop(
+        self,
+        result: ExecutorResult,
+        *,
+        plan_step: PlanStepExecutionInput | None = None,
+    ) -> None:
         return None
 
 
 class NoOpExecutorFeedbackSink:
-    def record(self, step_or_result: ExecutorFeedbackItem) -> None:
+    def record(
+        self,
+        step_or_result: ExecutorFeedbackItem,
+        *,
+        plan_step: PlanStepExecutionInput | None = None,
+    ) -> None:
         return None

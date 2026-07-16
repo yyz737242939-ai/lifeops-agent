@@ -18,6 +18,8 @@ from app.executor.models import (
     ExecutorDecision,
     ExecutorModelInput,
     FinalAnswerDecision,
+    GoalNotAchievedDecision,
+    PlanStepDependencyResult,
     ToolActionDecision,
     ToolObservation,
 )
@@ -37,6 +39,9 @@ For each step, return exactly one of the following:
 
 Tool and evidence rules:
 - Use only the supplied tools. Never invent a tool or return parallel calls.
+- When returning a function call, return only that call. Do not also emit a
+  message, progress update, preamble, explanation, or output_text. Text is a
+  final answer only when no function call is returned.
 - Treat Tool Observations as the source of truth for tool execution. Never
   claim that an action, fetch, or write succeeded unless an observation says
   it succeeded.
@@ -58,6 +63,8 @@ State and safety rules:
 - Never expose private reasoning. Return only the function call or the final
   answer.
 """.strip()
+
+_GOAL_NOT_ACHIEVED_CONTROL = "report_goal_not_achieved"
 
 
 class OpenAIExecutorModelClient:
@@ -103,6 +110,35 @@ class OpenAIExecutorModelClient:
             for item in model_input.tool_catalog
         )
         instructions = EXECUTOR_SYSTEM_PROMPT
+        if model_input.plan_step is not None:
+            tools = (
+                *tools,
+                {
+                    "type": "function",
+                    "name": _GOAL_NOT_ACHIEVED_CONTROL,
+                    "description": (
+                        "Report that the current plan step goal cannot be achieved "
+                        "with the supplied capabilities and observations."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"reason_code": {"type": "string"}},
+                        "required": ["reason_code"],
+                        "additionalProperties": False,
+                    },
+                    "strict": True,
+                },
+            )
+            instructions += (
+                "\n\nPlan Step rules:\n"
+                "Work only on the supplied current objective. Do not execute later "
+                "plan steps. As soon as a successful observation satisfies the current "
+                "expected outcome, return a concise final answer for this step; do not "
+                "call a tool for later work or continue pursuing the overall plan. If "
+                "the current goal cannot be achieved after using the "
+                "available capabilities appropriately, call report_goal_not_achieved "
+                "with a stable reason code."
+            )
         if model_input.prompt_contributions:
             instructions += "\n\nSelected Skill instructions:\n" + "\n\n".join(
                 item.instructions for item in model_input.prompt_contributions
@@ -137,7 +173,7 @@ class OpenAIExecutorModelClient:
             ) from exc
         response_payload = _provider_response_payload(response)
         try:
-            decision = _parse_decision(response, model_input.tool_catalog)
+            decision = _parse_decision(response, model_input)
         except InvalidExecutorModelActionError as exc:
             _record_llm(
                 llm_log,
@@ -159,7 +195,7 @@ class OpenAIExecutorModelClient:
 
 def _parse_decision(
     response: Any,
-    tool_catalog: tuple[dict[str, Any], ...],
+    model_input: ExecutorModelInput,
 ) -> ExecutorDecision:
     calls = [
         item
@@ -168,11 +204,26 @@ def _parse_decision(
     ]
     output_text = getattr(response, "output_text", "")
     final_text = output_text.strip() if isinstance(output_text, str) else ""
-    if len(calls) > 1 or (calls and final_text):
+    if len(calls) > 1:
         raise _invalid_action()
     if calls:
+        # Some OpenAI-compatible providers emit a progress message alongside
+        # one function call even when instructed not to. The typed call remains
+        # the sole executable decision; accompanying text is logged but is
+        # never treated as a final answer or execution evidence.
         selected = calls[0]
-        allowed_names = {item["name"] for item in tool_catalog}
+        if (
+            getattr(selected, "name", None) == _GOAL_NOT_ACHIEVED_CONTROL
+            and model_input.plan_step is not None
+        ):
+            try:
+                arguments = json.loads(selected.arguments)
+                if not isinstance(arguments, dict) or set(arguments) != {"reason_code"}:
+                    raise ValueError
+                return GoalNotAchievedDecision(arguments["reason_code"])
+            except (AttributeError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise _invalid_action() from exc
+        allowed_names = {item["name"] for item in model_input.tool_catalog}
         if getattr(selected, "name", None) not in allowed_names:
             raise _invalid_action()
         try:
@@ -203,7 +254,7 @@ def _invalid_action() -> InvalidExecutorModelActionError:
 
 
 def _model_payload(model_input: ExecutorModelInput) -> dict[str, Any]:
-    return {
+    payload = {
         "user_input": model_input.request.user_input,
         "context": [
             {"content": item.content, "source": item.source}
@@ -217,6 +268,28 @@ def _model_payload(model_input: ExecutorModelInput) -> dict[str, Any]:
             _observation_payload(item) for item in model_input.observations
         ],
         "step_index": model_input.step_index,
+    }
+    if model_input.plan_step is not None:
+        payload["plan_step"] = {
+            "plan_id": model_input.plan_step.plan_id,
+            "revision": model_input.plan_step.revision,
+            "step_id": model_input.plan_step.step_id,
+            "plan_goal": model_input.plan_step.plan_goal,
+            "current_objective": model_input.plan_step.current_objective,
+            "expected_outcome": model_input.plan_step.expected_outcome,
+            "dependency_results": [
+                _dependency_result_payload(item)
+                for item in model_input.plan_step.dependency_results
+            ],
+        }
+    return payload
+
+
+def _dependency_result_payload(result: PlanStepDependencyResult) -> dict[str, Any]:
+    return {
+        "step_id": result.step_id,
+        "safe_result_summary": result.safe_result_summary,
+        "observations": [_observation_payload(item) for item in result.observations],
     }
 
 
