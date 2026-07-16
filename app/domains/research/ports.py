@@ -12,17 +12,29 @@ from urllib.request import Request, urlopen
 from app.common.errors import AppError
 from app.common.ids import new_id
 from app.common.time import utc_now_iso
-from app.domains.research.models import ExternalObservation, FetchedSourceDocument
+from app.domains.research.models import (
+    ExternalObservation,
+    FetchedSourceDocument,
+    PaperSearchResult,
+)
 from app.domains.research.source_manifest import load_research_source
 
 
-MAX_RESEARCH_SOURCE_BYTES = 200_000
+MAX_RESEARCH_SOURCE_BYTES = 500_000
 RESEARCH_SOURCE_TIMEOUT_SECONDS = 8.0
 RESEARCH_SOURCE_USER_AGENT = "LifeOps-Agent/0.1 read-only research source fetcher"
 
 
 class ResearchExternalSourceError(AppError):
     """Raised when a declared Research source cannot be fetched safely."""
+
+
+class ResearchPaperSearchError(AppError):
+    """Stable failure returned by a paper-search adapter."""
+
+    def __init__(self, message: str, *, code: str, retryable: bool) -> None:
+        super().__init__(message, code=code, details={"retryable": retryable})
+        self.retryable = retryable
 
 
 class ResearchSourcePort(Protocol):
@@ -32,6 +44,15 @@ class ResearchSourcePort(Protocol):
 
 class ResearchContentPort(Protocol):
     def fetch(self, source_key: str) -> FetchedSourceDocument:
+        ...
+
+
+class PaperSearchPort(Protocol):
+    def search_papers(
+        self,
+        query: str,
+        limit: int,
+    ) -> PaperSearchResult:
         ...
 
 

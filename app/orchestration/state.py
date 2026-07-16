@@ -7,6 +7,7 @@ from typing import TypedDict
 
 from app.intent.models import IntentDecision
 from app.policy.models import PolicyDecision
+from app.planning.models import PlanningRouteDecision
 from app.runtime.models import RuntimeRequest, RuntimeResult
 from app.skills.models import PromptContribution, SkillSelection
 
@@ -28,6 +29,7 @@ class GraphState(TypedDict):
     route: GraphRoute | None
     skill_selection: SkillSelection | None
     prompt_contributions: list[PromptContribution]
+    planning_route: PlanningRouteDecision | None
     result: RuntimeResult | None
     error_code: str | None
     error_stage: str | None
@@ -44,6 +46,7 @@ def create_graph_state(request: RuntimeRequest) -> GraphState:
         "route": None,
         "skill_selection": None,
         "prompt_contributions": [],
+        "planning_route": None,
         "result": None,
         "error_code": None,
         "error_stage": None,

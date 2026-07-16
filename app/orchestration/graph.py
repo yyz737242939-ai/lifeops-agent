@@ -24,7 +24,12 @@ from app.orchestration.nodes import (
     prepare_skills,
     require_confirmation,
 )
+from app.orchestration.planning import execute_plan_command, route_planning
 from app.orchestration.state import GraphRoute, GraphState, create_graph_state
+from app.planning.controller import PlanController
+from app.planning.models import DirectRoute, PlanCommand, PlanningLimits
+from app.planning.ports import PlanningRouteClient
+from app.planning.service import PlanningService
 from app.policy.service import PolicyService
 from app.runtime.models import RuntimeRequest, RuntimeResult
 from app.skills.service import SkillService
@@ -46,6 +51,9 @@ def build_runtime_graph(
     policy_service: PolicyService,
     skill_service: SkillService,
     executor: ReactExecutor | None = None,
+    planning_route_client: PlanningRouteClient | None = None,
+    planning_service: PlanningService | None = None,
+    planning_limits: PlanningLimits | None = None,
 ) -> CompiledStateGraph:
     """Build and compile the stage-4 runtime orchestration graph."""
 
@@ -72,6 +80,16 @@ def build_runtime_graph(
             executor or ReactExecutor(_NoOpExecutorModelClient()),
         ),
     )
+    planning_enabled = planning_route_client is not None and planning_service is not None
+    if planning_enabled:
+        graph.add_node(
+            "route_planning",
+            _route_planning_with_runtime(
+                planning_route_client,
+                planning_service,
+                planning_limits or PlanningLimits(),
+            ),
+        )
     graph.add_node("requires_confirmation", require_confirmation)
     graph.add_node("deny", deny)
     graph.add_node("finalize", finalize)
@@ -99,10 +117,20 @@ def build_runtime_graph(
         "prepare_skills",
         _route_after_skill_preparation,
         {
-            "continue": "execute_executor",
+            "continue": "route_planning" if planning_enabled else "execute_executor",
             "error": END,
         },
     )
+    if planning_enabled:
+        graph.add_conditional_edges(
+            "route_planning",
+            _route_after_planning,
+            {
+                "direct": "execute_executor",
+                "finalize": "finalize",
+                "error": END,
+            },
+        )
     graph.add_edge("execute_executor", "finalize")
     graph.add_edge("requires_confirmation", "finalize")
     graph.add_edge("deny", "finalize")
@@ -120,16 +148,26 @@ class RuntimeOrchestrator:
         policy_service: PolicyService | None = None,
         execution_scope_factory: Callable[[], ToolRuntime] | None = None,
         executor: ReactExecutor | None = None,
+        planning_route_client: PlanningRouteClient | None = None,
+        planning_service: PlanningService | None = None,
+        plan_controller: PlanController | None = None,
+        planning_limits: PlanningLimits | None = None,
     ) -> None:
         self._intent_service = intent_service or IntentService()
         self._policy_service = policy_service or PolicyService()
         self._skill_service = skill_service
         self._execution_scope_factory = execution_scope_factory or _empty_tool_runtime
+        self._planning_service = planning_service
+        self._plan_controller = plan_controller
+        self._planning_limits = planning_limits or PlanningLimits()
         self._graph = build_runtime_graph(
             self._intent_service,
             self._policy_service,
             self._skill_service,
             executor,
+            planning_route_client,
+            planning_service,
+            self._planning_limits,
         )
 
     def invoke(
@@ -169,6 +207,46 @@ class RuntimeOrchestrator:
             raise RuntimeError("runtime graph completed without a result.")
         return result
 
+    def invoke_plan_command(
+        self,
+        request: RuntimeRequest,
+        command: PlanCommand,
+        trace: TraceSink | None = None,
+        llm_log: LlmInteractionSink | None = None,
+    ) -> GraphState:
+        """Run a structured plan command without encoding it as user text."""
+
+        if self._planning_service is None or self._plan_controller is None:
+            raise RuntimeError("planning command composition is not configured.")
+        state = create_graph_state(request)
+        state = classify_intent(state, self._intent_service, trace=trace)
+        if state["error_code"] is not None:
+            return state
+        state = decide_policy(state, self._policy_service, trace=trace)
+        if state["error_code"] is not None or state["route"] != GraphRoute.ALLOW:
+            if state["result"] is None:
+                state = deny(state)
+            return finalize(state)
+        state = prepare_skills(
+            state,
+            skill_service=self._skill_service,
+            trace=trace,
+            llm_log=llm_log,
+        )
+        if state["error_code"] is not None:
+            return state
+        state = execute_plan_command(
+            state,
+            command,
+            execution_scope=self._execution_scope_factory(),
+            planning_service=self._planning_service,
+            controller=self._plan_controller,
+            limits=self._planning_limits,
+            trace=trace,
+            llm_log=llm_log,
+        )
+        return finalize(state)
+
 
 def _route_after_intent(state: GraphState) -> Literal["continue", "error"]:
     if state["error_code"] is not None:
@@ -193,6 +271,18 @@ def _route_after_skill_preparation(
     if state["error_code"] is not None:
         return "error"
     return "continue"
+
+
+def _route_after_planning(
+    state: GraphState,
+) -> Literal["direct", "finalize", "error"]:
+    if state["error_code"] is not None:
+        return "error"
+    if state["result"] is not None:
+        return "finalize"
+    if isinstance(state["planning_route"], DirectRoute):
+        return "direct"
+    raise ValueError("planning route did not produce a routable result.")
 
 
 def _prepare_skills_with_runtime(
@@ -226,6 +316,29 @@ def _execute_executor_with_runtime(
             state,
             execution_scope=execution_scope,
             executor=executor,
+            trace=context.trace,
+            llm_log=context.llm_log,
+        )
+
+    return invoke_node
+
+
+def _route_planning_with_runtime(
+    route_client: PlanningRouteClient,
+    planning_service: PlanningService,
+    limits: PlanningLimits,
+) -> Callable[[GraphState, Runtime[OrchestrationContext]], GraphState]:
+    def invoke_node(
+        state: GraphState,
+        runtime: Runtime[OrchestrationContext],
+    ) -> GraphState:
+        context = runtime.context or OrchestrationContext()
+        return route_planning(
+            state,
+            execution_scope=context.execution_scope or _empty_tool_runtime(),
+            route_client=route_client,
+            planning_service=planning_service,
+            limits=limits,
             trace=context.trace,
             llm_log=context.llm_log,
         )

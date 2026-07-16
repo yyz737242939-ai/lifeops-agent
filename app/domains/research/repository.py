@@ -307,12 +307,27 @@ class ResearchRepository:
             created_at=str(topic["created_at"]),
         )
 
-    def list_topics(self, limit: int, offset: int) -> tuple[ResearchTopic, ...]:
-        rows = self._conn.execute(
-            """SELECT id, name, description, created_at FROM research_topics
-               ORDER BY created_at DESC, id LIMIT ? OFFSET ?""",
-            (limit, offset),
-        ).fetchall()
+    def list_topics(
+        self,
+        limit: int,
+        offset: int,
+        *,
+        filter_text: str | None = None,
+    ) -> tuple[ResearchTopic, ...]:
+        if filter_text:
+            pattern = f"%{filter_text}%"
+            rows = self._conn.execute(
+                """SELECT id, name, description, created_at FROM research_topics
+                   WHERE name LIKE ? OR description LIKE ?
+                   ORDER BY created_at DESC, id LIMIT ? OFFSET ?""",
+                (pattern, pattern, limit, offset),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                """SELECT id, name, description, created_at FROM research_topics
+                   ORDER BY created_at DESC, id LIMIT ? OFFSET ?""",
+                (limit, offset),
+            ).fetchall()
         return tuple(
             ResearchTopic(
                 topic_id=str(row["id"]),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 from app.executor.model_adapter import OpenAIExecutorModelClient
 from app.executor.service import ReactExecutor
@@ -14,8 +15,19 @@ from app.domains.research.tools import build_research_tools
 from app.domains.travel.repository import TravelRepository
 from app.domains.travel.service import TravelService
 from app.domains.travel.tools import build_travel_tools
+from app.integrations.mcp.models import McpServerConfig
+from app.integrations.research_mcp.adapter import (
+    HuggingFaceMcpPaperSearchAdapter,
+)
 from app.intent.service import IntentService
 from app.policy.service import PolicyService
+from app.planning.controller import PlanController
+from app.planning.finalizer import OpenAIPlanFinalizerClient
+from app.planning.models import PlanningLimits
+from app.planning.planner import OpenAIPlannerModelClient
+from app.planning.repository import SqlitePlanRepository
+from app.planning.router import OpenAIPlanningRouteClient
+from app.planning.service import PlanningService
 from app.runtime.service import RuntimeService
 from app.skills.loader import discover_skills
 from app.skills.registry import SkillRegistry
@@ -40,6 +52,18 @@ def build_runtime_service(
 
     conn = connect_sqlite(config.database_path)
     migrate(conn)
+    limits = PlanningLimits()
+    planner = OpenAIPlannerModelClient()
+    repository = SqlitePlanRepository(conn)
+    executor = ReactExecutor(OpenAIExecutorModelClient())
+    planning_service = PlanningService(planner, repository, limits=limits)
+    plan_controller = PlanController(
+        repository,
+        executor,
+        limits=limits,
+        planner=planner,
+        finalizer=OpenAIPlanFinalizerClient(),
+    )
 
     return RuntimeService(
         intent_service=IntentService(),
@@ -48,7 +72,11 @@ def build_runtime_service(
         conn=conn,
         log_root=config.log_root,
         execution_scope_factory=lambda: _build_tool_runtime(conn, config.skill_root),
-        executor=ReactExecutor(OpenAIExecutorModelClient()),
+        executor=executor,
+        planning_route_client=OpenAIPlanningRouteClient(),
+        planning_service=planning_service,
+        plan_controller=plan_controller,
+        planning_limits=limits,
     )
 
 
@@ -65,10 +93,20 @@ def _build_skill_service(
 def _build_tool_runtime(conn, skill_root: Path) -> ToolRuntime:
     """Build request-local domain services and one shared registry/Gateway pair."""
 
+    repo_root = Path(__file__).resolve().parents[2]
     research_service = ResearchService(
         _UnavailableResearchSourcePort(),
         ResearchRepository(conn),
         content_port=HuggingFaceResearchContentPort(skill_root / "research"),
+        paper_search_port=HuggingFaceMcpPaperSearchAdapter(
+            McpServerConfig(
+                server_id="huggingface-papers",
+                command=sys.executable,
+                args=("-m", "app.integrations.research_mcp.server"),
+                cwd=repo_root,
+                timeout_seconds=15.0,
+            )
+        ),
     )
     unavailable_travel = _UnavailableTravelPorts()
     travel_service = TravelService(

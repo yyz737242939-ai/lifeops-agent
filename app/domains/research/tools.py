@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from app.common.errors import AppError
-from app.domains.research.models import ResearchItemSet
 from app.domains.research.service import ResearchService
 from app.tools.models import (
     ExecutionEvidence,
@@ -18,14 +17,14 @@ from app.tools.models import (
 from app.tools.registry import ToolHandler
 
 
-FETCH_SOURCE_TOOL = "research.fetch_source"
-FETCH_BRIEFING_SOURCE_TOOL = "research.fetch_briefing_source"
-PARSE_ITEMS_TOOL = "research.parse_items"
-RANK_ITEMS_TOOL = "research.rank_items"
-BUILD_BRIEF_DRAFT_TOOL = "research.build_brief_draft"
+BUILD_BRIEF_TOOL = "research.build_brief"
+SEARCH_PAPERS_TOOL = "research.search_papers"
 SAVE_SOURCE_TOOL = "research.save_source"
 SAVE_BRIEF_TOOL = "research.save_brief"
 CREATE_NOTE_TOOL = "research.create_note"
+CREATE_TOPIC_TOOL = "research.create_topic"
+LINK_ITEMS_TOOL = "research.link_items"
+APPEND_REVISION_TOOL = "research.append_revision"
 SEARCH_KNOWLEDGE_TOOL = "research.search_knowledge"
 
 _OBSERVATION_PROPERTIES = {
@@ -37,61 +36,17 @@ _OBSERVATION_PROPERTIES = {
     "content_hash": {"type": "string", "minLength": 1},
     "fetched_at": {"type": "string", "minLength": 1},
     "provenance": {"type": "string", "minLength": 1},
-}
-
-_ITEM_PROPERTIES = {
-    "item_id": {"type": "string", "minLength": 1},
-    "source_key": {"type": "string", "minLength": 1},
-    "title": {"type": "string", "minLength": 1},
-    "url": {"type": "string", "minLength": 1},
-    "raw_position": {"type": "integer", "minimum": 1},
-    "topic_hint": {"type": "string", "minLength": 1},
-    "score": {"type": "integer"},
-}
-
-_ITEM_SET_OUTPUT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "item_set_id": {"type": "string", "minLength": 1},
-        "items": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 20,
-            "items": {
-                "type": "object",
-                "properties": _ITEM_PROPERTIES,
-                "required": list(_ITEM_PROPERTIES),
-                "additionalProperties": False,
-            },
-        },
+    "paper_id": {"type": "string", "minLength": 1, "maxLength": 200},
+    "authors": {
+        "type": "array",
+        "maxItems": 20,
+        "items": {"type": "string", "minLength": 1, "maxLength": 120},
     },
-    "required": ["item_set_id", "items"],
-    "additionalProperties": False,
 }
-
 
 def build_research_tools(
     service: ResearchService,
 ) -> tuple[tuple[ToolDefinition, ToolHandler], ...]:
-    fetch_definition = ToolDefinition(
-        name=FETCH_SOURCE_TOOL,
-        description="Fetch one declared Research fixture source as a temporary observation.",
-        input_schema={
-            "type": "object",
-            "properties": {"source_key": {"type": "string", "minLength": 1}},
-            "required": ["source_key"],
-            "additionalProperties": False,
-        },
-        output_schema={
-            "type": "object",
-            "properties": _OBSERVATION_PROPERTIES,
-            "required": list(_OBSERVATION_PROPERTIES),
-            "additionalProperties": False,
-        },
-        effect=ToolEffect.EXTERNAL_READ,
-        risk=ToolRisk.LOW,
-        skill_ids=("research",),
-    )
     save_definition = ToolDefinition(
         name=SAVE_SOURCE_TOOL,
         description="Persist one request-local Research observation as a Source.",
@@ -114,37 +69,49 @@ def build_research_tools(
         risk=ToolRisk.MEDIUM,
         skill_ids=("research",),
     )
-    fetch_briefing_definition = ToolDefinition(
-        name=FETCH_BRIEFING_SOURCE_TOOL,
-        description="Fetch one declared Hugging Face list page for a temporary briefing.",
+    search_papers_definition = ToolDefinition(
+        name=SEARCH_PAPERS_TOOL,
+        description=(
+            "Search public Hugging Face papers through the local MCP adapter and "
+            "return temporary observations."
+        ),
         input_schema={
             "type": "object",
-            "properties": {"source_key": {"type": "string", "minLength": 1}},
-            "required": ["source_key"],
+            "properties": {
+                "query": {"type": "string", "minLength": 1, "maxLength": 200},
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10,
+                    "default": 5,
+                },
+            },
+            "required": ["query", "limit"],
             "additionalProperties": False,
         },
         output_schema={
             "type": "object",
             "properties": {
-                "document_id": {"type": "string", "minLength": 1},
-                "observation_id": {"type": "string", "minLength": 1},
-                "source_key": {"type": "string", "minLength": 1},
-                "title": {"type": "string", "minLength": 1},
-                "url": {"type": "string", "minLength": 1},
-                "content_hash": {"type": "string", "minLength": 1},
-                "fetched_at": {"type": "string", "minLength": 1},
-                "provenance": {"type": "string", "minLength": 1},
+                "observations": {
+                    "type": "array",
+                    "maxItems": 10,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            **_OBSERVATION_PROPERTIES,
+                            "published_at": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64,
+                            },
+                        },
+                        "required": list(_OBSERVATION_PROPERTIES),
+                        "additionalProperties": False,
+                    },
+                },
+                "invalid_count": {"type": "integer", "minimum": 0, "maximum": 10},
             },
-            "required": [
-                "document_id",
-                "observation_id",
-                "source_key",
-                "title",
-                "url",
-                "content_hash",
-                "fetched_at",
-                "provenance",
-            ],
+            "required": ["observations", "invalid_count"],
             "additionalProperties": False,
         },
         effect=ToolEffect.EXTERNAL_READ,
@@ -198,48 +165,106 @@ def build_research_tools(
         risk=ToolRisk.MEDIUM,
         skill_ids=("research",),
     )
-    parse_definition = ToolDefinition(
-        name=PARSE_ITEMS_TOOL,
-        description="Parse one request-local Research document into typed list items.",
+    create_topic_definition = ToolDefinition(
+        name=CREATE_TOPIC_TOOL,
+        description="Create one explicitly confirmed Research topic.",
         input_schema={
             "type": "object",
             "properties": {
-                "document_id": {"type": "string", "minLength": 1},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+                "name": {"type": "string", "minLength": 1, "maxLength": 200},
+                "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000,
+                },
             },
-            "required": ["document_id", "limit"],
+            "required": ["name", "description"],
             "additionalProperties": False,
         },
-        output_schema=_ITEM_SET_OUTPUT_SCHEMA,
-        effect=ToolEffect.READ,
-        risk=ToolRisk.LOW,
+        output_schema={
+            "type": "object",
+            "properties": {
+                "topic_id": {"type": "string", "minLength": 1},
+                "name": {"type": "string", "minLength": 1},
+            },
+            "required": ["topic_id", "name"],
+            "additionalProperties": False,
+        },
+        effect=ToolEffect.WRITE,
+        risk=ToolRisk.MEDIUM,
         skill_ids=("research",),
     )
-    rank_definition = ToolDefinition(
-        name=RANK_ITEMS_TOOL,
-        description="Deduplicate and rank one request-local Research item set.",
+    item_kind_schema = {
+        "type": "string",
+        "enum": ["topic", "source", "note", "brief"],
+    }
+    link_items_definition = ToolDefinition(
+        name=LINK_ITEMS_TOOL,
+        description="Create one explicitly confirmed relationship between saved Research items.",
         input_schema={
             "type": "object",
             "properties": {
-                "item_set_id": {"type": "string", "minLength": 1},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
-                "topic_filter": {"type": "string", "minLength": 1},
+                "from_kind": item_kind_schema,
+                "from_id": {"type": "string", "minLength": 1},
+                "to_kind": item_kind_schema,
+                "to_id": {"type": "string", "minLength": 1},
+                "relation": {"type": "string", "minLength": 1, "maxLength": 100},
             },
-            "required": ["item_set_id", "limit"],
+            "required": ["from_kind", "from_id", "to_kind", "to_id", "relation"],
             "additionalProperties": False,
         },
-        output_schema=_ITEM_SET_OUTPUT_SCHEMA,
-        effect=ToolEffect.READ,
-        risk=ToolRisk.LOW,
+        output_schema={
+            "type": "object",
+            "properties": {
+                "link_id": {"type": "string", "minLength": 1},
+                "from_id": {"type": "string", "minLength": 1},
+                "to_id": {"type": "string", "minLength": 1},
+                "relation": {"type": "string", "minLength": 1},
+            },
+            "required": ["link_id", "from_id", "to_id", "relation"],
+            "additionalProperties": False,
+        },
+        effect=ToolEffect.WRITE,
+        risk=ToolRisk.MEDIUM,
+        skill_ids=("research",),
+    )
+    append_revision_definition = ToolDefinition(
+        name=APPEND_REVISION_TOOL,
+        description="Append one explicitly confirmed immutable revision to a saved Research item.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "item_kind": item_kind_schema,
+                "item_id": {"type": "string", "minLength": 1},
+                "content": {"type": "string", "minLength": 1, "maxLength": 12000},
+            },
+            "required": ["item_kind", "item_id", "content"],
+            "additionalProperties": False,
+        },
+        output_schema={
+            "type": "object",
+            "properties": {
+                "revision_id": {"type": "string", "minLength": 1},
+                "version": {"type": "integer", "minimum": 1},
+            },
+            "required": ["revision_id", "version"],
+            "additionalProperties": False,
+        },
+        effect=ToolEffect.WRITE,
+        risk=ToolRisk.MEDIUM,
         skill_ids=("research",),
     )
     search_definition = ToolDefinition(
         name=SEARCH_KNOWLEDGE_TOOL,
-        description="Search saved Research sources, notes, and briefs with pagination.",
+        description=(
+            "Search saved Research sources, notes, and briefs, or list/filter "
+            "Research topics when query is omitted."
+        ),
         input_schema={
             "type": "object",
             "properties": {
                 "query": {"type": "string", "minLength": 1},
+                "topic_filter": {"type": "string", "minLength": 1, "maxLength": 200},
                 "item_kinds": {
                     "type": "array",
                     "minItems": 1,
@@ -252,7 +277,7 @@ def build_research_tools(
                 "limit": {"type": "integer", "minimum": 1, "maximum": 100},
                 "offset": {"type": "integer", "minimum": 0},
             },
-            "required": ["query", "item_kinds", "limit", "offset"],
+            "required": ["limit", "offset"],
             "additionalProperties": False,
         },
         output_schema={
@@ -267,7 +292,7 @@ def build_research_tools(
                             "item_id": {"type": "string", "minLength": 1},
                             "item_kind": {
                                 "type": "string",
-                                "enum": ["source", "note", "brief"],
+                                "enum": ["topic", "source", "note", "brief"],
                             },
                             "title": {"type": "string", "minLength": 1},
                             "created_at": {"type": "string", "minLength": 1},
@@ -286,15 +311,32 @@ def build_research_tools(
         skill_ids=("research",),
     )
     build_brief_definition = ToolDefinition(
-        name=BUILD_BRIEF_DRAFT_TOOL,
-        description="Build a temporary Chinese source-linked brief from a ranked item set.",
+        name=BUILD_BRIEF_TOOL,
+        description=(
+            "Fetch declared Hugging Face list pages and build one temporary, "
+            "source-linked Research brief."
+        ),
         input_schema={
             "type": "object",
             "properties": {
-                "item_set_id": {"type": "string", "minLength": 1},
-                "title": {"type": "string", "minLength": 1, "maxLength": 200},
+                "source_keys": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 2,
+                    "items": {
+                        "type": "string",
+                        "enum": ["hf_daily_papers", "hf_blog"],
+                    },
+                },
+                "topic_filter": {"type": "string", "minLength": 1, "maxLength": 100},
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 20,
+                    "default": 10,
+                },
             },
-            "required": ["item_set_id", "title"],
+            "required": ["source_keys", "limit"],
             "additionalProperties": False,
         },
         output_schema={
@@ -309,30 +351,29 @@ def build_research_tools(
                     "items": {"type": "string", "minLength": 1},
                 },
                 "provenance": {"type": "string", "minLength": 1},
+                "source_observation_ids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 2,
+                    "items": {"type": "string", "minLength": 1},
+                },
+                "item_count": {"type": "integer", "minimum": 1, "maximum": 20},
             },
-            "required": ["draft_id", "title", "body", "source_urls", "provenance"],
+            "required": [
+                "draft_id",
+                "title",
+                "body",
+                "source_urls",
+                "provenance",
+                "source_observation_ids",
+                "item_count",
+            ],
             "additionalProperties": False,
         },
-        effect=ToolEffect.READ,
+        effect=ToolEffect.EXTERNAL_READ,
         risk=ToolRisk.LOW,
         skill_ids=("research",),
     )
-
-    def fetch_handler(call: ToolCall) -> ToolResult:
-        try:
-            observation = service.fetch_source(str(call.arguments["source_key"]))
-            output = {
-                field_name: getattr(observation, field_name)
-                for field_name in _OBSERVATION_PROPERTIES
-            }
-            return ToolResult(
-                call_id=call.call_id,
-                tool_name=call.tool_name,
-                status=ToolCallStatus.SUCCEEDED,
-                output=output,
-            )
-        except (AppError, ValueError, KeyError) as exc:
-            return _failed(call, exc)
 
     def save_handler(call: ToolCall) -> ToolResult:
         try:
@@ -353,37 +394,39 @@ def build_research_tools(
         except (AppError, ValueError, KeyError) as exc:
             return _failed(call, exc)
 
-    def fetch_briefing_handler(call: ToolCall) -> ToolResult:
+    def search_papers_handler(call: ToolCall) -> ToolResult:
         try:
-            document = service.fetch_content(str(call.arguments["source_key"]))
+            result = service.search_papers(
+                str(call.arguments["query"]),
+                limit=int(call.arguments["limit"]),
+            )
+            output_observations = []
+            for observation in result.observations:
+                paper = {
+                    "observation_id": observation.observation_id,
+                    "source_key": observation.source_key,
+                    "title": observation.title,
+                    "url": observation.url,
+                    "summary": observation.summary,
+                    "content_hash": observation.content_hash,
+                    "fetched_at": observation.fetched_at,
+                    "provenance": observation.provenance,
+                    "paper_id": observation.external_id,
+                    "authors": list(observation.authors),
+                }
+                if observation.published_at is not None:
+                    paper["published_at"] = observation.published_at
+                output_observations.append(paper)
             return ToolResult(
                 call_id=call.call_id,
                 tool_name=call.tool_name,
                 status=ToolCallStatus.SUCCEEDED,
                 output={
-                    field_name: getattr(document, field_name)
-                    for field_name in (
-                        "document_id",
-                        "observation_id",
-                        "source_key",
-                        "title",
-                        "url",
-                        "content_hash",
-                        "fetched_at",
-                        "provenance",
-                    )
+                    "observations": output_observations,
+                    "invalid_count": result.invalid_count,
                 },
             )
         except (AppError, ValueError, KeyError, RuntimeError) as exc:
-            return _failed(call, exc)
-
-    def parse_handler(call: ToolCall) -> ToolResult:
-        try:
-            item_set = service.parse_items(
-                str(call.arguments["document_id"]), limit=int(call.arguments["limit"])
-            )
-            return _item_set_result(call, item_set)
-        except (AppError, ValueError, KeyError) as exc:
             return _failed(call, exc)
 
     def save_brief_handler(call: ToolCall) -> ToolResult:
@@ -426,47 +469,137 @@ def build_research_tools(
         except (AppError, ValueError, KeyError) as exc:
             return _failed(call, exc)
 
-    def rank_handler(call: ToolCall) -> ToolResult:
+    def create_topic_handler(call: ToolCall) -> ToolResult:
         try:
-            item_set = service.rank_items(
-                str(call.arguments["item_set_id"]),
-                limit=int(call.arguments["limit"]),
-                topic_filter=(
-                    str(call.arguments["topic_filter"])
-                    if "topic_filter" in call.arguments
-                    else None
+            topic = service.create_topic(
+                str(call.arguments["name"]),
+                str(call.arguments["description"]),
+            )
+            return ToolResult(
+                call_id=call.call_id,
+                tool_name=call.tool_name,
+                status=ToolCallStatus.SUCCEEDED,
+                output={"topic_id": topic.topic_id, "name": topic.name},
+                evidence=(
+                    ExecutionEvidence(
+                        evidence_type="research_topic_created",
+                        summary="One Research topic was persisted.",
+                        reference=f"research-topic:{topic.topic_id}",
+                    ),
                 ),
             )
-            return _item_set_result(call, item_set)
         except (AppError, ValueError, KeyError) as exc:
             return _failed(call, exc)
 
-    def search_handler(call: ToolCall) -> ToolResult:
+    def link_items_handler(call: ToolCall) -> ToolResult:
         try:
-            item_kinds = tuple(str(value) for value in call.arguments["item_kinds"])
-            limit = int(call.arguments["limit"])
-            offset = int(call.arguments["offset"])
-            items = service.search_saved_items(
-                str(call.arguments["query"]),
-                item_kinds,
-                limit=limit,
-                offset=offset,
+            link = service.link_items(
+                str(call.arguments["from_kind"]),
+                str(call.arguments["from_id"]),
+                str(call.arguments["to_kind"]),
+                str(call.arguments["to_id"]),
+                str(call.arguments["relation"]),
             )
             return ToolResult(
                 call_id=call.call_id,
                 tool_name=call.tool_name,
                 status=ToolCallStatus.SUCCEEDED,
                 output={
-                    "items": [
-                        {
-                            "item_id": item.item_id,
-                            "item_kind": item.item_kind,
-                            "title": item.title,
-                            "created_at": item.created_at,
-                        }
-                        for item in items
-                    ],
-                    "next_offset": offset + len(items),
+                    "link_id": link.link_id,
+                    "from_id": link.from_id,
+                    "to_id": link.to_id,
+                    "relation": link.relation,
+                },
+                evidence=(
+                    ExecutionEvidence(
+                        evidence_type="research_items_linked",
+                        summary="One Research relationship was persisted.",
+                        reference=f"research-link:{link.link_id}",
+                    ),
+                ),
+            )
+        except (AppError, ValueError, KeyError) as exc:
+            return _failed(call, exc)
+
+    def append_revision_handler(call: ToolCall) -> ToolResult:
+        try:
+            revision = service.append_revision(
+                str(call.arguments["item_kind"]),
+                str(call.arguments["item_id"]),
+                str(call.arguments["content"]),
+            )
+            return ToolResult(
+                call_id=call.call_id,
+                tool_name=call.tool_name,
+                status=ToolCallStatus.SUCCEEDED,
+                output={
+                    "revision_id": revision.revision_id,
+                    "version": revision.version,
+                },
+                evidence=(
+                    ExecutionEvidence(
+                        evidence_type="research_revision_appended",
+                        summary="One immutable Research revision was persisted.",
+                        reference=f"research-revision:{revision.revision_id}",
+                    ),
+                ),
+            )
+        except (AppError, ValueError, KeyError) as exc:
+            return _failed(call, exc)
+
+    def search_handler(call: ToolCall) -> ToolResult:
+        try:
+            limit = int(call.arguments["limit"])
+            offset = int(call.arguments["offset"])
+            if "query" in call.arguments:
+                if "item_kinds" not in call.arguments:
+                    raise ValueError("item_kinds is required when query is present.")
+                item_kinds = tuple(
+                    str(value) for value in call.arguments["item_kinds"]
+                )
+                saved_items = service.search_saved_items(
+                    str(call.arguments["query"]),
+                    item_kinds,
+                    limit=limit,
+                    offset=offset,
+                )
+                output_items = [
+                    {
+                        "item_id": item.item_id,
+                        "item_kind": item.item_kind,
+                        "title": item.title,
+                        "created_at": item.created_at,
+                    }
+                    for item in saved_items
+                ]
+            else:
+                if "item_kinds" in call.arguments:
+                    raise ValueError("item_kinds is only valid with query.")
+                topics = service.list_topics(
+                    limit=limit,
+                    offset=offset,
+                    filter_text=(
+                        str(call.arguments["topic_filter"])
+                        if "topic_filter" in call.arguments
+                        else None
+                    ),
+                )
+                output_items = [
+                    {
+                        "item_id": topic.topic_id,
+                        "item_kind": "topic",
+                        "title": topic.name,
+                        "created_at": topic.created_at,
+                    }
+                    for topic in topics
+                ]
+            return ToolResult(
+                call_id=call.call_id,
+                tool_name=call.tool_name,
+                status=ToolCallStatus.SUCCEEDED,
+                output={
+                    "items": output_items,
+                    "next_offset": offset + len(output_items),
                 },
             )
         except (AppError, ValueError, KeyError, TypeError) as exc:
@@ -474,9 +607,16 @@ def build_research_tools(
 
     def build_brief_handler(call: ToolCall) -> ToolResult:
         try:
-            draft = service.build_brief_draft(
-                str(call.arguments["item_set_id"]), str(call.arguments["title"])
+            result = service.build_brief(
+                tuple(str(value) for value in call.arguments["source_keys"]),
+                limit=int(call.arguments["limit"]),
+                topic_filter=(
+                    str(call.arguments["topic_filter"])
+                    if "topic_filter" in call.arguments
+                    else None
+                ),
             )
+            draft = result.draft
             return ToolResult(
                 call_id=call.call_id,
                 tool_name=call.tool_name,
@@ -487,44 +627,25 @@ def build_research_tools(
                     "body": draft.body,
                     "source_urls": list(draft.source_urls),
                     "provenance": draft.provenance,
+                    "source_observation_ids": list(
+                        result.source_observation_ids
+                    ),
+                    "item_count": result.item_count,
                 },
             )
-        except (AppError, ValueError, KeyError) as exc:
+        except (AppError, ValueError, KeyError, RuntimeError, TypeError) as exc:
             return _failed(call, exc)
 
     return (
-        (fetch_definition, fetch_handler),
-        (fetch_briefing_definition, fetch_briefing_handler),
-        (parse_definition, parse_handler),
-        (rank_definition, rank_handler),
+        (search_papers_definition, search_papers_handler),
         (search_definition, search_handler),
         (build_brief_definition, build_brief_handler),
         (save_definition, save_handler),
         (save_brief_definition, save_brief_handler),
         (create_note_definition, create_note_handler),
-    )
-
-
-def _item_set_result(call: ToolCall, item_set: ResearchItemSet) -> ToolResult:
-    return ToolResult(
-        call_id=call.call_id,
-        tool_name=call.tool_name,
-        status=ToolCallStatus.SUCCEEDED,
-        output={
-            "item_set_id": item_set.item_set_id,
-            "items": [
-                {
-                    "item_id": item.item_id,
-                    "source_key": item.source_key,
-                    "title": item.title,
-                    "url": item.url,
-                    "raw_position": item.raw_position,
-                    "topic_hint": item.topic_hint or "other",
-                    "score": item.score or 0,
-                }
-                for item in item_set.items
-            ],
-        },
+        (create_topic_definition, create_topic_handler),
+        (link_items_definition, link_items_handler),
+        (append_revision_definition, append_revision_handler),
     )
 
 

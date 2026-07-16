@@ -30,6 +30,8 @@ class ExternalObservation:
     provenance: str
     source_type: str = "web_page"
     published_at: str | None = None
+    external_id: str | None = None
+    authors: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -46,6 +48,30 @@ class ExternalObservation:
             require_non_empty_string(getattr(self, field_name), field_name)
         if self.published_at is not None:
             require_non_empty_string(self.published_at, "published_at")
+        if self.external_id is not None:
+            require_non_empty_string(self.external_id, "external_id")
+        if not isinstance(self.authors, tuple):
+            raise ValueError("authors must be a tuple.")
+        for author in self.authors:
+            require_non_empty_string(author, "authors")
+
+
+@dataclass(frozen=True)
+class PaperSearchResult:
+    observations: tuple[ExternalObservation, ...]
+    invalid_count: int = 0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.observations, tuple) or any(
+            not isinstance(item, ExternalObservation) for item in self.observations
+        ):
+            raise ValueError("observations must contain ExternalObservation values.")
+        if (
+            not isinstance(self.invalid_count, int)
+            or isinstance(self.invalid_count, bool)
+            or self.invalid_count < 0
+        ):
+            raise ValueError("invalid_count must be a non-negative integer.")
 
 
 @dataclass(frozen=True)
@@ -195,6 +221,30 @@ class ResearchBriefDraft:
             require_non_empty_string(source_url, "source_urls")
         if len(set(self.source_urls)) != len(self.source_urls):
             raise ValueError("source_urls must not contain duplicates.")
+
+
+@dataclass(frozen=True)
+class ResearchBriefBuildResult:
+    draft: ResearchBriefDraft
+    source_observation_ids: tuple[str, ...]
+    item_count: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.draft, ResearchBriefDraft):
+            raise ValueError("draft must be a ResearchBriefDraft.")
+        if (
+            not isinstance(self.source_observation_ids, tuple)
+            or not self.source_observation_ids
+        ):
+            raise ValueError("source_observation_ids must be a non-empty tuple.")
+        for observation_id in self.source_observation_ids:
+            require_non_empty_string(observation_id, "source_observation_ids")
+        if (
+            not isinstance(self.item_count, int)
+            or isinstance(self.item_count, bool)
+            or self.item_count < 1
+        ):
+            raise ValueError("item_count must be a positive integer.")
 
 
 @dataclass(frozen=True)

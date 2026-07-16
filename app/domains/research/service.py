@@ -6,7 +6,9 @@ from app.domains.research.models import (
     ExternalObservation,
     FetchedSourceDocument,
     KnowledgeLink,
+    PaperSearchResult,
     ResearchBrief,
+    ResearchBriefBuildResult,
     ResearchBriefDraft,
     ResearchNote,
     ResearchItem,
@@ -18,7 +20,11 @@ from app.domains.research.models import (
 )
 from app.common.ids import new_id
 from app.common.time import utc_now_iso
-from app.domains.research.ports import ResearchContentPort, ResearchSourcePort
+from app.domains.research.ports import (
+    PaperSearchPort,
+    ResearchContentPort,
+    ResearchSourcePort,
+)
 from app.domains.research.processing import (
     parse_research_items,
     rank_research_items,
@@ -35,10 +41,12 @@ class ResearchService:
         repository: ResearchRepository,
         *,
         content_port: ResearchContentPort | None = None,
+        paper_search_port: PaperSearchPort | None = None,
     ) -> None:
         self._source_port = source_port
         self._repository = repository
         self._content_port = content_port
+        self._paper_search_port = paper_search_port
         self._observations: dict[str, ExternalObservation] = {}
         self._documents: dict[str, FetchedSourceDocument] = {}
         self._item_sets: dict[str, ResearchItemSet] = {}
@@ -55,6 +63,19 @@ class ResearchService:
         except KeyError as exc:
             raise ValueError("observation_id is not available in this request.") from exc
         return self._repository.save_source(observation)
+
+    def search_papers(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+    ) -> PaperSearchResult:
+        if self._paper_search_port is None:
+            raise RuntimeError("Research paper search port is not configured.")
+        result = self._paper_search_port.search_papers(query, limit)
+        for observation in result.observations:
+            self._observations[observation.observation_id] = observation
+        return result
 
     def fetch_content(self, source_key: str) -> FetchedSourceDocument:
         if self._content_port is None:
@@ -135,6 +156,51 @@ class ResearchService:
         self.register_brief_draft(draft)
         return draft
 
+    def build_brief(
+        self,
+        source_keys: tuple[str, ...],
+        *,
+        limit: int = 10,
+        topic_filter: str | None = None,
+    ) -> ResearchBriefBuildResult:
+        if (
+            not isinstance(source_keys, tuple)
+            or not source_keys
+            or len(source_keys) > 2
+            or len(set(source_keys)) != len(source_keys)
+        ):
+            raise ValueError("source_keys must contain one or two unique sources.")
+        if not 1 <= limit <= 20:
+            raise ValueError("limit must be between 1 and 20.")
+        documents = tuple(self.fetch_content(source_key) for source_key in source_keys)
+        parsed_items = tuple(
+            item
+            for document in documents
+            for item in parse_research_items(document, 20)
+        )
+        ranked_items = rank_research_items(parsed_items, limit, topic_filter)
+        if not ranked_items:
+            raise ValueError("No Research items matched the briefing request.")
+        item_set = ResearchItemSet(
+            item_set_id=new_id("research-item-set"),
+            document_ids=tuple(document.document_id for document in documents),
+            items=ranked_items,
+            created_at=utc_now_iso(),
+        )
+        self._item_sets[item_set.item_set_id] = item_set
+        title_suffix = topic_filter.strip() if topic_filter else "Hugging Face updates"
+        draft = self.build_brief_draft(
+            item_set.item_set_id,
+            f"Research Brief: {title_suffix}",
+        )
+        return ResearchBriefBuildResult(
+            draft=draft,
+            source_observation_ids=tuple(
+                document.observation_id for document in documents
+            ),
+            item_count=len(ranked_items),
+        )
+
     def _get_item_set(self, item_set_id: str) -> ResearchItemSet:
         try:
             return self._item_sets[item_set_id]
@@ -175,10 +241,23 @@ class ResearchService:
     ) -> ResearchRevision:
         return self._repository.append_revision(item_kind, item_id, content)
 
-    def list_topics(self, *, limit: int = 50, offset: int = 0) -> tuple[ResearchTopic, ...]:
+    def list_topics(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        filter_text: str | None = None,
+    ) -> tuple[ResearchTopic, ...]:
         if not 1 <= limit <= 100 or offset < 0:
             raise ValueError("Topic pagination is invalid.")
-        return self._repository.list_topics(limit, offset)
+        normalized_filter = filter_text.strip() if filter_text else None
+        if normalized_filter is not None and len(normalized_filter) > 200:
+            raise ValueError("Topic filter is too long.")
+        return self._repository.list_topics(
+            limit,
+            offset,
+            filter_text=normalized_filter,
+        )
 
     def search_saved_items(
         self,

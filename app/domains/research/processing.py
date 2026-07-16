@@ -130,10 +130,13 @@ def filter_research_items(
     if not isinstance(topic_filter, str) or not topic_filter.strip():
         raise ValueError("topic_filter must be a non-empty string or None.")
     normalized = topic_filter.strip().lower()
+    topic_tokens = frozenset(normalized.split())
     return tuple(
         item
         for item in items
-        if item.topic_hint == normalized or normalized in item.title.lower()
+        if item.topic_hint == normalized
+        or item.topic_hint in topic_tokens
+        or normalized in item.title.lower()
     )
 
 
