@@ -26,14 +26,24 @@ class RuleBasedIntentClassifier:
         "添加",
         "新增",
         "记录",
+        "记住",
         "保存",
         "创建",
+        "更新",
+        "修改",
+        "归档",
+        "删除",
         "设为",
         "标记",
         "add",
         "create",
         "save",
+        "update",
+        "archive",
+        "delete",
+        "remove",
         "record",
+        "remember",
         "mark",
     )
     _WRITE_OBJECTS = (
@@ -107,6 +117,13 @@ class RuleBasedIntentClassifier:
                 intent_type=IntentType.CLARIFICATION_NEEDED,
                 confidence=0.35,
                 reason="Planning keyword lacks enough action and object context.",
+            )
+        if contains_any(text, ("记住", "remember")):
+            return self._result(
+                status="matched",
+                intent_type=IntentType.WRITE_REQUEST,
+                confidence=0.9,
+                reason="Input explicitly asks to remember durable information.",
             )
         if contains_any(text, self._WRITE_ACTIONS) and contains_any(
             text, self._WRITE_OBJECTS

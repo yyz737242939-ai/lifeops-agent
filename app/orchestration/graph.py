@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import inspect
 from dataclasses import dataclass
 from functools import partial
 from typing import Literal, cast
@@ -11,6 +12,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 
+from app.context.models import ContextAssembly
 from app.executor.models import FinalAnswerDecision
 from app.executor.service import ReactExecutor
 from app.intent.service import IntentService
@@ -44,6 +46,7 @@ class OrchestrationContext:
     trace: TraceSink | None = None
     llm_log: LlmInteractionSink | None = None
     execution_scope: ToolRuntime | None = None
+    context_assembly: ContextAssembly | None = None
 
 
 def build_runtime_graph(
@@ -146,7 +149,7 @@ class RuntimeOrchestrator:
         skill_service: SkillService,
         intent_service: IntentService | None = None,
         policy_service: PolicyService | None = None,
-        execution_scope_factory: Callable[[], ToolRuntime] | None = None,
+        execution_scope_factory: Callable[..., ToolRuntime] | None = None,
         executor: ReactExecutor | None = None,
         planning_route_client: PlanningRouteClient | None = None,
         planning_service: PlanningService | None = None,
@@ -175,6 +178,7 @@ class RuntimeOrchestrator:
         request: RuntimeRequest,
         trace: TraceSink | None = None,
         llm_log: LlmInteractionSink | None = None,
+        context_assembly: ContextAssembly | None = None,
     ) -> GraphState:
         """Run the compiled graph and return its request-local final state."""
 
@@ -185,7 +189,10 @@ class RuntimeOrchestrator:
                 context=OrchestrationContext(
                     trace=trace,
                     llm_log=llm_log,
-                    execution_scope=self._execution_scope_factory(),
+                    execution_scope=_create_execution_scope(
+                        self._execution_scope_factory, request, trace
+                    ),
+                    context_assembly=context_assembly,
                 ),
             ),
         )
@@ -198,10 +205,16 @@ class RuntimeOrchestrator:
         request: RuntimeRequest,
         trace: TraceSink | None = None,
         llm_log: LlmInteractionSink | None = None,
+        context_assembly: ContextAssembly | None = None,
     ) -> RuntimeResult:
         """Run the compiled graph and return its structured runtime result."""
 
-        final_state = self.invoke(request, trace=trace, llm_log=llm_log)
+        final_state = self.invoke(
+            request,
+            trace=trace,
+            llm_log=llm_log,
+            context_assembly=context_assembly,
+        )
         result = final_state["result"]
         if result is None:
             raise RuntimeError("runtime graph completed without a result.")
@@ -213,6 +226,7 @@ class RuntimeOrchestrator:
         command: PlanCommand,
         trace: TraceSink | None = None,
         llm_log: LlmInteractionSink | None = None,
+        context_assembly: ContextAssembly | None = None,
     ) -> GraphState:
         """Run a structured plan command without encoding it as user text."""
 
@@ -238,12 +252,15 @@ class RuntimeOrchestrator:
         state = execute_plan_command(
             state,
             command,
-            execution_scope=self._execution_scope_factory(),
+            execution_scope=_create_execution_scope(
+                self._execution_scope_factory, request, trace
+            ),
             planning_service=self._planning_service,
             controller=self._plan_controller,
             limits=self._planning_limits,
             trace=trace,
             llm_log=llm_log,
+            context_assembly=context_assembly,
         )
         return finalize(state)
 
@@ -318,6 +335,7 @@ def _execute_executor_with_runtime(
             executor=executor,
             trace=context.trace,
             llm_log=context.llm_log,
+            context_assembly=context.context_assembly,
         )
 
     return invoke_node
@@ -341,6 +359,7 @@ def _route_planning_with_runtime(
             limits=limits,
             trace=context.trace,
             llm_log=context.llm_log,
+            context_assembly=context.context_assembly,
         )
 
     return invoke_node
@@ -348,6 +367,21 @@ def _route_planning_with_runtime(
 
 def _empty_tool_runtime() -> ToolRuntime:
     return ToolRuntime.from_registry(ToolRegistry())
+
+
+def _create_execution_scope(
+    factory: Callable[..., ToolRuntime],
+    request: RuntimeRequest,
+    trace: TraceSink | None,
+) -> ToolRuntime:
+    signature = inspect.signature(factory)
+    for arguments in ((request, trace), (request,), ()):
+        try:
+            signature.bind(*arguments)
+        except TypeError:
+            continue
+        return factory(*arguments)
+    raise TypeError("execution_scope_factory must accept zero, one, or two arguments.")
 
 
 class _NoOpExecutorModelClient:

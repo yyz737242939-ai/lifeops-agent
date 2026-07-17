@@ -9,6 +9,7 @@ from app.common.config import DEFAULT_CONFIG_PATH
 from app.common.errors import AppError
 from app.common.ids import new_id
 from app.runtime.bootstrap import build_runtime_service
+from app.runtime.confirmation import CliActionConfirmationProvider
 from app.runtime.models import RuntimeRequest, RuntimeResult, RuntimeStatus
 from app.planning.models import PlanCommand, PlanCommandAction
 
@@ -27,7 +28,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     runtime = None
     had_error = False
     try:
-        runtime = build_runtime_service(args.config)
+        runtime = build_runtime_service(
+            args.config,
+            confirmation_provider=CliActionConfirmationProvider(),
+        )
         session_id = new_id("session")
         current_plan: dict[str, object] | None = None
 

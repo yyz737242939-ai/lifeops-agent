@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from app.context.models import ContextAssembly
+from app.executor.adapters import (
+    AssemblyExecutorContextProvider,
+    AssemblyExecutorMemoryProvider,
+)
 from collections.abc import Callable
 from typing import Any
 
@@ -147,6 +152,7 @@ def execute_executor(
     executor: ReactExecutor,
     trace: TraceSink | None = None,
     llm_log: LlmInteractionSink | None = None,
+    context_assembly: ContextAssembly | None = None,
 ) -> GraphState:
     """Resolve fixed authorization and map one ReactExecutor result."""
 
@@ -172,13 +178,32 @@ def execute_executor(
                     "tool_count": len(allowed_tools.tool_names),
                 },
             )
-        if llm_log is None:
+        context_provider = (
+            AssemblyExecutorContextProvider(context_assembly)
+            if context_assembly
+            else None
+        )
+        memory_provider = (
+            AssemblyExecutorMemoryProvider(context_assembly)
+            if context_assembly
+            else None
+        )
+        if llm_log is None and context_assembly is None:
             executor_result = executor.execute(
                 request,
                 tuple(updated["prompt_contributions"]),
                 allowed_tools,
                 execution_scope,
                 trace=trace,
+            )
+        elif context_assembly is None:
+            executor_result = executor.execute(
+                request,
+                tuple(updated["prompt_contributions"]),
+                allowed_tools,
+                execution_scope,
+                trace=trace,
+                llm_log=llm_log,
             )
         else:
             executor_result = executor.execute(
@@ -188,6 +213,8 @@ def execute_executor(
                 execution_scope,
                 trace=trace,
                 llm_log=llm_log,
+                context_provider=context_provider,
+                memory_provider=memory_provider,
             )
         updated["result"] = _runtime_result_from_executor(
             executor_result,

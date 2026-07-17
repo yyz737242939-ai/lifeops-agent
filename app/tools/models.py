@@ -84,6 +84,7 @@ class ToolDefinition:
     effect: ToolEffect
     risk: ToolRisk
     skill_ids: tuple[str, ...] = field(default_factory=tuple)
+    max_calls_per_run: int | None = None
 
     def __post_init__(self) -> None:
         require_non_empty_string(self.name, "name")
@@ -100,6 +101,12 @@ class ToolDefinition:
         if not isinstance(self.risk, ToolRisk):
             raise ValueError("risk must be a ToolRisk.")
         require_unique_non_empty_strings(self.skill_ids, "skill_ids")
+        if self.max_calls_per_run is not None and (
+            not isinstance(self.max_calls_per_run, int)
+            or isinstance(self.max_calls_per_run, bool)
+            or self.max_calls_per_run < 1
+        ):
+            raise ValueError("max_calls_per_run must be a positive integer or None.")
 
 
 @dataclass(frozen=True)

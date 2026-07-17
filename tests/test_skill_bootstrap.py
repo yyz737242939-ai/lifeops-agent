@@ -38,7 +38,7 @@ class SkillBootstrapTest(unittest.TestCase):
             config_path.write_text(
                 json.dumps(
                     {
-                        "database": {"path": ":memory:"},
+                        "database": {"path": str(root / "lifeops-test.db")},
                         "logs": {"root": str(root / "logs")},
                         "skills": {"root": str(skill_root)},
                     }

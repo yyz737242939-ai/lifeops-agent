@@ -77,6 +77,9 @@ class ReactExecutor:
         execution_scope: ToolRuntime,
         trace: TraceSink | None = None,
         llm_log: LlmInteractionSink | None = None,
+        *,
+        context_provider: ExecutorContextProvider | None = None,
+        memory_provider: ExecutorMemoryProvider | None = None,
     ) -> ExecutorResult:
         return self._execute(
             request,
@@ -87,6 +90,8 @@ class ReactExecutor:
             llm_log,
             plan_step_input=None,
             limits=self._limits,
+            context_provider=context_provider,
+            memory_provider=memory_provider,
         )
 
     def execute_step(
@@ -98,6 +103,9 @@ class ReactExecutor:
         execution_scope: ToolRuntime,
         trace: TraceSink | None = None,
         llm_log: LlmInteractionSink | None = None,
+        *,
+        context_provider: ExecutorContextProvider | None = None,
+        memory_provider: ExecutorMemoryProvider | None = None,
     ) -> ExecutorResult:
         if not isinstance(step_input, PlanStepExecutionInput):
             raise ValueError("step_input must be PlanStepExecutionInput.")
@@ -113,6 +121,8 @@ class ReactExecutor:
             llm_log,
             plan_step_input=step_input,
             limits=effective_limits,
+            context_provider=context_provider,
+            memory_provider=memory_provider,
         )
 
     def _execute(
@@ -126,6 +136,8 @@ class ReactExecutor:
         *,
         plan_step_input: PlanStepExecutionInput | None,
         limits: ExecutionLimits,
+        context_provider: ExecutorContextProvider | None,
+        memory_provider: ExecutorMemoryProvider | None,
     ) -> ExecutorResult:
         if not isinstance(request, RuntimeRequest):
             raise ValueError("request must be a RuntimeRequest.")
@@ -134,10 +146,12 @@ class ReactExecutor:
         if not isinstance(execution_scope, ToolRuntime):
             raise ValueError("execution_scope must be a ToolRuntime.")
         try:
-            context_contributions = self._context_provider.load(
+            effective_context_provider = context_provider or self._context_provider
+            effective_memory_provider = memory_provider or self._memory_provider
+            context_contributions = effective_context_provider.load(
                 request, plan_step=plan_step_input
             )
-            memory_contributions = self._memory_provider.load(
+            memory_contributions = effective_memory_provider.load(
                 request, plan_step=plan_step_input
             )
             catalog = execution_scope.registry.model_catalog(

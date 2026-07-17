@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from app.context.models import ContextAssembly
+from app.context.projection import project_context_contributions
+from app.executor.adapters import (
+    AssemblyExecutorContextProvider,
+    AssemblyExecutorMemoryProvider,
+)
 from app.observability.logger import LlmInteractionSink, TraceSink
 from app.orchestration.state import GraphState, append_graph_path
 from app.planning.controller import PlanControlResult, PlanController
@@ -33,6 +39,7 @@ def route_planning(
     limits: PlanningLimits,
     trace: TraceSink | None = None,
     llm_log: LlmInteractionSink | None = None,
+    context_assembly: ContextAssembly | None = None,
 ) -> GraphState:
     """Select direct/plan/need-user after authorization and Skill preparation."""
 
@@ -56,6 +63,9 @@ def route_planning(
                 prompt_contributions=tuple(state["prompt_contributions"]),
                 tool_catalog=catalog,
                 limits=limits,
+                context_contributions=(
+                    project_context_contributions(context_assembly)
+                ),
             ),
             llm_log=llm_log,
         )
@@ -68,7 +78,13 @@ def route_planning(
         if isinstance(decision, PlanRoute):
             preview = planning_service.create_preview(
                 request.session_id,
-                _planner_input(request, state, catalog, limits),
+                _planner_input(
+                    request,
+                    state,
+                    catalog,
+                    limits,
+                    context_assembly=context_assembly,
+                ),
                 llm_log=llm_log,
             )
             if isinstance(preview, PlannerNeedUser):
@@ -113,6 +129,7 @@ def execute_plan_command(
     limits: PlanningLimits,
     trace: TraceSink | None = None,
     llm_log: LlmInteractionSink | None = None,
+    context_assembly: ContextAssembly | None = None,
 ) -> GraphState:
     """Apply one revision-bound command using the already prepared request scope."""
 
@@ -137,6 +154,7 @@ def execute_plan_command(
         catalog,
         limits,
         confirmed_constraints=current.run.confirmed_constraints,
+        context_assembly=context_assembly,
     )
     if trace is not None:
         trace.append(
@@ -157,6 +175,16 @@ def execute_plan_command(
             planner_input=planner_input,
             trace=trace,
             llm_log=llm_log,
+            context_provider=(
+                AssemblyExecutorContextProvider(context_assembly)
+                if context_assembly
+                else None
+            ),
+            memory_provider=(
+                AssemblyExecutorMemoryProvider(context_assembly)
+                if context_assembly
+                else None
+            ),
         )
         updated["result"] = runtime_result_from_control(request, result)
         if trace is not None:
@@ -269,6 +297,7 @@ def _planner_input(
     limits: PlanningLimits,
     *,
     confirmed_constraints: tuple[str, ...] = (),
+    context_assembly: ContextAssembly | None = None,
 ) -> PlannerInput:
     return PlannerInput(
         goal=request.user_input,
@@ -276,6 +305,9 @@ def _planner_input(
         tool_catalog=catalog,
         limits=limits,
         confirmed_constraints=confirmed_constraints,
+        context_contributions=(
+            project_context_contributions(context_assembly)
+        ),
     )
 
 

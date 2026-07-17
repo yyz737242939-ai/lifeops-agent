@@ -117,12 +117,20 @@ def _decide(
         )
 
     step_count = state["step_count"] + 1
+    blocked_tool_names = _non_retryable_failed_tools(state)
+    exhausted_tool_names = _exhausted_tool_names(state)
+    tool_catalog = tuple(
+        item
+        for item in state["tool_catalog"]
+        if item.get("name") not in blocked_tool_names
+        and item.get("name") not in exhausted_tool_names
+    )
     model_input = ExecutorModelInput(
         request=state["request"],
         prompt_contributions=state["prompt_contributions"],
         context_contributions=context.context_contributions,
         memory_contributions=context.memory_contributions,
-        tool_catalog=state["tool_catalog"],
+        tool_catalog=tool_catalog,
         observations=tuple(state["observations"]),
         step_index=step_count,
         plan_step=context.plan_step_input,
@@ -183,6 +191,18 @@ def _decide(
             stop_reason=ExecutorStopReason.FINAL_ANSWER,
             final_message=decision.message,
         )
+    if decision.call.tool_name in blocked_tool_names:
+        return _finish_failure(
+            next_state,
+            ExecutorStopReason.INVALID_MODEL_ACTION,
+            "executor_non_retryable_tool_reselected",
+        )
+    if decision.call.tool_name in exhausted_tool_names:
+        return _finish_failure(
+            next_state,
+            ExecutorStopReason.INVALID_MODEL_ACTION,
+            "executor_tool_call_limit_exceeded",
+        )
     if decision.call.call_id in {
         observation.call_id for observation in state["observations"]
     }:
@@ -198,6 +218,34 @@ def _decide(
         call=decision.call,
     )
     return next_state
+
+
+def _non_retryable_failed_tools(state: ExecutorState) -> frozenset[str]:
+    return frozenset(
+        observation.tool_name
+        for observation in state["observations"]
+        if (
+            observation.status == ToolCallStatus.FAILED
+            and observation.error is not None
+            and not observation.error.retryable
+        )
+    )
+
+
+def _exhausted_tool_names(state: ExecutorState) -> frozenset[str]:
+    call_counts: dict[str, int] = {}
+    for observation in state["observations"]:
+        call_counts[observation.tool_name] = call_counts.get(observation.tool_name, 0) + 1
+    return frozenset(
+        str(item["name"])
+        for item in state["tool_catalog"]
+        if (
+            isinstance(item.get("max_calls_per_run"), int)
+            and not isinstance(item.get("max_calls_per_run"), bool)
+            and call_counts.get(str(item.get("name")), 0)
+            >= int(item["max_calls_per_run"])
+        )
+    )
 
 
 def _execute_tool(

@@ -15,8 +15,11 @@
 - `TRAVEL_DOMAIN_PLAN.md`
 - `EXECUTOR_PLAN.md`
 - `PLANNER_PLAN.md`
-- `CONTEXT_MEMORY_PLAN.md`
+- `CONTEXT_MEMORY_PLAN.md`（Stage 9A/9B go；Stage 9 已关闭）
+- `LIVE_USER_E2E_PLAN.md`（Stage 9 后整体验收；真实用户 confirmation 与 5 个 live LLM E2E）
+- `TRACE_INSPECTION_EVAL_STANDARD_PLAN.md`（Feedback / Recovery / Inspector / Eval / DAG 共享 Trace 与 Runtime reporting 标准）
 - `RECOVERY_PLAN.md`
+- `INSPECTOR_PLAN.md`
 - `EVAL_HARNESS_PLAN.md`
 
 `plans/RUNTIME_REFACTOR_PLAN.md` 保持为总路线图。实现模块前，使用 `MODULE_PLAN_TEMPLATE.md` 在这里创建或更新模块计划。

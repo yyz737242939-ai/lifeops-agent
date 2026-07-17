@@ -22,7 +22,7 @@
 - 阶段 4：LangGraph Orchestration 骨架已完成，详见 `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md`。
 - 当前阶段：阶段 5 功能实现与稳定化均已完成；`STAGE5_STABILIZATION_PLAN.md` 已关闭全部 blocking findings，并在 `240/240` 统一离线回归后给出 Stage 6 `go`。
 - 当前阶段：阶段 7 Plan-and-Execute Planner 步骤 1-16 已全部完成；Planner 聚焦回归 `79/79`、统一离线回归 `379/379` 通过，Direct/Plan/NeedUser 与 Research happy-path 真实模型验证已有证据。
-- 当前阶段：阶段 8 Research External Interfaces / Hugging Face MCP 已完成。Stage 9 Context / Memory 的统一设计和 `plans/modules/CONTEXT_MEMORY_PLAN.md` 已确认，生产实现尚未开始；下一施工入口是 Stage 9A Context Engine，取得独立 `go` 并冻结接口后才进入 Stage 9B Long-term Memory。
+- 当前阶段：Stage 9A Context Engine 与 Stage 9B Long-term Memory 均已完成并取得独立 `go`；整个 Stage 9 已关闭，下一阶段为面试实践导向的 Stage 10 Execution Feedback / Recovery。
 
 核心执行链路：
 
@@ -44,7 +44,7 @@ User Input
 - 先判断 intent，再决定是否 planning，避免关键词误触发。
 - Policy 是权限事实源，Planner、LLM 文本、Recovery Context、LangGraph checkpoint 都不是授权来源。
 - LangGraph 做编排层，自研 runtime 保留 policy、tool safety、context、memory、executor、recovery、facts source。
-- 施工顺序先搭稳定的外层控制框架：Tool 完成后依次实现 ReAct Executor、Plan-and-Execute Planner，再把 Context / Memory、Recovery / Feedback 通过预留窄接口接入；不要求先完成局部状态模块再反推整体编排。
+- 施工顺序先搭稳定的外层控制框架：Tool 完成后依次实现 ReAct Executor、Plan-and-Execute Planner，再把 Context / Memory、Execution Feedback / Recovery 通过预留窄接口接入；不要求先完成局部状态模块再反推整体编排。
 - PlanRun / PlanStep 是跨 Domain 的通用执行策略，可为暂停、恢复和审计持久化，但不是业务事实；长期事实只来自经授权且成功执行的 Domain WRITE。
 - Inspector / Eval 是一等公民，不是最后补的日志查看工具。
 - 新旧代码、新旧文档必须明确分离。
@@ -961,7 +961,7 @@ docs/RUNTIME_CONCEPTS.md
 
 ### 阶段 9：Context / Memory
 
-状态：统一设计与 `plans/modules/CONTEXT_MEMORY_PLAN.md` 已确认，生产实现尚未开始。下一施工入口是 Stage 9A；Stage 9A 独立取得 `go` 并冻结交接接口前，不得开始 Stage 9B。
+状态：Stage 9A Context Engine 与 Stage 9B Long-term Memory 已于 2026-07-16 分别完成独立 gate 并取得 `go`；整个 Stage 9 已关闭。
 
 目标：
 
@@ -976,19 +976,37 @@ docs/RUNTIME_CONCEPTS.md
 - Stage 9B：read-only Profile、immutable Memory files、SQLite index、retriever、save/list/search/update/archive Tools、5 个真实 LLM happy paths和独立 go/no-go。
 - Stage 9A 不调用 Research/Travel Domain candidate provider；现有 provider contract 保留，但不是 session conversation assembly 的 production 输入。
 
-### 阶段 10：Recovery / Feedback
+### 阶段 10：Execution Feedback / Recovery
 
 目标：
 
-- 基于 Executor / Planner 的真实停点、Observation、PlanRun / PlanStep 和 evidence 实现解释型恢复与结构化执行反馈。
+- 面向面试前的实操学习，基于 Executor / Planner 的真实停点、Observation、
+  PlanRun / PlanStep 和 evidence，完成一个小而完整、可运行、可测试、可讲解的
+  Execution Feedback + 解释型 Recovery 闭环。
+- Execution Feedback 只把执行结果整理为结构化事实，并校验 final answer 不得把
+  失败、未执行或仅建议的动作描述为已经成功。
+- Recovery 只读取 durable evidence 和结构化反馈，解释上次执行到哪里、哪些已经
+  成功、哪里失败、哪些没有执行，以及用户可以安全采取的下一步。
 
 交付：
 
 - `plans/modules/RECOVERY_PLAN.md`。
-- ExecutionFeedback 和 final answer 校验。
-- session event logs / recovery context。
-- bounded replan 的真实反馈接入。
-- LangGraph checkpoint / persistence 作为暂停、恢复、fault tolerance 的候选实现；不承担外部副作用回滚。
+- 最小 `ExecutionFeedback` models、collector / builder 和 final answer validator。
+- 基于 session events、ExecutorResult、PlanRun / PlanStep 与 Tool evidence 的只读
+  `RecoveryContext`。
+- 面向 Direct 与 Planning 各一条成功/部分失败/失败停点的解释型恢复路径。
+- focused tests、compiled E2E 和少量真实模型 smoke，用于形成可复述的面试证据。
+
+当前阶段明确不做：
+
+- 自动 replay、自动继续执行、自动 retry 或新增 replan 机制；
+- compensation、rollback 或把已提交的 Domain / 外部副作用恢复到旧状态；
+- LangGraph checkpoint resume、time travel、跨进程 graph state 恢复；
+- 后台恢复、异步任务、分布式 workflow、通用 fault-tolerance 平台；
+- 从 Recovery Context、历史 Plan 或旧 confirmation 恢复 WRITE 权限。
+
+现有 Planner 可以读取结构化失败事实用于解释，但 Stage 10 不扩展 Planner 控制流；
+恢复输出只能说明事实和建议下一步，不能声称建议动作已经执行。
 
 ### 阶段 11：Inspector / Eval / DAG
 

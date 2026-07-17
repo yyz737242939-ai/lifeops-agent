@@ -324,6 +324,14 @@ def _planner_payload(
     payload: dict[str, Any] = {
         "operation": operation,
         "goal": planner_input.goal,
+        "context": [
+            {
+                "kind": item.kind.value,
+                "source": item.source,
+                "content": item.content,
+            }
+            for item in planner_input.context_contributions
+        ],
         "capabilities": [
             {key: item[key] for key in ("name", "description", "effect") if key in item}
             for item in planner_input.tool_catalog

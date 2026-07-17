@@ -102,6 +102,11 @@ class ToolRegistry:
                 "name": definition.name,
                 "description": definition.description,
                 "input_schema": deepcopy(definition.input_schema),
+                **(
+                    {"max_calls_per_run": definition.max_calls_per_run}
+                    if definition.max_calls_per_run is not None
+                    else {}
+                ),
             }
             for definition in self.list_definitions()
             if allowed_names is None or definition.name in allowed_names

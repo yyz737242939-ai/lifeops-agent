@@ -7,6 +7,7 @@ from typing import Protocol
 from app.observability.logger import LlmInteractionSink
 from app.observability.logger import TraceSink
 from app.executor.models import ExecutorResult, PlanStepExecutionInput
+from app.executor.ports import ExecutorContextProvider, ExecutorMemoryProvider
 from app.runtime.models import RuntimeRequest
 from app.skills.models import PromptContribution
 from app.tools.models import AllowedToolSet
@@ -155,6 +156,9 @@ class PlanStepExecutor(Protocol):
         execution_scope: ToolRuntime,
         trace: TraceSink | None = None,
         llm_log: LlmInteractionSink | None = None,
+        *,
+        context_provider: ExecutorContextProvider | None = None,
+        memory_provider: ExecutorMemoryProvider | None = None,
     ) -> ExecutorResult:
         ...
 

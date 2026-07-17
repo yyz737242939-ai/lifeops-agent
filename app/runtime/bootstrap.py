@@ -5,7 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
+from app.context.assembler import ContextAssembler
+from app.context.models import ContextBudget
+from app.context.repository import JsonlConversationRepository
+from app.context.summarizer import OpenAIContextSummarizer
+from app.context.summary_service import RollingSummaryService
 from app.executor.model_adapter import OpenAIExecutorModelClient
+from app.executor.ports import ActionConfirmationProvider
 from app.executor.service import ReactExecutor
 from app.common.config import load_app_config
 from app.domains.research.ports import HuggingFaceResearchContentPort
@@ -20,6 +26,13 @@ from app.integrations.research_mcp.adapter import (
     HuggingFaceMcpPaperSearchAdapter,
 )
 from app.intent.service import IntentService
+from app.memory.document_store import MemoryDocumentStore
+from app.memory.models import MemoryWriteContext
+from app.memory.profile import FileProfileProvider
+from app.memory.repository import SqliteMemoryRepository
+from app.memory.retriever import DeterministicMemoryRetriever
+from app.memory.service import MemoryService
+from app.memory.tools import build_memory_tools
 from app.policy.service import PolicyService
 from app.planning.controller import PlanController
 from app.planning.finalizer import OpenAIPlanFinalizerClient
@@ -41,6 +54,8 @@ from app.tools.runtime import ToolRuntime
 
 def build_runtime_service(
     config_path: str | Path = "config/default.json",
+    *,
+    confirmation_provider: ActionConfirmationProvider | None = None,
 ) -> RuntimeService:
     """Build a RuntimeService with configured storage and file logging."""
 
@@ -55,7 +70,28 @@ def build_runtime_service(
     limits = PlanningLimits()
     planner = OpenAIPlannerModelClient()
     repository = SqlitePlanRepository(conn)
-    executor = ReactExecutor(OpenAIExecutorModelClient())
+    executor = ReactExecutor(
+        OpenAIExecutorModelClient(),
+        confirmation_provider=confirmation_provider,
+    )
+    conversation_repository = JsonlConversationRepository(
+        config.database_path.parent / "conversations"
+    )
+    memory_root = config.database_path.parent / "memory"
+    memory_repository = SqliteMemoryRepository(conn)
+    memory_store = MemoryDocumentStore(memory_root)
+    context_assembler = ContextAssembler(
+        conversation_repository,
+        RollingSummaryService(
+            conversation_repository,
+            OpenAIContextSummarizer(),
+        ),
+        profile_provider=FileProfileProvider(memory_root),
+        memory_retriever=DeterministicMemoryRetriever(
+            memory_repository,
+            memory_store,
+        ),
+    )
     planning_service = PlanningService(planner, repository, limits=limits)
     plan_controller = PlanController(
         repository,
@@ -71,12 +107,21 @@ def build_runtime_service(
         skill_service=skill_service,
         conn=conn,
         log_root=config.log_root,
-        execution_scope_factory=lambda: _build_tool_runtime(conn, config.skill_root),
+        execution_scope_factory=lambda request, trace: _build_tool_runtime(
+            conn,
+            config.skill_root,
+            request=request,
+            memory_root=memory_root,
+            trace=trace,
+        ),
         executor=executor,
         planning_route_client=OpenAIPlanningRouteClient(),
         planning_service=planning_service,
         plan_controller=plan_controller,
         planning_limits=limits,
+        conversation_repository=conversation_repository,
+        context_assembler=context_assembler,
+        context_budget=ContextBudget(4000, 8, 1000, 500, 5, 500, 2000),
     )
 
 
@@ -90,7 +135,14 @@ def _build_skill_service(
     return SkillService(registry, SkillSelectionClient())
 
 
-def _build_tool_runtime(conn, skill_root: Path) -> ToolRuntime:
+def _build_tool_runtime(
+    conn,
+    skill_root: Path,
+    *,
+    request=None,
+    memory_root: Path | None = None,
+    trace=None,
+) -> ToolRuntime:
     """Build request-local domain services and one shared registry/Gateway pair."""
 
     repo_root = Path(__file__).resolve().parents[2]
@@ -117,8 +169,32 @@ def _build_tool_runtime(conn, skill_root: Path) -> ToolRuntime:
         lodging_port=unavailable_travel,
         place_port=unavailable_travel,
     )
+    memory_service = MemoryService(
+        SqliteMemoryRepository(conn),
+        MemoryDocumentStore(memory_root or Path("data/memory")),
+    )
+
+    def memory_write_context(call) -> MemoryWriteContext:
+        if request is None:
+            raise ValueError("Memory WRITE requires a request-bound Tool runtime.")
+        return MemoryWriteContext(
+            source_session_id=request.session_id,
+            source_turn_id=request.turn_id,
+            source_run_id=request.run_id,
+            source_tool_call_id=call.call_id,
+            confirmation_ref=f"confirmation://{request.run_id}/{call.call_id}",
+            evidence_ref=f"tool-evidence://{request.run_id}/{call.call_id}",
+        )
     registry = ToolRegistry(
-        (*build_research_tools(research_service), *build_travel_tools(travel_service))
+        (
+            *build_research_tools(research_service),
+            *build_travel_tools(travel_service),
+            *build_memory_tools(
+                memory_service,
+                memory_write_context,
+                event_sink=trace,
+            ),
+        )
     )
     return ToolRuntime.from_registry(registry)
 

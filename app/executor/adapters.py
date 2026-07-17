@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from app.context.models import (
+    ContextAssembly,
+    ContextContributionKind,
+)
+from app.context.projection import project_context_contributions
 from app.executor.models import (
     ExecutorContextContribution,
     ExecutorFeedbackItem,
@@ -31,6 +36,80 @@ class EmptyExecutorMemoryProvider:
         plan_step: PlanStepExecutionInput | None = None,
     ) -> tuple[ExecutorMemoryContribution, ...]:
         return ()
+
+
+class AssemblyExecutorContextProvider:
+    """Project conversation slots from one already-frozen ContextAssembly."""
+
+    def __init__(self, assembly: ContextAssembly) -> None:
+        if not isinstance(assembly, ContextAssembly):
+            raise ValueError("assembly must be a ContextAssembly.")
+        self.assembly_id = assembly.assembly_id
+        self._session_id = assembly.session_id
+        self._run_id = assembly.run_id
+        self._contributions = tuple(
+            ExecutorContextContribution(
+                item.content,
+                f"context-assembly://{assembly.assembly_id}/{item.kind.value}/{item.source}",
+            )
+            for item in project_context_contributions(assembly)
+            if item.kind
+            in {
+                ContextContributionKind.CONVERSATION_SUMMARY,
+                ContextContributionKind.CONVERSATION_TURN,
+                ContextContributionKind.CURRENT_INPUT,
+            }
+        )
+
+    def load(
+        self,
+        request: RuntimeRequest,
+        *,
+        plan_step: PlanStepExecutionInput | None = None,
+    ) -> tuple[ExecutorContextContribution, ...]:
+        _validate_assembly_request(request, self._session_id, self._run_id)
+        return self._contributions
+
+
+class AssemblyExecutorMemoryProvider:
+    """Project Profile/Memory slots from the same frozen ContextAssembly."""
+
+    def __init__(self, assembly: ContextAssembly) -> None:
+        if not isinstance(assembly, ContextAssembly):
+            raise ValueError("assembly must be a ContextAssembly.")
+        self.assembly_id = assembly.assembly_id
+        self._session_id = assembly.session_id
+        self._run_id = assembly.run_id
+        self._contributions = tuple(
+            ExecutorMemoryContribution(
+                item.content,
+                f"context-assembly://{assembly.assembly_id}/{item.kind.value}/{item.source}",
+            )
+            for item in assembly.contributions
+            if item.kind
+            in {
+                ContextContributionKind.PROFILE,
+                ContextContributionKind.MEMORY,
+            }
+        )
+
+    def load(
+        self,
+        request: RuntimeRequest,
+        *,
+        plan_step: PlanStepExecutionInput | None = None,
+    ) -> tuple[ExecutorMemoryContribution, ...]:
+        _validate_assembly_request(request, self._session_id, self._run_id)
+        return self._contributions
+
+
+def _validate_assembly_request(
+    request: RuntimeRequest, session_id: str, run_id: str
+) -> None:
+    if not isinstance(request, RuntimeRequest):
+        raise ValueError("request must be a RuntimeRequest.")
+    if request.session_id != session_id or request.run_id != run_id:
+        raise ValueError("request identity must match the frozen ContextAssembly.")
 
 
 class NoOpActionConfirmationProvider:

@@ -4,7 +4,7 @@ LifeOps Agent 是一个本地 Python 项目，用来学习和构建 Agent Runtim
 
 当前仓库处于 Runtime 重构。V0 代码、数据、日志、测试、旧计划和旧入口统一保存在 `legacy_v0/`，作为历史对照。当前工作使用清爽的 `app/`、`docs/` 和 `plans/` 结构。
 
-当前进度：阶段 0-5、阶段 6 ReAct Executor、阶段 7 Plan-and-Execute Planner 与阶段 8 Research External Interfaces / Hugging Face MCP 均已完成。Research 已冻结为 9 个模型可见 Tool；真实论文搜索经过官方 MCP SDK、本地 one-shot stdio Server 与 Hugging Face public API，默认只产生 request-local observation，确认后才允许保存。最终统一离线回归执行 `414` 个测试并通过 `412` 个、跳过 `2` 个显式 live gate；真实 LLM Research MCP happy path 以一次 Tool 请求、零失败、一次成功和 SQLite 零写通过。Stage 9 Context / Memory 的统一设计与 `plans/modules/CONTEXT_MEMORY_PLAN.md` 已确认，生产实现尚未开始；下一施工入口是独立 gate Stage 9A Context Engine，取得 `go` 后才进入 Stage 9B Long-term Memory。
+当前进度：阶段 0-5、阶段 6 ReAct Executor、阶段 7 Plan-and-Execute Planner、阶段 8 Research External Interfaces / Hugging Face MCP 与整个 Stage 9 Context / Memory 均已完成。Stage 9A 提供 session JSONL conversation、rolling summary、一次请求一份 bounded `ContextAssembly`，以及 Direct、Planning 和 PlanStep 的共享 projection；Stage 9B 提供只读 Profile、immutable Memory files + SQLite metadata index、verified retrieval、duplicate/conflict、update/archive lifecycle、memory Skill、5 个 Tool、Policy/confirmation/Gateway/evidence、生产 Context provider 和隐私事件。Stage 9A/9B 各 5 条真实 LLM paths、各 8 个 compiled E2E、最终 `561` 项统一离线测试零失败（`14` 项显式 live/platform gates 跳过）、`compileall`、`git diff --check` 与架构审计均通过；Stage 9B 结论为 `go`，整个 Stage 9 已关闭。
 
 ## 项目目标
 

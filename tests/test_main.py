@@ -21,7 +21,12 @@ class MainCliTest(unittest.TestCase):
             exit_code = cli.main(["--config", "config/test.json"])
 
         self.assertEqual(exit_code, 0)
-        build.assert_called_once_with("config/test.json")
+        build.assert_called_once()
+        self.assertEqual(build.call_args.args, ("config/test.json",))
+        self.assertIsInstance(
+            build.call_args.kwargs["confirmation_provider"],
+            cli.CliActionConfirmationProvider,
+        )
         self.assertTrue(runtime.closed)
         self.assertEqual(
             [request.user_input for request in runtime.requests],

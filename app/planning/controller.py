@@ -11,6 +11,7 @@ from app.executor.models import (
     PlanStepDependencyResult,
     PlanStepExecutionInput,
 )
+from app.executor.ports import ExecutorContextProvider, ExecutorMemoryProvider
 from app.observability.logger import LlmInteractionSink, TraceSink
 from app.planning.errors import PlanContractError, PlanningError
 from app.planning.finalizer import deterministic_finalizer_fallback
@@ -52,6 +53,8 @@ class PlanExecutionContext:
     tool_runtime: ToolRuntime
     allowed_tools: AllowedToolSet
     prompt_contributions: tuple[PromptContribution, ...]
+    context_provider: ExecutorContextProvider | None = None
+    memory_provider: ExecutorMemoryProvider | None = None
     dependency_results_by_step: dict[str, PlanStepDependencyResult] = field(
         default_factory=dict
     )
@@ -118,6 +121,8 @@ class PlanController:
         planner_input: PlannerInput | None = None,
         trace: TraceSink | None = None,
         llm_log: LlmInteractionSink | None = None,
+        context_provider: ExecutorContextProvider | None = None,
+        memory_provider: ExecutorMemoryProvider | None = None,
     ) -> PlanControlResult:
         if command.action != PlanCommandAction.CONFIRM:
             raise PlanContractError("Controller requires a confirm command.", code="plan_contract_invalid")
@@ -135,6 +140,8 @@ class PlanController:
             tool_runtime=execution_scope,
             allowed_tools=allowed_tools,
             prompt_contributions=prompt_contributions,
+            context_provider=context_provider,
+            memory_provider=memory_provider,
             total_executor_steps_used=run.executor_steps_used,
         )
         return self._execute_running_plan(
@@ -235,9 +242,7 @@ class PlanController:
                         "max_steps": step_limit,
                     },
                 )
-            result = self._executor.execute_step(
-                request,
-                PlanStepExecutionInput(
+            step_input = PlanStepExecutionInput(
                     plan_id=run.plan_id,
                     revision=run.current_revision,
                     step_id=step.step_id,
@@ -246,13 +251,29 @@ class PlanController:
                     expected_outcome=step.expected_outcome,
                     dependency_results=dependency_results,
                     max_steps=step_limit,
-                ),
-                context.prompt_contributions,
-                context.allowed_tools,
-                context.tool_runtime,
-                trace,
-                llm_log,
             )
+            if context.context_provider is None and context.memory_provider is None:
+                result = self._executor.execute_step(
+                    request,
+                    step_input,
+                    context.prompt_contributions,
+                    context.allowed_tools,
+                    context.tool_runtime,
+                    trace,
+                    llm_log,
+                )
+            else:
+                result = self._executor.execute_step(
+                    request,
+                    step_input,
+                    context.prompt_contributions,
+                    context.allowed_tools,
+                    context.tool_runtime,
+                    trace,
+                    llm_log,
+                    context_provider=context.context_provider,
+                    memory_provider=context.memory_provider,
+                )
             run, saved_step = self._record_result(run, step, result, context)
             if trace is not None:
                 trace.append(

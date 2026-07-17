@@ -314,6 +314,44 @@ ALTER TABLE plan_runs
 ADD COLUMN confirmed_constraints_json TEXT NOT NULL DEFAULT '[]';
 """
 
+V4_SCHEMA = """
+CREATE TABLE IF NOT EXISTS memory_index (
+    memory_id TEXT NOT NULL,
+    version INTEGER NOT NULL CHECK (version >= 1),
+    status TEXT NOT NULL CHECK (status IN ('active', 'superseded', 'archived')),
+    relative_path TEXT NOT NULL UNIQUE,
+    content_hash TEXT NOT NULL,
+    tags_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    supersedes_memory_id TEXT,
+    supersedes_version INTEGER,
+    source_session_id TEXT NOT NULL,
+    source_turn_id TEXT NOT NULL,
+    source_run_id TEXT NOT NULL,
+    source_tool_call_id TEXT NOT NULL,
+    confirmation_ref TEXT NOT NULL,
+    evidence_ref TEXT NOT NULL,
+    PRIMARY KEY (memory_id, version),
+    CHECK ((supersedes_memory_id IS NULL) = (supersedes_version IS NULL)),
+    CHECK (
+        (version = 1 AND supersedes_memory_id IS NULL AND supersedes_version IS NULL)
+        OR
+        (version > 1 AND supersedes_memory_id = memory_id AND supersedes_version = version - 1)
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_one_active
+ON memory_index(memory_id)
+WHERE status = 'active';
+
+CREATE INDEX IF NOT EXISTS idx_memory_status_updated
+ON memory_index(status, updated_at, memory_id, version);
+
+CREATE INDEX IF NOT EXISTS idx_memory_content_hash
+ON memory_index(content_hash);
+"""
+
 MIGRATIONS = (
     SchemaMigration(
         version=1,
@@ -329,6 +367,11 @@ MIGRATIONS = (
         version=3,
         name="plan_confirmed_constraints",
         sql=V3_SCHEMA,
+    ),
+    SchemaMigration(
+        version=4,
+        name="memory_index",
+        sql=V4_SCHEMA,
     ),
 )
 

@@ -637,11 +637,11 @@ Stage 7 已使用 Research 作为主要业务场景，验证 fetch / parse / ran
 - `app/executor/`
 - `app/orchestration/planning.py`
 
-## Context / Memory 生命周期（Stage 9 已确认，未实现）
+## Context / Memory 生命周期（Stage 9 已完成）
 
 ### 为什么统一设计、分两轮实施
 
-Context 与 Memory 都会进入模型输入，因此需要共享预算、provenance、日志隐私和“不产生授权”的边界。但它们的数据生命周期不同：Context Engine 先解决同一 session 的对话连续性；Long-term Memory 再解决用户明确希望长期保留的信息。Stage 9A 必须先独立测试并冻结接口，Stage 9B 只能实现这些预留接口，不能反向改写 Planner / Executor。
+Context 与 Memory 都会进入模型输入，因此需要共享预算、provenance、日志隐私和“不产生授权”的边界。但它们的数据生命周期不同：Context Engine 解决同一 session 的对话连续性；Long-term Memory 解决用户明确希望长期保留的信息。Stage 9A 先独立测试并冻结接口，Stage 9B 只实现这些预留接口，没有反向改写 Planner / Executor。
 
 ### 三种生命周期
 
@@ -653,7 +653,7 @@ Context 在这里专指 session conversation context，不绑定 Research 或 Tr
 
 ### Context assembly
 
-Stage 9A 计划按固定顺序组装 rolling summary、summary 未覆盖的 recent original turns、current input，再预留 Profile/Memory slots。Stage 9B 渲染时把 Profile/Memory 放在 conversation 之前，并让 current input 保持最后；预算仍优先保护 current input 和 recent turns。V1 使用本地确定性 token 估算、一个总预算和少量固定 cap；current input 必须保留，超上限时在模型调用前失败。只有 history 超预算时才调用 Summarizer，输入是 previous valid summary 加本次新增的连续 turns；invalid/partial summary 不落盘，原始 turns 不删除。
+Stage 9A 按固定顺序组装 rolling summary、summary 未覆盖的 recent original turns、current input，并预留 Profile/Memory slots。Stage 9B 渲染时把 Profile/Memory 放在 conversation 之前，并让 current input 保持最后；预算仍优先保护 current input 和 recent turns。V1 使用本地确定性 token 估算、一个总预算和少量固定 cap；current input 必须保留，超上限时在 JSONL append 和模型调用前失败。只有 history 超预算时才调用 Summarizer，输入是 previous valid summary 加本次新增的连续 turns；invalid/partial summary 不落盘，原始 turns不删除。
 
 ContextAssembly 与完整 report 留在 request runtime context/result-local 对象，不进入 outer GraphState、ExecutorState、PlanRepository 或 checkpoint。实际 bounded content 会进入模型 prompt 和现有 llm.jsonl；events.jsonl 只记录 assembly_id、计数、估算 token、summary version、裁剪和安全 error code。
 
@@ -664,7 +664,7 @@ Stage 9B 第一版只支持两种长期来源：
 - Profile：固定 Markdown，由用户自己编辑，Agent 只读，不提供 Profile WRITE Tool，也不进入 Memory index。
 - Explicit Memory：只有用户明确要求记住时，才允许模型提出 memory.save；用户确认 exact preview 后，Tool 才能经过 Policy/AllowedToolSet、Guardrails、Gateway 和 evidence 写入。
 
-Memory 全文计划保存为不可变版本文件，SQLite 只保存 ID、version、status、相对路径、hash、tags、provenance 和 confirmation/evidence refs。update 生成新 version 并 supersede 旧 version；archive 保留文件和历史但从普通 retrieval 排除。V1 用 tag、substring 和 keyword 的确定性检索，不使用 embedding、FTS5 或 vector database。
+Memory 全文保存为不可变版本文件，SQLite 只保存 ID、version、status、相对路径、hash、tags、provenance 和 confirmation/evidence refs。update 生成新 version 并 supersede 旧 version；archive 保留文件和历史但从普通 retrieval 排除。V1 用 tag、substring 和 keyword 的确定性检索，不使用 embedding、FTS5 或 vector database。
 
 ### 最重要的来源边界
 
@@ -677,7 +677,7 @@ Memory 全文计划保存为不可变版本文件，SQLite 只保存 ID、versio
 
 ### 如何验证
 
-Stage 9A 与 Stage 9B 各自保留 5 个真实 LLM happy paths，并在它们之前完成 focused unit/integration、compiled E2E 和统一离线 regression。Stage 9A 重点证明 recent/compacted/restart/Planner/shared-PlanStep context；Stage 9B 重点证明 Profile、explicit save、restart retrieval、conflict update 和 archive lifecycle。
+Stage 9A 与 Stage 9B 各自保留 5 个真实 LLM paths，并完成 focused unit/integration、各 8 个 compiled E2E 和统一离线 regression。Stage 9A 证明 recent/compacted/restart/Planner/shared-PlanStep context；Stage 9B 证明 Profile、explicit save、restart retrieval、conflict update 和 archive lifecycle。真实 provider 若在 non-retryable 失败后重复选择同一 Tool，Executor 会在 request-local catalog 中移除它并在 Gateway 前拒绝绕过；optimistic expected_version 继续保证 stale update 零额外版本。
 
 ### 相关项目文件
 

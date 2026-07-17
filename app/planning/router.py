@@ -192,6 +192,14 @@ def _route_payload(route_input: PlanningRouteInput) -> dict[str, Any]:
     return {
         "goal": route_input.goal,
         "intent_summary": route_input.intent_summary,
+        "context": [
+            {
+                "kind": item.kind.value,
+                "source": item.source,
+                "content": item.content,
+            }
+            for item in route_input.context_contributions
+        ],
         "capabilities": [
             {
                 key: item[key]

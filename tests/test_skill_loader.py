@@ -36,7 +36,7 @@ class SkillDiscoveryTest(unittest.TestCase):
 
         self.assertEqual(
             tuple(definition.skill_id for definition in definitions),
-            ("research", "travel"),
+            ("memory", "research", "travel"),
         )
         descriptions = {definition.skill_id: definition.description for definition in definitions}
         self.assertIn("Hugging Face", descriptions["research"])

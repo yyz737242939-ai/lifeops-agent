@@ -27,6 +27,19 @@ class IntentServiceTest(unittest.TestCase):
         self.assertEqual(decision.intent_type, IntentType.WRITE_REQUEST)
         self.assertTrue(decision.write_candidate)
 
+    def test_update_and_archive_of_supported_objects_are_write_requests(self) -> None:
+        for user_input in (
+            "Call memory.update exactly once for this memory.",
+            "Call memory.archive exactly once for this memory.",
+            "更新这条记忆",
+            "归档这条记忆",
+        ):
+            with self.subTest(user_input=user_input):
+                decision = IntentService().classify(_request(user_input))
+
+                self.assertEqual(decision.intent_type, IntentType.WRITE_REQUEST)
+                self.assertTrue(decision.write_candidate)
+
     def test_bare_planning_keyword_requires_clarification(self) -> None:
         decision = IntentService().classify(_request("计划一下"))
 

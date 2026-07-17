@@ -73,6 +73,13 @@ class OpenAIExecutorModelClientTest(unittest.TestCase):
         self.assertTrue(call["instructions"].startswith(EXECUTOR_SYSTEM_PROMPT))
         self.assertIn("Do not also emit a", call["instructions"])
         self.assertIn("Tool Observations as the source of truth", call["instructions"])
+        self.assertIn(
+            "Context and Memory contributions before choosing a tool",
+            call["instructions"],
+        )
+        self.assertIn("Never call a Memory tool to look up a Profile fact", call["instructions"])
+        self.assertIn("After a successful WRITE observation", call["instructions"])
+        self.assertIn("failed with `retryable: false`", call["instructions"])
         self.assertIn("current user request explicitly asks", call["instructions"])
         self.assertIn("Selected Skill instructions:\nUse travel tools.", call["instructions"])
         payload = json.loads(call["input"])
@@ -227,7 +234,10 @@ def _configured_client() -> OpenAIExecutorModelClient:
         return OpenAIExecutorModelClient()
 
 
-def _model_input(*, plan_step: PlanStepExecutionInput | None = None) -> ExecutorModelInput:
+def _model_input(
+    *,
+    plan_step: PlanStepExecutionInput | None = None,
+) -> ExecutorModelInput:
     return ExecutorModelInput(
         request=RuntimeRequest(
             user_input="查找东京地点",

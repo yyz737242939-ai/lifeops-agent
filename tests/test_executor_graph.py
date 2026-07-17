@@ -96,6 +96,106 @@ class ExecutorGraphTest(unittest.TestCase):
         )
         self.assertEqual(gateway.calls, [first, second])
 
+    def test_non_retryable_failure_removes_tool_from_later_catalog(self) -> None:
+        first = _call("call_1", "memory.save")
+        failed = _result(
+            first,
+            ToolCallStatus.FAILED,
+            error=ToolError("memory_version_conflict", "Conflict.", False),
+        )
+        model = FakeExecutorModelClient(
+            [ToolActionDecision(first), FinalAnswerDecision("请确认是否更新。")]
+        )
+        gateway = FakeExecutorToolGateway([failed])
+
+        state = _invoke(
+            model,
+            gateway,
+            tool_catalog=(
+                {"name": "memory.save"},
+                {"name": "memory.update"},
+            ),
+        )
+
+        self.assertEqual(state["result"].status, ExecutorStatus.COMPLETED)
+        self.assertEqual(
+            tuple(item["name"] for item in model.inputs[1].tool_catalog),
+            ("memory.update",),
+        )
+        self.assertEqual(gateway.calls, [first])
+
+    def test_non_retryable_failed_tool_cannot_be_reselected_by_model_client(self) -> None:
+        first = _call("call_1", "memory.save")
+        repeated = _call("call_2", "memory.save")
+        failed = _result(
+            first,
+            ToolCallStatus.FAILED,
+            error=ToolError("memory_version_conflict", "Conflict.", False),
+        )
+        model = FakeExecutorModelClient(
+            [ToolActionDecision(first), ToolActionDecision(repeated)]
+        )
+        gateway = FakeExecutorToolGateway([failed])
+
+        state = _invoke(
+            model,
+            gateway,
+            tool_catalog=({"name": "memory.save"},),
+        )
+
+        self.assertEqual(state["result"].status, ExecutorStatus.FAILED)
+        self.assertEqual(
+            state["result"].error_code,
+            "executor_non_retryable_tool_reselected",
+        )
+        self.assertEqual(gateway.calls, [first])
+
+    def test_per_run_tool_call_limit_removes_tool_after_first_attempt(self) -> None:
+        first = _call("call_1", "memory.save")
+        succeeded = _result(first, ToolCallStatus.SUCCEEDED, output={"saved": True})
+        model = FakeExecutorModelClient(
+            [ToolActionDecision(first), FinalAnswerDecision("已保存。")]
+        )
+        gateway = FakeExecutorToolGateway([succeeded])
+
+        state = _invoke(
+            model,
+            gateway,
+            tool_catalog=(
+                {"name": "memory.save", "max_calls_per_run": 1},
+                {"name": "memory.search"},
+            ),
+        )
+
+        self.assertEqual(state["result"].status, ExecutorStatus.COMPLETED)
+        self.assertEqual(
+            tuple(item["name"] for item in model.inputs[1].tool_catalog),
+            ("memory.search",),
+        )
+        self.assertEqual(gateway.calls, [first])
+
+    def test_exhausted_tool_cannot_be_reselected_by_model_client(self) -> None:
+        first = _call("call_1", "memory.save")
+        repeated = _call("call_2", "memory.save")
+        succeeded = _result(first, ToolCallStatus.SUCCEEDED, output={"saved": True})
+        model = FakeExecutorModelClient(
+            [ToolActionDecision(first), ToolActionDecision(repeated)]
+        )
+        gateway = FakeExecutorToolGateway([succeeded])
+
+        state = _invoke(
+            model,
+            gateway,
+            tool_catalog=({"name": "memory.save", "max_calls_per_run": 1},),
+        )
+
+        self.assertEqual(state["result"].status, ExecutorStatus.FAILED)
+        self.assertEqual(
+            state["result"].error_code,
+            "executor_tool_call_limit_exceeded",
+        )
+        self.assertEqual(gateway.calls, [first])
+
     def test_exact_limit_stops_without_an_extra_model_or_tool_call(self) -> None:
         first = _call("call_1", "travel.search_places")
         second = _call("call_2", "travel.get_weather")

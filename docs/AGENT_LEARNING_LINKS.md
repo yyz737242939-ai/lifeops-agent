@@ -33,7 +33,7 @@
 
 - 优先官方文档、正式 specification 和成熟开源项目的核心文档。
 - 每个链接都必须能解释当前阶段已实现、正在实现或明确准备学习的 runtime 边界。
-- 不提前收录 Eval Harness、DAG Scheduler、复杂 RAG/向量服务或完整多轮 human-in-the-loop 的实现资料；MCP 当前只收录 Stage 8 已确认的 stdio Tool 调用切片，Memory 只收录 Stage 9 已确认的轻量边界。
+- 不提前收录尚未进入确认规划的 DAG Scheduler、复杂 RAG/向量服务或完整多轮 human-in-the-loop 实现资料；Trace、Inspector与Eval只收录当前共享标准和Stage 11A/11B计划直接需要的主体概念。MCP只保留Stage 8已确认的stdio Tool调用切片，Memory只保留Stage 9已确认的轻量边界。
 - 如果一个主题只是后续扩展点，而不是当前阶段的学习重点，先放在“暂不收录”。
 
 ## 阶段 3：Runtime Core / Intent / Policy
@@ -301,15 +301,105 @@ LifeOps 自研 runtime
 - [LangGraph Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
   学习重点：理解 thread/checkpoint 与跨 thread store 是不同持久化问题。LifeOps Stage 9 明确不把 conversation 或长期 Memory 放进 outer GraphState/checkpoint，避免把可恢复 graph state 误当事实或授权。
 
+- [JSON Lines](https://jsonlines.org/)
+  学习重点：每行一个完整 UTF-8 JSON value，适合 append-only session conversation 与 restart recovery；LifeOps 对 schema、sequence、路径和损坏尾部另做显式校验。
+
+- [Python `os.replace`](https://docs.python.org/3/library/os.html#os.replace)
+  学习重点：Stage 9B 先在目标目录写临时文件，再用 replace 提交不可变 Memory version；只有 replace 成功后才允许提交 SQLite index。
+
+- [SQLite Transactions](https://www.sqlite.org/lang_transaction.html)
+  学习重点：Memory index 的 active version、supersede、archive 和 evidence metadata 必须在明确 transaction 中原子更新；SQLite 不保存 Memory 全文。
+
+## Stage 9 后整体验收：Live User E2E
+
+### 真实 Agent workflow 的 eval 设计
+
+- [OpenAI Evaluation best practices](https://developers.openai.com/api/docs/guides/evaluation-best-practices)
+  学习重点：生成式模型具有变异性，因此验收应采用 task-specific、贴近真实用户分布且可自动评分的测试；Agent workflow 要分别观察 instruction following、Tool selection、arguments precision 和 functional correctness。LifeOps live E2E 以 route、ToolCall、confirmation、evidence、SQLite、文件和语义日志作为主要 grader，不用“回答看起来不错”替代产品事实。
+
+- [OpenAI Prompt engineering](https://developers.openai.com/api/docs/guides/prompt-engineering)
+  学习重点：固定模型版本并持续运行同一 eval suite，避免 model alias 或 prompt 漂移让 live 结果失去可比性。LifeOps 仍以当前 OpenAI-compatible adapter 为边界，不在本轮迁移 provider 或 hosted Evals 平台。
+
+## 阶段 10：Execution Feedback / 解释型 Recovery
+
+### Structured output 与 evidence-grounded claim validation
+
+- [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
+  学习重点：用 schema 约束模型返回的 success claims、call/step identity 和 evidence references，再由 LifeOps 确定性 validator 对照当前执行事实。Structured output 只改善输出契约，不会把模型声明升级为 Tool 或 Domain 事实。
+
+- [LangChain structured output](https://docs.langchain.com/oss/python/langchain/structured-output)
+  学习重点：对照 provider-native 与 tool-calling structured output 的通用实现方式。Stage 10 保持 LifeOps-owned `FinalAnswerDraft` / validator，不引入新的 Agent abstraction，也不让 parsing failure 绕过 deterministic fallback。
+
+### Agent eval 与事实型 grader
+
+- [OpenAI Evaluation best practices](https://developers.openai.com/api/docs/guides/evaluation-best-practices)
+  学习重点：把“是否错误声称成功”“是否区分 completed/failed/not-run”“Recovery 是否零 Tool 调用”写成 task-specific、可自动判定的 grader；真实模型 smoke 与 deterministic compiled E2E 分层报告。
+
+### Checkpoint / replay / side-effect 边界对照
+
+- [LangGraph persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
+  学习重点：checkpoint、pending writes、replay 和 time travel 属于 durable execution 问题；replay 会重新触发 checkpoint 之后的 LLM/API/interrupt。Stage 10 只读取执行事实并解释，不配置 checkpointer、不 replay，也不撤销已提交副作用。
+
+- [LangGraph Functional API](https://docs.langchain.com/oss/python/langgraph/functional-api)
+  学习重点：理解恢复型 workflow 为什么要把 side effects 封装为可 checkpoint 的 task，并要求 idempotency。LifeOps Stage 10 暂不承担这个控制流复杂度，而是用 ToolResult/evidence 和 Plan lifecycle 完成可解释、不可执行的恢复闭环。
+
+## Feedback / Recovery / Inspector / Eval 共享 Trace 标准
+
+### OpenTelemetry tracing core
+
+- [OpenTelemetry Traces](https://opentelemetry.io/docs/concepts/signals/traces/)
+  学习重点：Trace、Span、parent span、Span Context、Attributes、Span Events、Span Links 与 Span Status。LifeOps 使用这些概念建立本地 Trace Contract，但不在当前阶段实现 OTLP、Collector 或分布式 tracing。
+
+- [OpenTelemetry Signals](https://opentelemetry.io/docs/concepts/signals/)
+  学习重点：区分 traces、metrics、logs 与 baggage。LifeOps 当前共享标准聚焦 trace 与现有文件 logs 的关联；生产 metrics/alerts 和跨服务 baggage 延后。
+
+- [OpenTelemetry Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/)
+  学习重点：理解 semantic conventions 如何冻结 operation names、attribute keys/types/meaning。LifeOps 为 Runtime/Policy/Planner/Executor/Feedback 定义自己的稳定命名，并对照而不直接依赖仍可能变化的 GenAI experimental keys。
+
+### OpenInference GenAI semantic conventions
+
+- [OpenInference Specification](https://arize-ai.github.io/openinference/spec/)
+  学习重点：OpenInference 如何在 OpenTelemetry 上表达 LLM、Agent、Tool、Retriever、Guardrail、Evaluator 与 Prompt spans。LifeOps 复用 span-kind 思想，同时保持 ToolResult/evidence、Policy和隐私边界由自己拥有。
+
+- [OpenInference Semantic Conventions](https://arize-ai.github.io/openinference/spec/semantic_conventions.html)
+  学习重点：对照 LLM provider/model、token、Tool calling、input/output 与 evaluation attributes。LifeOps 默认不把 raw prompt、messages、Tool arguments/output 或 private reasoning写入普通 trace/index，只保存安全 metadata和 artifact reference。
+
+## Stage 11A：Inspector / Runtime Debugger
+
+### Trace navigation 与 details view
+
+- [LangSmith View traces](https://docs.langchain.com/langsmith/view-traces)
+  学习重点：对照 Messages、Turns 与 Details 三种观察层级，以及从thread/turn概要下钻到具体run、Tool、输入输出、timing、token、error和metadata的调试流程。LifeOps v0只实现本地summary/tree/timeline/details CLI，不复制完整云端产品。
+
+- [Phoenix Tracing](https://arize.com/docs/phoenix/learn/tracing)
+  学习重点：理解trace由root和parent/child spans组成，Agent、LLM、Tool、Retriever等不同span kinds如何帮助重建执行过程。LifeOps进一步用ExecutionFeedback和Plan/DAG links提供自己的事实与dependency语义。
+
+- [OpenAI Agents SDK Tracing](https://openai.github.io/openai-agents-python/tracing/)
+  学习重点：对照Agent run、LLM generation、function Tool、Guardrail、handoff和custom spans的默认instrumentation，以及敏感数据和custom processor边界。LifeOps不引入Agents SDK，只比较其trace coverage和processor/exporter职责。
+
+## Stage 11B：Eval Harness
+
+### Eval lifecycle、dataset 与 grader
+
+- [OpenAI Evaluation best practices](https://developers.openai.com/api/docs/guides/evaluation-best-practices)
+  学习重点：从目标、dataset、metrics、run和持续评价形成闭环。LifeOps把代表性任务固化为versioned suite，以route、Policy、Tool、evidence、state、grounding和trace的确定性grader作为主gate。
+
+- [OpenAI Evals guide](https://developers.openai.com/api/docs/guides/evals)
+  学习重点：理解eval configuration、test data、run和result的基本生命周期。LifeOps实现本地轻量case/suite/runner/report，不迁移到hosted platform。
+
+- [OpenAI Graders](https://developers.openai.com/api/docs/guides/graders)
+  学习重点：grader如何把候选输出映射为可比较结果，以及string、score和model grader的适用边界。LifeOps优先使用typed `RuntimeReport`上的deterministic graders，LLM judge只作为未来显式annotation增强。
+
+- [LangSmith Evaluation concepts](https://docs.langchain.com/langsmith/evaluation-concepts)
+  学习重点：对照dataset、example、experiment、run和evaluator的职责分离。LifeOps使用`EvalSuite/EvalCase/EvalRun/GradeResult`表达相同主体概念，同时保持facts和trace由自己的shared standard拥有。
+
 
 ## 暂不收录
 
 以下主题已经在总路线图或后续模块中规划，但不属于当前阶段学习链接范围。等对应模块施工时，再按模块 plan 补充权威链接：
 
 - MCP remote Streamable HTTP / OAuth / authorization 与 Calendar integration。
-- Eval Harness。
 - DAG Scheduler。
-- Inspector / Debugger 的正式 UI 或 CLI。
 - 多轮 human-in-the-loop / pending confirmation state。
 - 复杂 RAG、向量数据库、embedding/reranker 服务、后台自动 Memory 提取和多 Agent 共享 Memory。
 - Pydantic 或其他 schema validation 框架替换。

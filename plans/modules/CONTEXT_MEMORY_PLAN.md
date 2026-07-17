@@ -1,8 +1,8 @@
 # Context / Memory 模块计划
 
-文档状态：设计已确认，生产实现尚未开始。Stage 9A 是下一施工入口；只有 Stage 9A 独立取得 go 并冻结交接接口后，才能开始 Stage 9B。
+文档状态：Stage 9A 与 Stage 9B 已于 2026-07-16 分别完成独立 gate 并取得 `go`；本节 28 的接口保持冻结，整个 Stage 9 已完成并关闭。
 
-最后确认日期：2026-07-15
+最后确认日期：2026-07-16
 
 ## 1. 模块目标和用户主线
 
@@ -31,7 +31,7 @@ V1 优先小、确定、可解释，适合本地产品、单元测试和面试�
 
 当前 Research、Travel 已实现 DomainContextProvider 和 DomainMemoryCandidateProvider，并有 read model、稳定排序、预算和 contract tests。它们继续作为 Domain 共享只读接口存在，但不是本计划 Stage 9A 的 production 输入。
 
-当前不存在 app/context、app/memory、conversation repository、Profile provider、durable Memory index 或 Stage 9 最终实现。
+当前 `app/context/` 已提供 conversation JSONL repository、rolling summary、bounded assembly 与 Runtime/Planner/Executor projection；`app/memory/` 已提供 production read-only Profile provider、Memory contracts、durable SQLite V4 metadata index、immutable Memory document store、save/update/archive lifecycle、orphan audit、duplicate/conflict、deterministic verified retrieval、memory Skill、5 个 Tool、Policy/confirmation/Gateway/evidence、production Context provider、privacy events、compiled E2E 与真实 LLM smokes。实现没有改写 Stage 9A 冻结接口。
 
 本次设计前已运行当前共享 Domain read contract、Research/Travel read model、Executor provider/PlanStep 和 PlanningService 的聚焦核对，共 `26/26` 通过。代码接缝与 Stage 7/8 路线总体一致，但文档有两处需要本计划正式收敛：
 
@@ -332,7 +332,7 @@ Memory 全文保存在不可变 UTF-8 Markdown 文件：
 
 - data/memory/entries/{system_memory_id}/v{system_version}.md
 
-SQLite 只保存 memory_index，不保存全文。Stage 9B 计划在当前 schema V3 之后新增 V4 migration。
+SQLite 只保存 memory_index，不保存全文。Stage 9B 已在原 schema V3 之后新增 V4 `memory_index` migration。
 
 MemoryIndexRecord 最小字段：
 
@@ -819,6 +819,8 @@ Stage 9A no-go 条件：
 16. 运行 5 个真实 LLM smokes，分别记录文件/index/evidence/assembly 行为。
 17. 运行 Stage 9A+9B focused regression、统一离线 regression、compileall、git diff --check，审计无自动写入、无 path exposure、无旧接口改写。
 18. 同步已实施文档并作 Stage 9B go/no-go 与 Stage 9 最终结论。
+
+实施结果（2026-07-16）：步骤 1-18 全部完成。Stage 9A focused `63` 项、Stage 9B focused `81` 项、受影响 Executor `33` 项均零失败；统一离线回归 `561` 项零失败，`14` 项显式 live/platform gates 跳过；5 条真实 LLM Memory paths、`compileall`、`git diff --check` 和 architecture/privacy/authorization 审计通过。真实 provider 在 update 成功后可能追加一次 stale update，optimistic version 与 non-retryable guard 会拒绝额外版本并收敛 Tool catalog。未命中本节 no-go 条件，Stage 9B 结论为 `go`；因 Stage 9A 已为 `go`，整个 Stage 9 最终结论为完成。
 
 Stage 9B 完成标准：
 

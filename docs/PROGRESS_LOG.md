@@ -23,7 +23,7 @@
 
 项目已完成阶段 4：LangGraph Orchestration 骨架。
 
-阶段 5 功能实现与稳定化、Stage 6 ReAct Executor、Stage 7 Plan-and-Execute Planner 和 Stage 8 Research External Interfaces / Hugging Face MCP 均已完成。Stage 9 Context / Memory 的统一设计和模块计划已于 2026-07-15 确认，生产实现尚未开始；下一施工入口是 Stage 9A Context Engine，独立取得 `go` 后才能进入 Stage 9B Long-term Memory。
+阶段 5 功能实现与稳定化、Stage 6 ReAct Executor、Stage 7 Plan-and-Execute Planner、Stage 8 Research External Interfaces / Hugging Face MCP 与整个 Stage 9 Context / Memory 均已完成。Stage 9A、Stage 9B 分别取得独立 `go`，Stage 9 已于 2026-07-16 关闭。
 
 - Storage schema 开发基线已在 2026-07-14 从旧 V1-V8 压缩为单一 canonical V1：新空库一次建立当前 Runtime、Research、Travel 的最终表、约束和索引，不再保留开发期 `ALTER` / 临时表搬运。迁移聚焦测试 `6/6`、统一离线回归 `299/299` 与 compileall 通过；本地旧库先备份并升级到最终结构，再重标 V1，`PRAGMA integrity_check=ok` 且原有 `7` 条 run record 保留。未来真实 schema 变化从 V2 开始追加。
 
@@ -50,7 +50,12 @@
 - Stage 8 Research MCP 计划在 2026-07-15 完成确认并实施关闭：MCP 主线使用本地短生命周期 stdio Server 包装 Hugging Face public paper search，不使用 OpenAlex/API key；论文复用 `ExternalObservation`、Source/Snapshot 和确认保存链，不新增 schema，不修改 Planner/Executor。模型可见 Research Tool 已原子收敛为 9 个；Context / Memory 后移到 Stage 9，Recovery / Feedback 后移到 Stage 10，Calendar MCP 从当前 V1 路线移除。
 - Stage 8 实现了通用 one-shot stdio MCP client、只暴露 `search_papers` 的本地 Server、Hugging Face provider façade、Research `PaperSearchPort`/Adapter 与最终业务 Tool surface。`research.search_papers` 显式输出 paper ID、bounded authors/summary、published time、canonical URL 和 provenance；混合非法 provider item 保留合法 observation 并报告 `invalid_count`，全部非法 fail-closed。搜索默认零写，只有确认后的 `save_source` / `link_items` 才形成长期事实。
 - Stage 8 最终验证：新增契约收口聚焦测试 `28/28` 通过；统一离线回归执行 `414` 个测试，`412` 通过、`2` 个显式 live gate 跳过；真实 LLM → Direct route → Executor → Gateway → `research.search_papers` → one-shot stdio MCP → Hugging Face public API happy path 在一次 Tool 请求、零 Tool failure、一次成功和 SQLite 零写条件下通过。`compileall` 与 `git diff --check` 通过后，Stage 8 结论为 `go`，Stage 9 gate 为 `go`。
-- Stage 9 设计已于 2026-07-15 确认并记录到 `plans/modules/CONTEXT_MEMORY_PLAN.md`：Context 定义为不绑定 Domain 的 session conversation context，原始 turns/summary 使用每 session JSONL 而不写 SQLite；Stage 9A 一次请求冻结一份 bounded assembly，并用 empty/fake Memory provider。Stage 9B 只支持用户编辑的只读 Profile 和用户明确确认保存的 Memory，全文使用不可变文件、SQLite 只保存索引/lifecycle。两阶段各有 5 个真实 LLM happy paths，当前均未开始生产实现。
+- Stage 9 设计已于 2026-07-15 确认并记录到 `plans/modules/CONTEXT_MEMORY_PLAN.md`；Stage 9A 于 2026-07-16 完成实现和独立 gate。当前 Context 是不绑定 Domain 的 session conversation context，原始 turns/summary 使用每 session JSONL 而不写 SQLite；RuntimeService 在 current input pre-append fail-fast 后只 assembly 一次，Direct、Planning 和 confirmed PlanStep 复用 frozen assembly。Context payload 不进入 GraphState、SQLite、events 或 application log，Domain candidate provider 未接入。
+- Stage 9A 最终验证：8 个 compiled E2E、5 个真实 LLM happy paths、`477/477` 统一离线回归、`compileall` 和 `git diff --check` 全部通过；真实路径覆盖 recent Direct、summary + recent Direct、RuntimeService restart、Planner preview 和共享 PlanStep assembly。审计未发现 no-go 条件，结论为 `go`，本计划冻结的 Context/Provider/Projection/日志接口交给 Stage 9B 使用。
+- Stage 9B 实施步骤 1-5 已完成：Stage 9A frozen interfaces 回归保持不变；新增固定 `data/memory/profile.md` 语义的只读 `FileProfileProvider`、immutable Memory models/error contracts、SQLite V4 `memory_index` metadata repository，以及 file-first 所需的 immutable UTF-8 Markdown `MemoryDocumentStore`、SHA-256 verified read、安全系统路径、原子替换失败清理和 orphan audit。Profile 不进入 index，SQLite 不保存全文，重复 version 与 stale lifecycle transition fail-closed。聚焦迁移/仓储/文件测试 `24/24` 通过（另有 `1` 项 Windows symlink permission check 跳过），统一离线回归 `503/503` 通过、`9` 项显式 gate/platform checks 跳过。Stage 9B 仍在施工，尚未实现步骤 6 之后的 save transaction、retrieval、Memory Tool、confirmation/Gateway 接入或 ContextAssembly production provider。
+- Stage 9B 实施步骤 6-10 已完成：`MemoryService` 使用 file-first/index-second 写入，index 失败留下不可检索且可显式审计的 orphan；`DeterministicMemoryRetriever` 只读取 committed active rows，逐文件验证 SHA-256，按 tag exact、query substring、term overlap、updated_at、memory_id 稳定排序并遵守 item/token budget。规范化 duplicate 幂等复用既有版本，明确 tag/关键词 conflict 在写前返回 candidate；update 使用 active `expected_version` 并原子提交 superseded + active，archive 只改 lifecycle、不删除文件，history/restart 从 SQLite → file → hash 恢复。步骤 6-10 聚焦测试 `27/27` 通过，统一离线回归 `530/530` 通过、`9` 项显式 gate/platform checks 跳过。当前这些 service/retriever 尚未注册为 Tool 或接入 Runtime，因此不会因普通 conversation、summary 或模型推断自动写入 Memory；下一入口是步骤 11 的 memory Skill 与 5 个 Tool schemas/handlers。
+- Stage 9B 实施步骤 11-15 已完成：新增 candidate-only `memory` Skill，以及固定 global scope、无 path/user/session 参数的 `memory.save/search/list/update/archive`；WRITE 通过 request-bound `MemoryWriteContext` 接入现有 Policy → AllowedToolSet → exact confirmation → Gateway → pre/post Guardrail → ToolResult/Evidence 链，deny/missing/mismatch/expired/cross-run 均零写。生产 `ContextAssembler` 已使用冻结 provider slots 接入只读 Profile 和 verified active Memory；Memory events 只记录 tool/call identity、status、memory_id/version、idempotent flag、evidence count 或稳定 error code。8 个 compiled E2E 覆盖 Profile、save、duplicate、restart、conflict/update、archive/history、corrupt file isolation 和 non-explicit zero-write；统一离线回归 `552/552` 通过、`9` 项显式 live/platform gates 跳过。下一入口为步骤 16 的 5 个真实 LLM smokes；在 live gate 前不宣称 Stage 9B 或整个 Stage 9 完成。
+- Stage 9B 实施步骤 16-18 已完成：5 条独立真实 LLM paths 覆盖只读 Profile、确认前零写/确认后 file+index+evidence、restart verified retrieval、两回合 conflict→explicit update 和 archive lifecycle。真实 provider 在 update 成功后可能追加一次 stale update；optimistic version 与 non-retryable guard 会拒绝额外版本并收敛 catalog。最终 Stage 9A focused `63` 项、Stage 9B focused `81` 项、受影响 Executor `33` 项均零失败；统一离线回归 `561` 项零失败、`14` 项显式 live/platform gates 跳过，`compileall`、`git diff --check`、无自动写入/path exposure/冻结接口/依赖方向审计全部通过。新增 Memory architecture contract 固化 core/context adapter 不依赖 LangGraph、Planner、Executor、Domain 或 Tool System，Tool/observability 依赖只存在于 `memory/tools.py`。未命中 no-go 条件，Stage 9B 结论为 `go`，整个 Stage 9 关闭。
 
 - Stage 5 稳定化步骤 6-11 已完成：公共 Tool schema、依赖方向、Runtime/Tool/Domain contract 与事件 payload 已增加兼容性门禁；每个 run 显式拥有一个 execution scope，同 run 复用、跨 run 隔离。
 - Runtime 公共结果已精简，内部 exception、Intent/Policy 摘要和 trace summary 不再进入 `RuntimeResult`；run lifecycle record 与 Domain WRITE transaction 已分离，LLM/external read 不占用 SQLite 写 transaction，异常 run record 可闭合。
@@ -110,7 +115,7 @@
 - Observability 文件日志已完成阶段 3.5 初版。
 - LangGraph Orchestration 已完成阶段 4 初版。
 - 阶段 5 的 Skill System、Tool System、Research、Travel 与稳定化步骤 1-15 均已完成，Stage 6 gate 为 `go`。
-- 阶段 6 ReAct Executor、阶段 7 Plan-and-Execute Planner 与 Stage 8 Research MCP 均已完成；Stage 9 Context / Memory 模块计划已确认，下一实现入口是 Stage 9A Context Engine。
+- 阶段 6 ReAct Executor、阶段 7 Plan-and-Execute Planner、Stage 8 Research MCP 与整个 Stage 9 Context / Memory 均已完成并关闭；下一阶段为 Stage 10 Recovery / Feedback。
 - 旧 runtime 已归档到 `legacy_v0/app/`。
 - 当前代码放在 `app/`。
 - 当前计划放在 `plans/`。
@@ -148,7 +153,7 @@
 uv run python main.py
 ```
 
-`main.py` 已接入 ReAct、Plan-and-Execute 与真实 Research MCP，支持普通输入以及 `confirm-plan`、`modify-plan`、`cancel-plan` 结构化命令；Context / Memory 与异步恢复尚未实现，因此仍不是最终产品 CLI。
+`main.py` 已接入 ReAct、Plan-and-Execute、真实 Research MCP、session Context 与 Long-term Memory 生产读写边界，支持普通输入以及 `confirm-plan`、`modify-plan`、`cancel-plan` 结构化命令；默认无同步 confirmation provider 时所有 WRITE 仍 fail-closed，异步恢复尚未实现，因此仍不是最终产品 CLI。
 
 当前 `main.py` 已接入 `config/default.json`、SQLite migration 和 `RuntimeService`。`RuntimeService` 当前执行：
 
@@ -179,7 +184,7 @@ RuntimeRequest
 - `docs/ARCHITECTURE.md` 已记录 Runtime Core、Intent / Policy、LangGraph Orchestration、Skill、Tool Gateway、Guardrails 和 Domain 纵向切片边界。
 - `docs/RUNTIME_CONCEPTS.md` 已记录 Runtime Core、Intent Layer、Policy / Permission Layer、Write Safety、LangGraph Orchestrator、LangGraph vs LangChain、Observability 和 SQLite Local Persistence 学习章节。
 - `plans/modules/STORAGE_SQLITE_PLAN.md`、`plans/modules/RUNTIME_CORE_PLAN.md`、`plans/modules/INTENT_POLICY_PLAN.md`、`plans/modules/OBSERVABILITY_LOGGING_PLAN.md` 和 `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md` 已记录完成状态。
-- Stage 6、Stage 7 与 Stage 8 均已关闭；Stage 9 统一模块计划已确认但尚未实施。下一施工入口是 `plans/modules/CONTEXT_MEMORY_PLAN.md` 的 Stage 9A 步骤 1。
+- Stage 6、Stage 7、Stage 8 与整个 Stage 9 Context / Memory 均已关闭；下一施工模块为 Stage 10 Recovery / Feedback。
 
 当前有效测试命令：
 

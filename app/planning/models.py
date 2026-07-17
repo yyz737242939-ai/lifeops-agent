@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from app.context.models import ContextContribution
 from app.common.validation import (
     require_non_empty_string,
     require_unique_non_empty_strings,
@@ -94,6 +95,9 @@ class PlanningRouteInput:
     prompt_contributions: tuple[PromptContribution, ...] = field(default_factory=tuple)
     tool_catalog: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     limits: PlanningLimits = field(default_factory=PlanningLimits)
+    context_contributions: tuple[ContextContribution, ...] = field(
+        default_factory=tuple
+    )
 
     def __post_init__(self) -> None:
         require_non_empty_string(self.goal, "goal")
@@ -105,6 +109,11 @@ class PlanningRouteInput:
             raise ValueError("tool_catalog must contain dict values.")
         if not isinstance(self.limits, PlanningLimits):
             raise ValueError("limits must be PlanningLimits.")
+        _require_tuple_of(
+            self.context_contributions,
+            ContextContribution,
+            "context_contributions",
+        )
 
 
 class PlanRunStatus(StrEnum):
@@ -281,6 +290,9 @@ class PlannerInput:
     limits: PlanningLimits
     snapshots: tuple[PlanningSnapshotEnvelope, ...] = field(default_factory=tuple)
     confirmed_constraints: tuple[str, ...] = field(default_factory=tuple)
+    context_contributions: tuple[ContextContribution, ...] = field(
+        default_factory=tuple
+    )
 
     def __post_init__(self) -> None:
         require_non_empty_string(self.goal, "goal")
@@ -293,6 +305,11 @@ class PlannerInput:
         if len({(item.domain, item.scope_id) for item in self.snapshots}) != len(self.snapshots):
             raise ValueError("snapshots must not contain duplicate scope envelopes.")
         require_unique_non_empty_strings(self.confirmed_constraints, "confirmed_constraints")
+        _require_tuple_of(
+            self.context_contributions,
+            ContextContribution,
+            "context_contributions",
+        )
 
 
 @dataclass(frozen=True)

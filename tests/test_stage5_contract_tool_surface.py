@@ -14,6 +14,11 @@ from app.tools.models import ExecutionEvidence, GuardrailDecision
 
 
 EXPECTED_TOOL_CONTRACTS = {
+    "memory.archive": ("write", "medium", ("memory",), "7dc717571aaac94d457c42d8dad7188d67dfa26a22d55b1aa21e98ed0d8efa30"),
+    "memory.list": ("read", "low", ("memory",), "398ac69f3255912439360a83540a6f7c3743b7609656b22bee4a3e5c0710e89a"),
+    "memory.save": ("write", "medium", ("memory",), "98bfc502d5c11f04a71d8c5a27362e3aee2915cbed2f749f28e7c302c4b9de33"),
+    "memory.search": ("read", "low", ("memory",), "7cacb50cf5b54435be8c5269cd338404cfc8a6c172a70f1ca9f34b8128126db1"),
+    "memory.update": ("write", "medium", ("memory",), "5e10962971a2e52d52da464e43326584acddedbfc63d988b0fff3c662ba8b51a"),
     "research.append_revision": ("write", "medium", ("research",), "cf3de9e9e46e98efbd174668f0f7abfa559f2cb5731b7289302fea155e604701"),
     "research.build_brief": ("external_read", "low", ("research",), "f9bc5597911a3eb622aa9255e4cbe378ea18b0b57f9583fe333b4a0c3eae4f55"),
     "research.create_note": ("write", "medium", ("research",), "23bdc899780b70aa56017c777fcacbe461aeb1343b0ff82174e3860bb1e69e21"),
