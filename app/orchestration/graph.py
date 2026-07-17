@@ -17,6 +17,8 @@ from app.executor.models import FinalAnswerDecision
 from app.executor.service import ReactExecutor
 from app.intent.service import IntentService
 from app.observability.logger import LlmInteractionSink, TraceSink
+from app.observability.telemetry import optional_span
+from app.observability.trace_vocabulary import LifeOpsSpanKind
 from app.orchestration.nodes import (
     classify_intent,
     decide_policy,
@@ -65,12 +67,16 @@ def build_runtime_graph(
         "classify_intent",
         _with_runtime_trace(
             partial(classify_intent, intent_service=intent_service),
+            name="intent.classify",
+            kind=LifeOpsSpanKind.INTENT,
         ),
     )
     graph.add_node(
         "decide_policy",
         _with_runtime_trace(
             partial(decide_policy, policy_service=policy_service),
+            name="policy.decide",
+            kind=LifeOpsSpanKind.POLICY,
         ),
     )
     graph.add_node(
@@ -233,35 +239,63 @@ class RuntimeOrchestrator:
         if self._planning_service is None or self._plan_controller is None:
             raise RuntimeError("planning command composition is not configured.")
         state = create_graph_state(request)
-        state = classify_intent(state, self._intent_service, trace=trace)
+        with optional_span(
+            trace, name="intent.classify", kind=LifeOpsSpanKind.INTENT
+        ) as span:
+            state = classify_intent(state, self._intent_service, trace=trace)
+            if state["error_code"] is not None:
+                span.fail(state["error_code"])
         if state["error_code"] is not None:
             return state
-        state = decide_policy(state, self._policy_service, trace=trace)
+        with optional_span(
+            trace, name="policy.decide", kind=LifeOpsSpanKind.POLICY
+        ) as span:
+            state = decide_policy(state, self._policy_service, trace=trace)
+            if state["error_code"] is not None:
+                span.fail(state["error_code"])
         if state["error_code"] is not None or state["route"] != GraphRoute.ALLOW:
             if state["result"] is None:
                 state = deny(state)
             return finalize(state)
-        state = prepare_skills(
-            state,
-            skill_service=self._skill_service,
-            trace=trace,
-            llm_log=llm_log,
-        )
+        with optional_span(
+            trace, name="skill.prepare", kind=LifeOpsSpanKind.SKILL
+        ) as span:
+            state = prepare_skills(
+                state,
+                skill_service=self._skill_service,
+                trace=trace,
+                llm_log=llm_log,
+            )
+            if state["error_code"] is not None:
+                span.fail(state["error_code"])
         if state["error_code"] is not None:
             return state
-        state = execute_plan_command(
-            state,
-            command,
-            execution_scope=_create_execution_scope(
-                self._execution_scope_factory, request, trace
+        with optional_span(
+            trace,
+            name="planning.command",
+            kind=LifeOpsSpanKind.PLANNER,
+            attributes=(
+                {"lifeops.plan.command": command.action.value}
+                if command.plan_id is None
+                else {
+                    "lifeops.plan.command": command.action.value,
+                    "lifeops.plan.id": command.plan_id,
+                }
             ),
-            planning_service=self._planning_service,
-            controller=self._plan_controller,
-            limits=self._planning_limits,
-            trace=trace,
-            llm_log=llm_log,
-            context_assembly=context_assembly,
-        )
+        ):
+            state = execute_plan_command(
+                state,
+                command,
+                execution_scope=_create_execution_scope(
+                    self._execution_scope_factory, request, trace
+                ),
+                planning_service=self._planning_service,
+                controller=self._plan_controller,
+                limits=self._planning_limits,
+                trace=trace,
+                llm_log=llm_log,
+                context_assembly=context_assembly,
+            )
         return finalize(state)
 
 
@@ -310,12 +344,18 @@ def _prepare_skills_with_runtime(
         runtime: Runtime[OrchestrationContext],
     ) -> GraphState:
         context = runtime.context or OrchestrationContext()
-        return prepare_skills(
-            state,
-            skill_service=skill_service,
-            trace=context.trace,
-            llm_log=context.llm_log,
-        )
+        with optional_span(
+            context.trace, name="skill.prepare", kind=LifeOpsSpanKind.SKILL
+        ) as span:
+            result = prepare_skills(
+                state,
+                skill_service=skill_service,
+                trace=context.trace,
+                llm_log=context.llm_log,
+            )
+            if result["error_stage"] == "skill" and result["error_code"] is not None:
+                span.fail(result["error_code"])
+            return result
 
     return invoke_node
 
@@ -351,16 +391,35 @@ def _route_planning_with_runtime(
         runtime: Runtime[OrchestrationContext],
     ) -> GraphState:
         context = runtime.context or OrchestrationContext()
-        return route_planning(
-            state,
-            execution_scope=context.execution_scope or _empty_tool_runtime(),
-            route_client=route_client,
-            planning_service=planning_service,
-            limits=limits,
-            trace=context.trace,
-            llm_log=context.llm_log,
-            context_assembly=context.context_assembly,
-        )
+        with optional_span(
+            context.trace, name="planning.route", kind=LifeOpsSpanKind.PLANNER
+        ) as span:
+            result = route_planning(
+                state,
+                execution_scope=context.execution_scope or _empty_tool_runtime(),
+                route_client=route_client,
+                planning_service=planning_service,
+                limits=limits,
+                trace=context.trace,
+                llm_log=context.llm_log,
+                context_assembly=context.context_assembly,
+            )
+            if result["error_stage"] == "planning" and result["error_code"] is not None:
+                span.fail(result["error_code"])
+            runtime_result = result.get("result")
+            tool_result = (
+                runtime_result.tool_result
+                if isinstance(runtime_result, RuntimeResult)
+                else None
+            )
+            if isinstance(tool_result, dict) and tool_result.get("type") == "plan_preview":
+                span.set_attributes(
+                    {
+                        "lifeops.plan.id": tool_result["plan_id"],
+                        "lifeops.plan.revision": tool_result["revision"],
+                    }
+                )
+            return result
 
     return invoke_node
 
@@ -391,6 +450,9 @@ class _NoOpExecutorModelClient:
 
 def _with_runtime_trace(
     action: Callable[..., GraphState],
+    *,
+    name: str,
+    kind: LifeOpsSpanKind,
 ) -> Callable[[GraphState, Runtime[OrchestrationContext]], GraphState]:
     """Bind the request-local sink while keeping it outside GraphState."""
 
@@ -399,6 +461,10 @@ def _with_runtime_trace(
         runtime: Runtime[OrchestrationContext],
     ) -> GraphState:
         trace = runtime.context.trace if runtime.context is not None else None
-        return action(state, trace=trace)
+        with optional_span(trace, name=name, kind=kind) as span:
+            result = action(state, trace=trace)
+            if result["error_code"] is not None:
+                span.fail(result["error_code"])
+            return result
 
     return invoke_node

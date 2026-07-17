@@ -57,6 +57,7 @@ class RuntimeObservabilityE2ETest(unittest.TestCase):
             session_dir = session_dirs[0]
             events = _read_jsonl(session_dir / "events.jsonl")
             llm_rows = _read_jsonl(session_dir / "llm.jsonl")
+            trace_rows = _read_jsonl(session_dir / "traces.jsonl")
 
             event_types = [row["event_type"] for row in events]
             expected_flow = [
@@ -101,6 +102,71 @@ class RuntimeObservabilityE2ETest(unittest.TestCase):
                 all(row["run_id"] == request.run_id for row in llm_rows)
             )
             self.assertTrue((session_dir / "application.log").exists())
+            self.assertTrue((session_dir / "annotations.jsonl").exists())
+
+            spans = [row for row in trace_rows if row["record_type"] == "span"]
+            artifacts = [
+                row for row in trace_rows if row["record_type"] == "artifact_reference"
+            ]
+            trace_records = [
+                row for row in trace_rows if row["record_type"] == "trace"
+            ]
+            self.assertEqual(len(trace_records), 1)
+            self.assertEqual(trace_records[0]["run_id"], request.run_id)
+            self.assertEqual(trace_records[0]["status"], "ok")
+            self.assertEqual(
+                {row["lifeops_span_kind"] for row in spans},
+                {"RUNTIME", "INTENT", "POLICY", "SKILL", "EXECUTOR", "LLM", "TOOL", "GUARDRAIL"},
+            )
+            self.assertEqual(
+                len([row for row in spans if row["lifeops_span_kind"] == "LLM"]),
+                3,
+            )
+            llm_spans = {
+                row["span_id"]: row
+                for row in spans
+                if row["lifeops_span_kind"] == "LLM"
+            }
+            llm_artifacts = [
+                row for row in artifacts if row["artifact_type"] == "llm_interaction"
+            ]
+            self.assertEqual(len(llm_artifacts), 3)
+            self.assertTrue(
+                all(row["span_id"] in llm_spans for row in llm_artifacts)
+            )
+            self.assertTrue(
+                all(row["sensitivity"] == "sensitive" for row in llm_artifacts)
+            )
+            self.assertEqual(
+                len({row["safe_reference"] for row in llm_artifacts}),
+                3,
+            )
+            self.assertTrue(
+                all(
+                    row["safe_reference"].startswith("llm.jsonl#id=logllm_")
+                    for row in llm_artifacts
+                )
+            )
+            self.assertEqual(
+                [
+                    span["attributes"]["llm.usage.total_tokens"]
+                    for span in llm_spans.values()
+                ],
+                [12, 23, 23],
+            )
+            root = next(row for row in spans if row["lifeops_span_kind"] == "RUNTIME")
+            self.assertIsNone(root["parent_span_id"])
+            self.assertTrue(
+                all(row["trace_id"] == trace_records[0]["trace_id"] for row in spans)
+            )
+            serialized_trace = (session_dir / "traces.jsonl").read_text(encoding="utf-8")
+            for forbidden in (
+                request.user_input,
+                "messages",
+                "private_reasoning",
+                "confirmation",
+            ):
+                self.assertNotIn(forbidden, serialized_trace)
 
 
 class _LoggingSkillSelectionClient:
@@ -116,7 +182,14 @@ class _LoggingSkillSelectionClient:
                 provider="fixture",
                 model="skill-selector-fixture",
                 request={"operation": "skill_selection", "skill_count": len(skill_metadata)},
-                response={"selected_skill_ids": ["research"]},
+                response={
+                    "selected_skill_ids": ["research"],
+                    "usage": {
+                        "input_tokens": 10,
+                        "output_tokens": 2,
+                        "total_tokens": 12,
+                    },
+                },
             )
         return {"selected_skill_ids": ["research"], "reason": "Research fixture."}
 
@@ -144,7 +217,14 @@ class _LoggingExecutorModelClient:
                     "step_index": model_input.step_index,
                     "observation_count": len(model_input.observations),
                 },
-                response={"decision_type": decision_type},
+                response={
+                    "decision_type": decision_type,
+                    "usage": {
+                        "input_tokens": 20,
+                        "output_tokens": 3,
+                        "total_tokens": 23,
+                    },
+                },
             )
         return decision
 

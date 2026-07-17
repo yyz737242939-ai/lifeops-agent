@@ -21,6 +21,8 @@ from app.context.summary_service import RollingSummaryService
 from app.executor.models import FinalAnswerDecision, ToolActionDecision
 from app.executor.service import ReactExecutor
 from app.intent.models import IntentDecision, IntentType
+from app.observability.trace_reader import FileTraceStore, TraceReader
+from app.observability.trace_vocabulary import LifeOpsSpanKind, SpanLinkType
 from app.planning.controller import PlanController
 from app.planning.finalizer import FakePlanFinalizerClient
 from app.planning.models import (
@@ -154,6 +156,7 @@ class ContextCompiledE2ETest(unittest.TestCase):
             summarizer = _Summarizer()
             plan_model = _RecordingModel()
             conn = create_test_connection()
+            service = None
             try:
                 service, _, _, assembler = _planning_service(
                     root,
@@ -163,6 +166,7 @@ class ContextCompiledE2ETest(unittest.TestCase):
                     summarizer=summarizer,
                     budget=_budget(max_recent_turns=0),
                     executor_model=plan_model,
+                    log_root=root / "logs",
                 )
                 preview = service.handle(
                     RuntimeRequest(
@@ -203,7 +207,39 @@ class ContextCompiledE2ETest(unittest.TestCase):
                         for model_input in plan_model.inputs
                     )
                 )
+                reader = TraceReader(FileTraceStore(root / "logs"))
+                preview_graph = reader.find_by_run("run_preview")
+                confirm_graph = reader.find_by_run("run_confirm")
+                self.assertEqual(
+                    [
+                        link.target_trace_id
+                        for link in confirm_graph.links
+                        if link.link_type is SpanLinkType.PLAN_CONTINUATION
+                    ],
+                    [preview_graph.trace.trace_id],
+                )
+                self.assertEqual(
+                    len(
+                        [
+                            span
+                            for span in confirm_graph.spans_by_id.values()
+                            if span.lifeops_span_kind is LifeOpsSpanKind.EXECUTOR
+                        ]
+                    ),
+                    2,
+                )
+                preview_span = next(
+                    span
+                    for span in preview_graph.spans_by_id.values()
+                    if span.name == "planning.route"
+                )
+                self.assertEqual(
+                    preview_span.attributes["lifeops.plan.id"],
+                    preview.tool_result["plan_id"],
+                )
             finally:
+                if service is not None:
+                    service.close()
                 conn.close()
 
     def test_history_read_failure_degrades_to_current_only(self) -> None:
@@ -458,6 +494,7 @@ def _planning_service(
     summarizer=None,
     budget: ContextBudget | None = None,
     executor_model=None,
+    log_root: Path | None = None,
 ):
     limits = PlanningLimits(max_plan_steps=4)
     draft = PlanDraft(
@@ -500,6 +537,7 @@ def _planning_service(
         conversation_repository=repository,
         context_assembler=assembler,
         context_budget=budget or _budget(),
+        log_root=log_root,
     )
     return service, planner, plan_repository, assembler
 

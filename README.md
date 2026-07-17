@@ -6,6 +6,8 @@ LifeOps Agent 是一个本地 Python 项目，用来学习和构建 Agent Runtim
 
 当前进度：阶段 0-5、阶段 6 ReAct Executor、阶段 7 Plan-and-Execute Planner、阶段 8 Research External Interfaces / Hugging Face MCP 与整个 Stage 9 Context / Memory 均已完成。Stage 9A 提供 session JSONL conversation、rolling summary、一次请求一份 bounded `ContextAssembly`，以及 Direct、Planning 和 PlanStep 的共享 projection；Stage 9B 提供只读 Profile、immutable Memory files + SQLite metadata index、verified retrieval、duplicate/conflict、update/archive lifecycle、memory Skill、5 个 Tool、Policy/confirmation/Gateway/evidence、生产 Context provider 和隐私事件。Stage 9A/9B 各 5 条真实 LLM paths、各 8 个 compiled E2E、最终 `561` 项统一离线测试零失败（`14` 项显式 live/platform gates 跳过）、`compileall`、`git diff --check` 与架构审计均通过；Stage 9B 结论为 `go`，整个 Stage 9 已关闭。
 
+Stage 10 前置的共享 Trace 标准步骤 1-16 已完成并通过 `go` gate：LifeOps Trace Contract v1、request-local TraceContext、兼容 RequestTelemetry、session canonical files、可删除重建的derived index、TraceReader/TraceGraph、shared RuntimeReport、deterministic sample annotations、serial diamond fixture、Planning `plan_continuation`、LLM artifact/token metadata及真实 Direct/Planning smoke 均已验证。ExecutionFeedback / Recovery产品逻辑、正式 Eval Harness 与DAG scheduler仍按各自模块计划实施。
+
 ## 项目目标
 
 LifeOps Agent 有两个目标：

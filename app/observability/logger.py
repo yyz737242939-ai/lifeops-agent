@@ -8,6 +8,30 @@ from pathlib import Path
 from typing import Any, Protocol
 
 
+def project_llm_token_usage(response: object) -> dict[str, int]:
+    """Project provider-specific usage objects into safe canonical counters."""
+
+    usage = getattr(response, "usage", None)
+    if usage is None and isinstance(response, dict):
+        usage = response.get("usage")
+    if usage is None:
+        return {}
+
+    def read(*names: str) -> int | None:
+        for name in names:
+            value = usage.get(name) if isinstance(usage, dict) else getattr(usage, name, None)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                return value
+        return None
+
+    projected = {
+        "input_tokens": read("input_tokens", "prompt_tokens"),
+        "output_tokens": read("output_tokens", "completion_tokens"),
+        "total_tokens": read("total_tokens"),
+    }
+    return {key: value for key, value in projected.items() if value is not None}
+
+
 class TraceSink(Protocol):
     """Application-owned sink for ordered request-local events."""
 

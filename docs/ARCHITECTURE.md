@@ -273,6 +273,16 @@ Runtime 的事实来源是：
 
 三类日志默认写入 `logs/sessions/session_<timestamp>_<session_id>/`。event writer 按 session 隔离；application logger 同一时刻只保留一个 active session FileHandler，切换或 `RuntimeService.close()` 时关闭旧 handler。SQLite 不再默认承载 runtime event log 或 LLM log。
 
+共享 `LifeOps Trace Contract v1` 在同一 session directory 增加 `traces.jsonl` 与 `annotations.jsonl`。前者是append-only Trace/Span/SpanEvent/SpanLink/ArtifactReference canonical records，后者保存派生Annotation。`TraceIndexBuilder`可从这些canonical files构建独立SQLite derived index；index可删除重建，stale/corrupt/missing时`FileTraceStore`回退file scan，不进入Runtime transaction，也不复用业务SQLite的`run_records`/`tool_calls`。`events.jsonl`继续作为兼容semantic-event projection，现有`TraceSink.append()` producer/fake无需改签名。
+
+`TraceReader`是唯一graph reconstruction边界：它负责schema、duplicate identity、root/parent/cycle、event sequence、link、artifact和annotation target完整性，输出deterministic immutable `TraceGraph`。`app/runtime_reporting`位于Observability之上，通过typed `RuntimeFactProvider`组装`RuntimeFactBundle`，再由唯一`RuntimeReportBuilder`生成Inspector/Eval共享的`RuntimeReport`；它不直接查询raw业务表、Tool output或artifact content。当前只有empty/composite Ports与safe projection models，尚无ExecutionFeedback/Recovery具体fact adapter。
+
+Shared sample annotation层只包含`TraceIntegrityRule`和`TraceContractGrader`，输出带producer version、source fingerprint与eval lineage的`AnnotationRecord`；规则和annotation sink失败不修改TraceGraph、RuntimeReport或facts。serial diamond fixture用parent-child表达scheduler containment、`depends_on`表达dependency，并验证B成功证据保留、C失败、D blocked；它不是DAG scheduler实现。
+
+每个 `RuntimeService` request 创建一个 request-local `RequestTelemetry` 和 immutable `TraceContext(trace_id, current_span_id, run_id, session_id, turn_id)`。telemetry 通过已有 `OrchestrationContext` / service 参数传递，不进入 `GraphState`、Policy input、Tool arguments、Domain model、Context/Memory content 或 durable authorization state。当前 instrumentation 覆盖 Runtime root、Intent、Policy、Skill、Planner、Executor、LLM、Tool 和 pre/post Guardrail；plan-step Executor span携带 plan/revision/step 与独立 invocation identity。active span可在结束时补充此时才确定的safe metadata，但最终`SpanRecord`仍immutable。Planning preview span保存plan identity，confirm root通过`plan_continuation`链接canonical preview trace；correlation只读files/index，失败不改变Plan命令。Trace/export/start/end validation failure只写安全diagnostic或降级为缺少telemetry，不改变RuntimeResult、ToolResult、PlanStep或业务事实。
+
+Tool evidence只在已有 safe reference 时投影为 `ArtifactReference`，不复制 output/summary。敏感LLM request/response继续只写`llm.jsonl`；shared trace使用唯一interaction ID的safe reference，并只投影provider/model与provider实际提供的token counts。ExecutionFeedback / Recovery 产品模块仍未实现；Observability 仅提供 finalized feedback reference 与 `recovery_of` link 的 projection seam，并验证 Recovery trace 不含 Tool、Policy、Executor、Planner 或 Guardrail execution spans。
+
 `RuntimeService` 为每个 request 建立 `RequestLlmLog`，通过 request-local orchestration context 传给 Skill selection 和 `ReactExecutor`，不进入 outer `GraphState` 或 `ExecutorState`。Skill selection 记录实际 chat-completions request 与 content；Executor adapter 记录每一步 Responses request，以及 final text 或 function-call identity/arguments。provider/config/contract failure 记录 stable error code，不写 exception text；日志 writer 自身失败只进入 `application.log`，不能改变 model decision、Tool evidence 或 RuntimeResult。deterministic file-backed E2E 已验证一次 current Runtime run 能按顺序生成完整 `events.jsonl` 和三次 Skill/Executor `llm.jsonl` interaction。
 
 `TraceSink` 是应用拥有的 request-local event 接口。outer Graph node 与 `ReactExecutor` 通过 runtime context / service 参数复用同一个 sink；Tool Safety、repository 或 integration 关键阶段也可以直接写同一个 sink，不需要为了可观察性变成 LangGraph node。Event 在真实逻辑边界实时追加，不根据最终 state 事后补写。
@@ -289,6 +299,7 @@ Executor 稳定语义事件包含 `executor.action.selected`、`executor.observa
 - Conversation Summary 不是 Long-term Memory。Context compaction 结果不能自动升级为长期记忆。
 - LangGraph checkpoint state、Planner 输出和 Recovery Context 不是业务事实来源，也不是写入授权来源。
 - `TraceSink` 是运行依赖，不进入 `GraphState`；event payload 不写完整 GraphState 或原始用户输入。
+- Trace/Span/Annotation 是 telemetry 或派生判断，不是执行、业务事实或写入授权来源。
 - 修改 Runtime 行为、Context 处理、Memory、写入安全或工具执行时，需要聚焦的回归测试。
 
 ## PlanRun vs Domain Facts

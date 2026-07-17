@@ -10,7 +10,7 @@ from typing import Any
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from app.observability.logger import LlmInteractionSink
+from app.observability.logger import LlmInteractionSink, project_llm_token_usage
 from app.planning.errors import PlanContractError, PlanningError
 from app.planning.models import (
     PlanFinalizerInput,
@@ -132,7 +132,10 @@ class OpenAIPlanFinalizerClient:
                 "Finalizer provider request failed.",
                 code="plan_finalization_failed",
             ) from exc
-        response_payload = {"output_text": getattr(response, "output_text", "")}
+        response_payload = {
+            "output_text": getattr(response, "output_text", ""),
+            "usage": project_llm_token_usage(response),
+        }
         try:
             output = parse_finalizer_output(response_payload["output_text"], finalizer_input)
         except PlanContractError as exc:

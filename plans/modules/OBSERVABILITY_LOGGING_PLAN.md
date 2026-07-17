@@ -4,6 +4,8 @@
 
 阶段 3.5 Observability 文件日志校正已完成。
 
+后续 Trace storage/read-model ownership 已由 `TRACE_INSPECTION_EVAL_STANDARD_PLAN.md` 接管。当前 session directory 在既有三通道之外新增 canonical `traces.jsonl` 与 `annotations.jsonl`；本计划早期关于 Inspector / Eval 直接读取 `events.jsonl` 或单独建设 `SessionLogReader` 的假设不再是后续架构来源。
+
 已完成：
 
 - `app/observability/file_logs.py` 已实现 `SessionLogWriter`、`EventLogWriter` 和 `LlmLogWriter`。
@@ -15,7 +17,6 @@
 
 仍保留到后续阶段：
 
-- Inspector / Eval 读取 session log directory。
 - LLM log 脱敏策略。
 - 日志清理、轮转和导出策略。
 

@@ -688,6 +688,22 @@ Stage 9A 与 Stage 9B 各自保留 5 个真实 LLM paths，并完成 focused uni
 
 ## Observability
 
+### LifeOps Trace Contract v1
+
+`events.jsonl` 回答“发生了哪些稳定语义事件”，`traces.jsonl` 回答“这些 operation 的层级、时序、状态和关联是什么”。一次 request 对应 Trace；有 start/end、latency 或 child operation 的工作对应 Span；瞬时里程碑对应 Span Event；跨 request 或 DAG dependency 使用 Span Link；大型或敏感内容只保存 ArtifactReference；诊断和评测结论使用 Annotation，不能覆盖执行事实。
+
+`TraceContext` 是 request-local correlation value，不是 GraphState 或权限状态。`RequestTelemetry` 同时兼容旧 `TraceSink.append()` 和新 span recording，因此可以渐进迁移 producer。Runtime root包含Intent、Policy、Skill、Planner/Executor等child spans；LLM、Tool和Guardrail继续形成更深层子操作。span status表达operation telemetry是否正常，不等同于业务 outcome：例如按设计停在confirmation required可以是正常结束，而provider exception应是error。
+
+Trace记录只允许低层、安全、可序列化metadata。raw user input、prompt/messages、Tool arguments/output、confirmation、credentials、exception text和private reasoning不能进入普通attributes/events；需要关联的敏感材料通过带sensitivity和hash的ArtifactReference表示。Trace/export失败属于观测降级，不能反转ToolResult、PlanStep、Domain fact或RuntimeResult。
+
+Planning preview与confirm是两个独立Trace：preview PLANNER span保存plan identity，confirm root使用`plan_continuation` Span Link指向preview，而不是把trace_id写进PlanRun。LLM request/response仍留在敏感`llm.jsonl`；ArtifactReference引用唯一interaction ID，普通span只保留provider/model和provider实际返回的token counts。缺少usage时保持缺失，不用本地估算伪装provider事实。optional instrumentation的start/end/validation/export失败全部降级，不能让原本成功的业务路径失败。
+
+Derived trace index不是第四种事实源。它只复制canonical files中的安全envelope用于按run/plan/trace查询，删除后可重建；stale、损坏或缺失时回退file reader。`TraceStore`负责定位和读取records，`TraceReader`负责schema/integrity validation与组图，两者分开避免Inspector和Eval各自解释parent、link或corrupt tail。
+
+`TraceGraph`只描述telemetry结构；`RuntimeFactBundle`通过typed read Ports携带更高优先级的run/plan/feedback facts；`RuntimeReportBuilder`再组合二者生成唯一shared RuntimeReport。Inspector负责基于report诊断，Eval负责基于同一report评分，但二者不能重新解析raw JSONL决定action success。Annotation是派生判断，deterministic producer必须带version和source fingerprint，evaluation annotation还必须带完整eval lineage。
+
+DAG的parent-child和dependency必须分开：scheduler是parent，node spans是children；`depends_on` links才表达A→B/C→D。serial diamond fixture中C失败后D为blocked，但B的成功与evidence仍保留。这个fixture验证Trace/Reader/Report表达能力，不等于已经实现scheduler、并发或恢复执行。
+
 ### 解决什么问题
 
 Observability 让 runtime 行为可以被解释和复盘。它回答“这次 run 经过了哪些阶段、哪里失败、LLM 原始请求和响应是什么”。

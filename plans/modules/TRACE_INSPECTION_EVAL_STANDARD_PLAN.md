@@ -1,6 +1,6 @@
 # LifeOps Trace / Inspection / Eval 共享标准计划
 
-文档状态：范围已确认，已完成与 Recovery、Inspector、Eval 计划及当前代码接缝的适配审查，待实施。本计划只冻结 Feedback、Recovery、Inspector、Eval 与未来最小 DAG demo 共用的 telemetry、read model 和 annotation 标准；不在本轮直接实现四个业务模块。
+文档状态：步骤 1-16 已完成，shared-standard gate 为 `go`。本计划只冻结 Feedback、Recovery、Inspector、Eval 与未来最小 DAG demo 共用的 telemetry、read model 和 annotation 标准；步骤 8 只提供现有 hook telemetry 与 downstream projection seam，不代表 ExecutionFeedback / Recovery 产品模块已经实现，步骤 13 只提供shared serial diamond fixture，不代表DAG scheduler已经实现。Recovery/Eval 的真实模型 smoke 属于各自产品模块 gate，不反向阻塞共享标准。
 
 ## 1. 背景与目标
 
@@ -834,10 +834,10 @@ Inspector 默认只显示 artifact metadata；显式 `--llm` / `--sensitive` 等
 
 共享标准实现并通过离线 gate 后，复用现有受控 live paths，不新增大规模 suite：
 
-- Direct READ with Tool；
-- Planning preview/confirm；
-- Recovery explanation；
-- Eval grader读取真实 trace并产生 deterministic annotation。
+- shared-standard gate 必须运行当前已实现的 Direct READ with Tool 与 Planning preview/confirm；
+- Recovery explanation 在 `RECOVERY_PLAN.md` 实现后运行；
+- Eval grader 读取真实 trace 的 smoke 在 `EVAL_HARNESS_PLAN.md` 实现后运行；
+- 在下游产品尚未实现时，本计划只用 deterministic Recovery/Eval contract fixtures 证明 shared models、links、annotations 和 report compatibility，不伪造真实入口。
 
 smoke 只验证真实 adapter产生的 trace topology、LLM artifact link、token/provider metadata和最终事实一致性。provider/external failure单独报告，不以 trace文案相似度判定。
 

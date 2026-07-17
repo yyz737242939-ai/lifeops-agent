@@ -23,7 +23,7 @@ from app.executor.models import (
     ToolActionDecision,
     ToolObservation,
 )
-from app.observability.logger import LlmInteractionSink
+from app.observability.logger import LlmInteractionSink, project_llm_token_usage
 from app.tools.models import ToolCall
 
 
@@ -335,6 +335,7 @@ def _observation_payload(observation: ToolObservation) -> dict[str, Any]:
 def _provider_response_payload(response: Any) -> dict[str, Any]:
     return {
         "output_text": getattr(response, "output_text", ""),
+        "usage": project_llm_token_usage(response),
         "output": [
             {
                 "type": getattr(item, "type", None),

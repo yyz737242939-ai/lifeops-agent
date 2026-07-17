@@ -34,6 +34,14 @@ from app.observability.logger import (
     configure_application_logging,
     ensure_application_logger,
 )
+from app.observability.logger import TraceSink
+from app.observability.telemetry import (
+    RequestTelemetry,
+    SpanLinkInput,
+    add_span_link,
+)
+from app.observability.trace_reader import FileTraceStore
+from app.observability.trace_vocabulary import SpanLinkType, TraceStatus
 from app.orchestration.graph import RuntimeOrchestrator
 from app.planning.controller import PlanController
 from app.planning.models import PlanCommand, PlanningLimits
@@ -105,25 +113,30 @@ class RuntimeService:
     def handle(self, request: RuntimeRequest) -> RuntimeResult:
         """Run one request through authorization and direct Tool execution."""
 
-        trace = OptionalLogAppender(self._build_event_appender(request))
-        llm_log = self._build_llm_log(request)
+        trace = self._build_request_telemetry(request)
+        llm_log = self._build_llm_log(request, trace)
 
         if self._conn is None:
-            self._append_request_started(request, trace)
-            return self._handle_with_context(
-                request,
-                trace=trace,
-                llm_log=llm_log,
-            )
+            try:
+                self._append_request_started(request, trace)
+                result = self._handle_with_context(
+                    request, trace=trace, llm_log=llm_log
+                )
+            except Exception:
+                trace.finish(
+                    status=TraceStatus.ERROR,
+                    error_code="runtime.orchestration_failed",
+                )
+                raise
+            self._finish_request_telemetry(trace, result)
+            return result
 
         insert_run_record(self._conn, request)
         self._conn.commit()
         try:
             self._append_request_started(request, trace)
             result = self._handle_with_context(
-                request,
-                trace=trace,
-                llm_log=llm_log,
+                request, trace=trace, llm_log=llm_log
             )
         except Exception:
             self._conn.rollback()
@@ -131,13 +144,22 @@ class RuntimeService:
                 self._conn, request.run_id, "runtime.orchestration_failed"
             )
             self._conn.commit()
+            trace.finish(
+                status=TraceStatus.ERROR,
+                error_code="runtime.orchestration_failed",
+            )
             raise
         try:
             finish_run_record(self._conn, result)
             self._conn.commit()
+            self._finish_request_telemetry(trace, result)
             return result
         except Exception:
             self._conn.rollback()
+            trace.finish(
+                status=TraceStatus.ERROR,
+                error_code="runtime.persistence_failed",
+            )
             raise
 
     def close(self) -> None:
@@ -153,40 +175,52 @@ class RuntimeService:
     ) -> RuntimeResult:
         """Run one structured plan command with an explicit goal request."""
 
-        trace = OptionalLogAppender(self._build_event_appender(request))
-        llm_log = self._build_llm_log(request)
+        trace = self._build_request_telemetry(request)
+        self._add_plan_continuation(trace, command)
+        llm_log = self._build_llm_log(request, trace)
         if self._conn is None:
-            self._append_request_started(request, trace)
-            return self._handle_plan_command_with_context(
-                command,
-                request,
-                trace=trace,
-                llm_log=llm_log,
-            )
+            try:
+                self._append_request_started(request, trace)
+                result = self._handle_plan_command_with_context(
+                    command, request, trace=trace, llm_log=llm_log
+                )
+            except Exception:
+                trace.finish(
+                    status=TraceStatus.ERROR,
+                    error_code="runtime.orchestration_failed",
+                )
+                raise
+            self._finish_request_telemetry(trace, result)
+            return result
+
         insert_run_record(self._conn, request)
         self._conn.commit()
         try:
             self._append_request_started(request, trace)
             result = self._handle_plan_command_with_context(
-                command,
-                request,
-                trace=trace,
-                llm_log=llm_log,
+                command, request, trace=trace, llm_log=llm_log
             )
             finish_run_record(self._conn, result)
             self._conn.commit()
+            self._finish_request_telemetry(trace, result)
             return result
         except Exception:
             self._conn.rollback()
-            fail_run_record(self._conn, request.run_id, "runtime.orchestration_failed")
+            fail_run_record(
+                self._conn, request.run_id, "runtime.orchestration_failed"
+            )
             self._conn.commit()
+            trace.finish(
+                status=TraceStatus.ERROR,
+                error_code="runtime.orchestration_failed",
+            )
             raise
 
     def _handle_core(
         self,
         request: RuntimeRequest,
         *,
-        trace: OptionalLogAppender,
+        trace: TraceSink,
         llm_log: RequestLlmLog | None,
         context_assembly: ContextAssembly | None = None,
     ) -> RuntimeResult:
@@ -244,7 +278,7 @@ class RuntimeService:
         self,
         request: RuntimeRequest,
         *,
-        trace: OptionalLogAppender,
+        trace: TraceSink,
         llm_log: RequestLlmLog | None,
     ) -> RuntimeResult:
         prepared = self._prepare_context(
@@ -273,7 +307,7 @@ class RuntimeService:
         command: PlanCommand,
         request: RuntimeRequest,
         *,
-        trace: OptionalLogAppender,
+        trace: TraceSink,
         llm_log: RequestLlmLog | None,
         context_assembly: ContextAssembly | None = None,
     ) -> RuntimeResult:
@@ -304,7 +338,7 @@ class RuntimeService:
         command: PlanCommand,
         request: RuntimeRequest,
         *,
-        trace: OptionalLogAppender,
+        trace: TraceSink,
         llm_log: RequestLlmLog | None,
     ) -> RuntimeResult:
         content = json.dumps(
@@ -349,7 +383,7 @@ class RuntimeService:
         query_text: str,
         query_origin: ContextQueryOrigin,
         llm_log: RequestLlmLog | None,
-        trace: OptionalLogAppender,
+        trace: TraceSink,
     ) -> ContextAssembly | RuntimeResult | None:
         if self._conversation_repository is None or self._context_assembler is None:
             return None
@@ -421,7 +455,7 @@ class RuntimeService:
         request: RuntimeRequest,
         result: RuntimeResult,
         *,
-        trace: OptionalLogAppender,
+        trace: TraceSink,
     ) -> None:
         """Persist only the user-visible RuntimeResult after orchestration completes."""
 
@@ -524,7 +558,7 @@ class RuntimeService:
     @staticmethod
     def _append_context_failure(
         result: RuntimeResult,
-        trace: OptionalLogAppender,
+        trace: TraceSink,
     ) -> None:
         trace.append(
             "runtime.run.failed",
@@ -559,15 +593,71 @@ class RuntimeService:
 
         return append_trace
 
-    def _build_llm_log(self, request: RuntimeRequest) -> RequestLlmLog | None:
+    def _build_request_telemetry(self, request: RuntimeRequest) -> RequestTelemetry:
+        session_log = (
+            self._ensure_session_log(request) if self._log_root is not None else None
+        )
+        return RequestTelemetry(
+            run_id=request.run_id,
+            session_id=request.session_id,
+            turn_id=request.turn_id,
+            legacy_sink=OptionalLogAppender(self._build_event_appender(request)),
+            exporter=session_log.trace_exporter if session_log is not None else None,
+            annotation_sink=session_log.annotation_sink if session_log is not None else None,
+        )
+
+    def _build_llm_log(
+        self, request: RuntimeRequest, telemetry: RequestTelemetry
+    ) -> RequestLlmLog | None:
         if self._log_root is None:
             return None
-        return RequestLlmLog(self._ensure_session_log(request).llm_log, request)
+        return RequestLlmLog(
+            self._ensure_session_log(request).llm_log, request, telemetry
+        )
+
+    def _add_plan_continuation(
+        self,
+        telemetry: RequestTelemetry,
+        command: PlanCommand,
+    ) -> None:
+        if self._log_root is None or command.plan_id is None:
+            return
+        try:
+            preview_trace_id = FileTraceStore(
+                self._log_root
+            ).find_plan_preview_trace_id(command.plan_id)
+            if preview_trace_id is None:
+                return
+            add_span_link(
+                telemetry,
+                SpanLinkInput(
+                    target_trace_id=preview_trace_id,
+                    link_type=SpanLinkType.PLAN_CONTINUATION,
+                    attributes={
+                        "lifeops.plan.id": command.plan_id,
+                        "lifeops.plan.revision": command.revision,
+                    },
+                ),
+            )
+        except Exception:
+            self._logger.error(
+                "plan continuation trace lookup failed plan_id=%s",
+                command.plan_id,
+            )
+
+    @staticmethod
+    def _finish_request_telemetry(
+        telemetry: RequestTelemetry, result: RuntimeResult
+    ) -> None:
+        telemetry.finish(
+            status=TraceStatus.ERROR if result.error_code else TraceStatus.OK,
+            error_code=result.error_code,
+        )
 
     def _append_request_started(
         self,
         request: RuntimeRequest,
-        trace: OptionalLogAppender,
+        trace: TraceSink,
     ) -> None:
         trace.append("runtime.run.started")
 

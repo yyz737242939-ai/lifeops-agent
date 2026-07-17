@@ -10,7 +10,7 @@ from typing import Any
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from app.observability.logger import LlmInteractionSink
+from app.observability.logger import LlmInteractionSink, project_llm_token_usage
 from app.planning.errors import PlanContractError, PlanningError
 from app.planning.lifecycle import validate_plan_draft
 from app.planning.models import (
@@ -242,7 +242,10 @@ class OpenAIPlannerModelClient:
             raise PlanningError(
                 "Planner provider request failed.", code="plan_generation_failed"
             ) from exc
-        response_payload = {"output_text": getattr(response, "output_text", "")}
+        response_payload = {
+            "output_text": getattr(response, "output_text", ""),
+            "usage": project_llm_token_usage(response),
+        }
         try:
             result = parse_plan_draft(response_payload["output_text"], planner_input)
         except PlanContractError as exc:

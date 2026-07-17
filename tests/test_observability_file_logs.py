@@ -4,14 +4,40 @@ import logging
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from app.observability.events import LogLlmInteraction, LogTraceEvent
 from app.observability.file_logs import RequestLlmLog, SessionLogWriter
 from app.runtime.models import RuntimeRequest
-from app.observability.logger import OptionalLogAppender, configure_application_logging
+from app.observability.logger import (
+    OptionalLogAppender,
+    configure_application_logging,
+    project_llm_token_usage,
+)
 
 
 class ObservabilityFileLogsTest(unittest.TestCase):
+    def test_provider_token_usage_projection_is_optional_safe_metadata(self) -> None:
+        self.assertEqual(
+            project_llm_token_usage(
+                SimpleNamespace(
+                    usage=SimpleNamespace(
+                        input_tokens=11,
+                        output_tokens=4,
+                        total_tokens=15,
+                    )
+                )
+            ),
+            {"input_tokens": 11, "output_tokens": 4, "total_tokens": 15},
+        )
+        self.assertEqual(project_llm_token_usage(SimpleNamespace()), {})
+        self.assertEqual(
+            project_llm_token_usage(
+                {"usage": {"prompt_tokens": 7, "completion_tokens": 2}}
+            ),
+            {"input_tokens": 7, "output_tokens": 2},
+        )
+
     def test_request_llm_log_assigns_ordered_request_identity(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             session = SessionLogWriter.create(tmpdir, session_id="session_llm")

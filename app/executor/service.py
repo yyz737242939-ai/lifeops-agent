@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from langgraph.graph.state import CompiledStateGraph
 
+from app.common.ids import new_id
 from app.executor.adapters import (
     EmptyExecutorContextProvider,
     EmptyExecutorMemoryProvider,
@@ -35,6 +36,8 @@ from app.executor.ports import (
 )
 from app.executor.state import create_executor_state
 from app.observability.logger import LlmInteractionSink, TraceSink
+from app.observability.telemetry import add_span_event, optional_span
+from app.observability.trace_vocabulary import LifeOpsSpanKind
 from app.runtime.models import RuntimeRequest
 from app.skills.models import PromptContribution
 from app.tools.models import AllowedToolSet, ToolCall, ToolEffect, ToolResult
@@ -81,18 +84,27 @@ class ReactExecutor:
         context_provider: ExecutorContextProvider | None = None,
         memory_provider: ExecutorMemoryProvider | None = None,
     ) -> ExecutorResult:
-        return self._execute(
-            request,
-            prompt_contributions,
-            allowed_tools,
-            execution_scope,
+        with optional_span(
             trace,
-            llm_log,
-            plan_step_input=None,
-            limits=self._limits,
-            context_provider=context_provider,
-            memory_provider=memory_provider,
-        )
+            name="executor.invoke",
+            kind=LifeOpsSpanKind.EXECUTOR,
+            attributes={
+                "lifeops.executor.invocation_id": new_id("execinv"),
+                "lifeops.runtime.run_id": request.run_id,
+            },
+        ):
+            return self._execute(
+                request,
+                prompt_contributions,
+                allowed_tools,
+                execution_scope,
+                trace,
+                llm_log,
+                plan_step_input=None,
+                limits=self._limits,
+                context_provider=context_provider,
+                memory_provider=memory_provider,
+            )
 
     def execute_step(
         self,
@@ -112,18 +124,30 @@ class ReactExecutor:
         effective_limits = ExecutionLimits(
             max_steps=min(self._limits.max_steps, step_input.max_steps)
         )
-        return self._execute(
-            request,
-            prompt_contributions,
-            allowed_tools,
-            execution_scope,
+        with optional_span(
             trace,
-            llm_log,
-            plan_step_input=step_input,
-            limits=effective_limits,
-            context_provider=context_provider,
-            memory_provider=memory_provider,
-        )
+            name="executor.invoke_plan_step",
+            kind=LifeOpsSpanKind.EXECUTOR,
+            attributes={
+                "lifeops.executor.invocation_id": new_id("execinv"),
+                "lifeops.runtime.run_id": request.run_id,
+                "lifeops.plan.id": step_input.plan_id,
+                "lifeops.plan.revision": step_input.revision,
+                "lifeops.plan.step.id": step_input.step_id,
+            },
+        ):
+            return self._execute(
+                request,
+                prompt_contributions,
+                allowed_tools,
+                execution_scope,
+                trace,
+                llm_log,
+                plan_step_input=step_input,
+                limits=effective_limits,
+                context_provider=context_provider,
+                memory_provider=memory_provider,
+            )
 
     def _execute(
         self,
@@ -221,10 +245,23 @@ class ReactExecutor:
     ) -> ExecutorResult:
         try:
             self._feedback_sink.record(result, plan_step=plan_step)
+            add_span_event(
+                trace,
+                "execution.feedback.observed",
+                {
+                    "executor.status": result.status.value,
+                    "executor.stop_reason": result.stop_reason.value,
+                },
+            )
         except Exception:
             _trace_hook_failure(trace, "feedback")
         try:
             self._recovery_hook.on_stop(result, plan_step=plan_step)
+            add_span_event(
+                trace,
+                "recovery.stop.observed",
+                {"executor.stop_reason": result.stop_reason.value},
+            )
         except Exception:
             _trace_hook_failure(trace, "recovery")
         if trace is not None:

@@ -23,7 +23,7 @@ from app.context.models import (
     ConversationSummary,
     ConversationTurn,
 )
-from app.observability.logger import LlmInteractionSink
+from app.observability.logger import LlmInteractionSink, project_llm_token_usage
 
 
 CONTEXT_SUMMARY_SCHEMA = {
@@ -146,7 +146,10 @@ class OpenAIContextSummarizer:
                 "Context summary provider request failed.",
                 code=ContextErrorCode.SUMMARY_PROVIDER_FAILED,
             ) from exc
-        response_payload = {"output_text": getattr(response, "output_text", "")}
+        response_payload = {
+            "output_text": getattr(response, "output_text", ""),
+            "usage": project_llm_token_usage(response),
+        }
         try:
             output = parse_context_summary(
                 response_payload["output_text"],

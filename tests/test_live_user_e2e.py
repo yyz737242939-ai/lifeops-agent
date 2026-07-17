@@ -70,6 +70,12 @@ class LiveUserE2ETest(unittest.TestCase):
             self.assertEqual(env.count("memory_index"), 0)
             self.assertTrue(env.llm_rows())
             self.assertTrue(env.application_logs())
+            _assert_shared_trace(
+                self,
+                env,
+                request.run_id,
+                required_span_kinds={"RUNTIME", "LLM", "TOOL", "GUARDRAIL"},
+            )
 
     def test_02_real_plan_preview_executes_research_then_saved_trip_read(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -152,6 +158,30 @@ class LiveUserE2ETest(unittest.TestCase):
                     (preview.tool_result["plan_id"],),
                 ),
                 "completed",
+            )
+            preview_trace_id = _assert_shared_trace(
+                self,
+                env,
+                preview.run_id,
+                required_span_kinds={"RUNTIME", "PLANNER", "LLM"},
+            )
+            confirm_trace_id = _assert_shared_trace(
+                self,
+                env,
+                result.run_id,
+                required_span_kinds={"RUNTIME", "PLANNER", "EXECUTOR", "LLM", "TOOL"},
+            )
+            continuation_links = [
+                row
+                for row in env.trace_rows()
+                if row["record_type"] == "span_link"
+                and row["source_trace_id"] == confirm_trace_id
+                and row["link_type"] == "plan_continuation"
+            ]
+            self.assertEqual(len(continuation_links), 1)
+            self.assertEqual(
+                continuation_links[0]["target_trace_id"],
+                preview_trace_id,
             )
 
     def test_03_real_context_summary_and_restart_preserve_markers(self) -> None:
@@ -453,6 +483,9 @@ class _LiveEnvironment:
     def llm_rows(self) -> list[dict]:
         return _read_jsonl(self.log_root, "llm.jsonl")
 
+    def trace_rows(self) -> list[dict]:
+        return _read_jsonl(self.log_root, "traces.jsonl")
+
     def application_logs(self) -> list[Path]:
         return list(self.log_root.rglob("application.log"))
 
@@ -461,7 +494,7 @@ def _seed_long_conversation(
     env: _LiveEnvironment,
     old_marker: str,
     recent_marker: str,
-) -> None:
+) -> str:
     repository = JsonlConversationRepository(env.root / "conversations")
     contents = (
         f"My old exact session marker is {old_marker}.",
@@ -553,6 +586,70 @@ def _tool_names(events: list[dict], event_type: str) -> tuple[str, ...]:
         for row in events
         if row["event_type"] == event_type
     )
+
+
+def _assert_shared_trace(
+    test: unittest.TestCase,
+    env: _LiveEnvironment,
+    run_id: str,
+    *,
+    required_span_kinds: set[str],
+) -> None:
+    rows = env.trace_rows()
+    trace_records = [
+        row
+        for row in rows
+        if row["record_type"] == "trace" and row["run_id"] == run_id
+    ]
+    test.assertEqual(len(trace_records), 1)
+    trace_id = trace_records[0]["trace_id"]
+    spans = [
+        row
+        for row in rows
+        if row["record_type"] == "span" and row["trace_id"] == trace_id
+    ]
+    test.assertTrue(required_span_kinds.issubset({row["lifeops_span_kind"] for row in spans}))
+    llm_spans = {
+        row["span_id"]: row for row in spans if row["lifeops_span_kind"] == "LLM"
+    }
+    test.assertTrue(llm_spans)
+    test.assertTrue(
+        all(
+            span["attributes"].get("llm.provider")
+            and span["attributes"].get("llm.model")
+            for span in llm_spans.values()
+        )
+    )
+    usage_by_sequence = {
+        row["seq"]: row["response"].get("usage", {})
+        for row in env.llm_rows()
+        if row["run_id"] == run_id and isinstance(row.get("response"), dict)
+    }
+    for span in llm_spans.values():
+        sequence = span["attributes"]["llm.interaction.sequence"]
+        usage = usage_by_sequence.get(sequence, {})
+        if usage:
+            test.assertEqual(
+                span["attributes"].get("llm.usage.total_tokens"),
+                usage.get("total_tokens"),
+            )
+    llm_artifacts = [
+        row
+        for row in rows
+        if row["record_type"] == "artifact_reference"
+        and row["trace_id"] == trace_id
+        and row["artifact_type"] == "llm_interaction"
+    ]
+    test.assertEqual(len(llm_artifacts), len(llm_spans))
+    test.assertTrue(
+        all(
+            row["span_id"] in llm_spans
+            and row["sensitivity"] == "sensitive"
+            and row["safe_reference"].startswith("llm.jsonl#id=logllm_")
+            for row in llm_artifacts
+        )
+    )
+    return trace_id
 
 
 def _result_debug(result, env: _LiveEnvironment) -> str:

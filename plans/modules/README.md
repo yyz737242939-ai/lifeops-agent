@@ -17,7 +17,7 @@
 - `PLANNER_PLAN.md`
 - `CONTEXT_MEMORY_PLAN.md`（Stage 9A/9B go；Stage 9 已关闭）
 - `LIVE_USER_E2E_PLAN.md`（Stage 9 后整体验收；真实用户 confirmation 与 5 个 live LLM E2E）
-- `TRACE_INSPECTION_EVAL_STANDARD_PLAN.md`（Feedback / Recovery / Inspector / Eval / DAG 共享 Trace 与 Runtime reporting 标准）
+- `TRACE_INSPECTION_EVAL_STANDARD_PLAN.md`（步骤 1-16 已完成；shared-standard gate 为 `go`）
 - `RECOVERY_PLAN.md`
 - `INSPECTOR_PLAN.md`
 - `EVAL_HARNESS_PLAN.md`

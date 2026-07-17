@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 import logging
 import os
 from collections.abc import Mapping, Sequence
@@ -12,7 +13,11 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.observability.logger import LlmInteractionSink, TraceSink
+from app.observability.logger import (
+    LlmInteractionSink,
+    TraceSink,
+    project_llm_token_usage,
+)
 from app.runtime.models import RuntimeRequest
 from app.skills.errors import SkillSelectionError
 from app.skills.models import SkillDefinition, SkillSelection
@@ -97,8 +102,10 @@ class SkillSelectionClient:
             "temperature": 0,
         }
         content: str | None = None
+        usage: dict[str, int] = {}
         try:
             response = self._client.chat.completions.create(**provider_request)
+            usage = project_llm_token_usage(response)
             content = response.choices[0].message.content
             if not content:
                 raise SkillSelectionError(
@@ -121,7 +128,7 @@ class SkillSelectionClient:
                 llm_log,
                 self._model,
                 provider_request,
-                {"content": content},
+                {"content": content, "usage": usage},
                 status="failed",
                 error_code="skill_selection_invalid_provider_output",
             )
@@ -143,7 +150,7 @@ class SkillSelectionClient:
             llm_log,
             self._model,
             provider_request,
-            {"content": content},
+            {"content": content, "usage": usage},
         )
         return parsed.model_dump()
 
@@ -160,10 +167,21 @@ def select_skills(
 
     try:
         metadata = _validate_metadata(skill_metadata)
-        if llm_log is None:
-            raw = llm.select(request, metadata)
-        else:
+        supports_llm_log = False
+        if llm_log is not None:
+            try:
+                inspect.signature(llm.select).bind(
+                    request,
+                    metadata,
+                    llm_log=llm_log,
+                )
+                supports_llm_log = True
+            except TypeError:
+                pass
+        if supports_llm_log:
             raw = llm.select(request, metadata, llm_log=llm_log)
+        else:
+            raw = llm.select(request, metadata)
         selection = _validate_selection(raw, metadata)
     except Exception as exc:
         if trace is not None:

@@ -10,7 +10,7 @@ from typing import Any
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from app.observability.logger import LlmInteractionSink
+from app.observability.logger import LlmInteractionSink, project_llm_token_usage
 from app.planning.errors import PlanContractError, PlanningRouteError
 from app.planning.models import (
     DirectRoute,
@@ -145,7 +145,10 @@ class OpenAIPlanningRouteClient:
             raise PlanningRouteError(
                 "Planning route provider request failed.", code="planning_route_failed"
             ) from exc
-        response_payload = {"output_text": getattr(response, "output_text", "")}
+        response_payload = {
+            "output_text": getattr(response, "output_text", ""),
+            "usage": project_llm_token_usage(response),
+        }
         try:
             decision = parse_planning_route(response_payload["output_text"])
         except PlanContractError as exc:
