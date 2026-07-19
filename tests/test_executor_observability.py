@@ -83,6 +83,11 @@ class ExecutorObservabilityTest(unittest.TestCase):
             [item[0] for item in trace.events].count("tool.call.completed"), 1
         )
         self.assertEqual(feedback.items, [result.observations[0], result])
+        self.assertEqual(feedback.run_ids, ["run_test", "run_test"])
+        self.assertEqual(len(set(feedback.executor_invocation_ids)), 1)
+        self.assertTrue(feedback.executor_invocation_ids[0])
+        self.assertEqual(feedback.source_span_ids, [None, None])
+        self.assertEqual(feedback.tool_effects, [ToolEffect.READ, None])
         self.assertEqual(recovery.results, [result])
 
     def test_hook_failures_preserve_result_and_emit_safe_diagnostics(self) -> None:
@@ -111,7 +116,16 @@ class RecordingTrace:
 
 
 class _ExplodingFeedbackSink:
-    def record(self, step_or_result, *, plan_step=None) -> None:
+    def record(
+        self,
+        step_or_result,
+        *,
+        run_id=None,
+        executor_invocation_id=None,
+        source_span_id=None,
+        tool_effect=None,
+        plan_step=None,
+    ) -> None:
         raise RuntimeError("private-hook-path")
 
 

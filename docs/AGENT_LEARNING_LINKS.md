@@ -366,6 +366,14 @@ LifeOps 自研 runtime
 
 ## Stage 11A：Inspector / Runtime Debugger
 
+### 不可变 query / view contract
+
+- [Python `dataclasses`](https://docs.python.org/3/library/dataclasses.html)
+  学习重点：用`frozen=True`定义只读的InspectionTarget/Query/Result value objects，并在`__post_init__`冻结跨字段不变量；这只是Python层的不可变契约，不会把Inspector结果升级为执行事实。
+
+- [Python `enum.StrEnum`](https://docs.python.org/3/library/enum.html#enum.StrEnum)
+  学习重点：为view和稳定validation code使用同时具备字符串互操作与有限取值约束的枚举；外部错误判断依赖stable code，不依赖可能调整的message文本。
+
 ### Trace navigation 与 details view
 
 - [LangSmith View traces](https://docs.langchain.com/langsmith/view-traces)

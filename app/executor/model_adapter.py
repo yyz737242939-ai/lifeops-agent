@@ -17,6 +17,7 @@ from app.executor.errors import (
 from app.executor.models import (
     ExecutorDecision,
     ExecutorModelInput,
+    FinalAnswerActionClaim,
     FinalAnswerDecision,
     GoalNotAchievedDecision,
     PlanStepDependencyResult,
@@ -34,8 +35,13 @@ concrete, and warm.
 For each step, return exactly one of the following:
 - One supplied function call when a tool is needed to inspect data, obtain
   external information, or perform an action.
-- One non-empty final answer when no tool is needed or the available
-  observations are sufficient.
+- Call `lifeops_submit_final_answer` when no Tool is needed or the available
+  observations are sufficient. After any successful Tool Observation, include
+  exactly one structured action claim for each successful call whose result is
+  used or described by the answer, even when the prose only presents returned
+  facts and does not literally say "the Tool succeeded". Use an empty claim
+  list only when this Executor invocation has no Tool Observation, or when all
+  observed Tool actions failed and the answer only explains those failures.
 
 Tool and evidence rules:
 - Inspect the supplied Context and Memory contributions before choosing a tool.
@@ -46,11 +52,18 @@ Tool and evidence rules:
   Never call a Memory tool to look up a Profile fact.
 - Use only the supplied tools. Never invent a tool or return parallel calls.
 - When returning a function call, return only that call. Do not also emit a
-  message, progress update, preamble, explanation, or output_text. Text is a
-  final answer only when no function call is returned.
+  progress update, preamble, explanation, or output_text. The final user-facing
+  message belongs inside `lifeops_submit_final_answer`.
 - Treat Tool Observations as the source of truth for tool execution. Never
   claim that an action, fetch, or write succeeded unless an observation says
   it succeeded.
+- In an execution claim, copy `call_id` exactly from the matching current
+  observation. `evidence_refs` may contain only non-null `reference` strings
+  copied exactly from that observation's `evidence` entries. Never invent an
+  evidence reference or use an observation id, evidence summary, call id, URL
+  from output, or list position as one. For a successful READ with no non-null
+  evidence reference, use an empty `evidence_refs` list. A WRITE success claim
+  requires a matching non-null evidence reference and must otherwise be omitted.
 - Base the final answer on available observations. Never invent missing facts,
   identifiers, dates, prices, availability, or evidence.
 - After a successful WRITE observation satisfies the current explicit request,
@@ -77,6 +90,7 @@ State and safety rules:
 """.strip()
 
 _GOAL_NOT_ACHIEVED_CONTROL = "report_goal_not_achieved"
+_FINAL_ANSWER_CONTROL = "lifeops_submit_final_answer"
 
 
 class OpenAIExecutorModelClient:
@@ -121,6 +135,7 @@ class OpenAIExecutorModelClient:
             }
             for item in model_input.tool_catalog
         )
+        tools = (*tools, _final_answer_tool())
         instructions = EXECUTOR_SYSTEM_PROMPT
         if model_input.plan_step is not None:
             tools = (
@@ -235,6 +250,39 @@ def _parse_decision(
                 return GoalNotAchievedDecision(arguments["reason_code"])
             except (AttributeError, TypeError, ValueError, json.JSONDecodeError) as exc:
                 raise _invalid_action() from exc
+        if getattr(selected, "name", None) == _FINAL_ANSWER_CONTROL:
+            try:
+                arguments = json.loads(selected.arguments)
+                if not isinstance(arguments, dict) or set(arguments) != {
+                    "message",
+                    "execution_claims",
+                }:
+                    raise ValueError
+                claims_payload = arguments["execution_claims"]
+                if not isinstance(claims_payload, list):
+                    raise ValueError
+                claims = tuple(
+                    FinalAnswerActionClaim(
+                        claim_id=item["claim_id"],
+                        call_id=item["call_id"],
+                        evidence_refs=tuple(item["evidence_refs"]),
+                    )
+                    for item in claims_payload
+                    if isinstance(item, dict)
+                    and set(item) == {"claim_id", "call_id", "evidence_refs"}
+                    and isinstance(item["evidence_refs"], list)
+                )
+                if len(claims) != len(claims_payload):
+                    raise ValueError
+                return FinalAnswerDecision(arguments["message"], claims)
+            except (
+                AttributeError,
+                KeyError,
+                TypeError,
+                ValueError,
+                json.JSONDecodeError,
+            ) as exc:
+                raise _invalid_action() from exc
         allowed_names = {item["name"] for item in model_input.tool_catalog}
         if getattr(selected, "name", None) not in allowed_names:
             raise _invalid_action()
@@ -263,6 +311,42 @@ def _invalid_action() -> InvalidExecutorModelActionError:
         "Executor model returned an invalid action.",
         code="executor_invalid_model_action",
     )
+
+
+def _final_answer_tool() -> dict[str, Any]:
+    return {
+        "type": "function",
+        "name": _FINAL_ANSWER_CONTROL,
+        "description": (
+            "Return the final user-facing answer and structured claims for any "
+            "Tool execution success asserted by that answer."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "message": {"type": "string"},
+                "execution_claims": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "claim_id": {"type": "string"},
+                            "call_id": {"type": "string"},
+                            "evidence_refs": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                        },
+                        "required": ["claim_id", "call_id", "evidence_refs"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["message", "execution_claims"],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    }
 
 
 def _model_payload(model_input: ExecutorModelInput) -> dict[str, Any]:

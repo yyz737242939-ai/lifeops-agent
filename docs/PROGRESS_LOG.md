@@ -29,6 +29,14 @@
 - 共享Trace标准步骤9-13已完成：新增独立derived SQLite index与freshness/file fallback、统一TraceStore/TraceReader/immutable TraceGraph、独立`app/runtime_reporting` typed Ports/models/builder、deterministic sample rule/grader，以及serial diamond shared fixture。Diamond明确parent-child containment与`depends_on` dependency不同，保留B evidence、C failed、D blocked且D零Tool attempt；不实现scheduler。新增及架构focused tests `44/44`、统一离线回归`610/610`通过（`20`项显式live/platform gates跳过）。
 - 共享Trace标准步骤14-16与实现审计已完成：Planning preview PLANNER span在结束时补齐canonical plan identity，confirm root以`plan_continuation`链接preview；`FileTraceStore`从canonical files或derived index只读解析preview，不修改PlanRun/PlanStep/GraphState。真实LLM交互使用唯一`LogLlmInteraction.id`作为sensitive artifact reference，并在provider提供时投影安全input/output/total token counts。审计同时修正optional instrumentation异常可能反转业务结果、旧Skill fake因`llm_log`扩签受侵入及`file_logs`不必要依赖RuntimeRequest的问题。focused/architecture回归`99/99`、统一离线回归`613/613`通过（`20`项显式live/platform gates跳过），compileall、diff与依赖扫描通过；真实Direct READ与Planning preview/confirm smoke均通过。Recovery/Eval真实smoke归各自未实施产品模块gate，共享标准最终结论为`go`。
 
+- Stage 10 Execution Feedback / Recovery 步骤1-15已完成：新增immutable Feedback/Recovery models、Direct/Planning builder、request-local collector、structured claim validator与deterministic fallback、V5 Feedback header/action/evidence和V6 historical PlanStep snapshot、SQLite repository、RuntimeOutcomeFinalizer、typed RuntimeReport fact sources、显式RecoveryRuntime与`recover-last`/`recover <run_id>` CLI。Runtime在completed event、assistant turn和run record前完成validation与best-effort persistence；Feedback/Recovery不改变ToolResult、Plan lifecycle、Domain facts或Policy权限。
+- Stage 10步骤16真实模型smoke已完成：Direct Research MCP success、Planning preview/confirm completed、Travel provider failure + confirmation denial、Planning success后failure/replan的partial路径均通过，并逐条验证shared trace identity、LLM/Tool topology、Feedback ArtifactReference、durable validation、restart deterministic Recovery、`recovery_of`和Recovery零Tool/Policy/confirmation/Executor/Planner span。smoke修正single Tool READ误路由Planning、模型漏报/伪造claim evidence reference、最终Plan completed覆盖早期action failure三处真实adapter偏差。
+- Stage 10最终统一离线回归`696/696`通过（`21`项环境开关测试跳过），compiled Recovery E2E `10/10`、compileall、diff和依赖审计通过；未引入checkpoint/replay/resume/rollback/time-travel，未读取或修改`legacy_v0/`。Stage 10结论为`go`并关闭，下一阶段为Stage 11 Inspector / Eval / DAG。
+
+- Stage 11A Inspector / Runtime Debugger V1已于2026-07-17完成并关闭：新增独立只读`app/inspection`、immutable query/result models、stable validation/service errors、InspectorService、summary/tree/timeline/details/graph/evidence/annotations/integrity/diagnose text/JSON views、10条deterministic diagnosis rules、derived index/file fallback、metadata-only artifact details、optional shared annotation persistence和独立`main.py inspect` dispatch。Inspector只消费shared `TraceReader + RuntimeReportBuilder + RuntimeReport`，不解析raw JSONL、不拥有storage或执行事实、不触发Tool/model/Policy/Planner/Executor/Recovery。
+- Inspector compiled E2E `10/10`、Inspector/shared compatibility slice `56/56`通过；统一离线discovery记录`730`项，其中`709`项通过、`21`项按既有环境开关跳过，零失败/错误，完整compileall、diff与依赖审计通过。Direct、Planning、Recovery、Eval四类由当前`RequestTelemetry + FileTraceExporter`真实落盘的canonical artifacts又完成`4/4`只读smoke；现存15个历史session早于Trace Contract且没有`traces.jsonl`，未作为有效Inspector证据。
+- Stage 11A gate结论为`go`。正式serial DAG Scheduler仍未规划或实现；shared diamond fixture只冻结tree containment、`depends_on`、partial evidence和blocked语义。正式Scheduler compiled artifact改由未来DAG模块完成后执行Inspector跨模块兼容性回归，不反向阻塞已关闭的Inspector V1，也不表示整个runtime路线图的DAG项目已经完成。
+
 - Storage schema 开发基线已在 2026-07-14 从旧 V1-V8 压缩为单一 canonical V1：新空库一次建立当前 Runtime、Research、Travel 的最终表、约束和索引，不再保留开发期 `ALTER` / 临时表搬运。迁移聚焦测试 `6/6`、统一离线回归 `299/299` 与 compileall 通过；本地旧库先备份并升级到最终结构，再重标 V1，`PRAGMA integrity_check=ok` 且原有 `7` 条 run record 保留。未来真实 schema 变化从 V2 开始追加。
 
 - Stage 6 Executor 实施步骤 2 已完成：新增 `ExecutionLimits`、互斥的 model decisions、`ToolObservation` 安全投影、冻结的 status / stop reason、结构化 `ExecutorResult` 和最小 request-local `ExecutorState`；models 不保存 private reasoning，不依赖 Domain、repository、storage、LangGraph 或 provider SDK。新增 Executor models/contracts 与 Stage 5 architecture/runtime/tool/domain 公共契约共 `26/26` 通过。
@@ -119,7 +127,7 @@
 - Observability 文件日志已完成阶段 3.5 初版。
 - LangGraph Orchestration 已完成阶段 4 初版。
 - 阶段 5 的 Skill System、Tool System、Research、Travel 与稳定化步骤 1-15 均已完成，Stage 6 gate 为 `go`。
-- 阶段 6 ReAct Executor、阶段 7 Plan-and-Execute Planner、Stage 8 Research MCP 与整个 Stage 9 Context / Memory 均已完成并关闭；下一阶段为 Stage 10 Recovery / Feedback。
+- 阶段 6 ReAct Executor、阶段 7 Plan-and-Execute Planner、Stage 8 Research MCP、Stage 9 Context / Memory、Stage 10 Execution Feedback / Recovery与Stage 11A Inspector均已完成并关闭；下一施工入口为Stage 11B Eval Harness或之后独立DAG Scheduler。
 - 旧 runtime 已归档到 `legacy_v0/app/`。
 - 当前代码放在 `app/`。
 - 当前计划放在 `plans/`。
@@ -188,7 +196,7 @@ RuntimeRequest
 - `docs/ARCHITECTURE.md` 已记录 Runtime Core、Intent / Policy、LangGraph Orchestration、Skill、Tool Gateway、Guardrails 和 Domain 纵向切片边界。
 - `docs/RUNTIME_CONCEPTS.md` 已记录 Runtime Core、Intent Layer、Policy / Permission Layer、Write Safety、LangGraph Orchestrator、LangGraph vs LangChain、Observability 和 SQLite Local Persistence 学习章节。
 - `plans/modules/STORAGE_SQLITE_PLAN.md`、`plans/modules/RUNTIME_CORE_PLAN.md`、`plans/modules/INTENT_POLICY_PLAN.md`、`plans/modules/OBSERVABILITY_LOGGING_PLAN.md` 和 `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md` 已记录完成状态。
-- Stage 6、Stage 7、Stage 8 与整个 Stage 9 Context / Memory 均已关闭；下一施工模块为 Stage 10 Recovery / Feedback。
+- Stage 6、Stage 7、Stage 8、Stage 9 Context / Memory与Stage 10 Execution Feedback / Recovery均已关闭；下一施工模块为Stage 11 Inspector / Eval / DAG。
 
 当前有效测试命令：
 

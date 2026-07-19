@@ -30,8 +30,12 @@ class RuntimeReportingTest(unittest.TestCase):
                 "execution_feedback", "feedback_1", "failed",
                 {"validation.status": "failed"},
             )
+            stop_point = FactProjection(
+                "execution_stop_point", "feedback_1:stop", "failed"
+            )
             facts = RuntimeFactBundle(
                 execution_feedback=feedback,
+                stop_point=stop_point,
                 evidence_reports=(
                     EvidenceReport("execution_feedback", "evidence_1", "feedback/evidence_1"),
                 ),
@@ -44,7 +48,7 @@ class RuntimeReportingTest(unittest.TestCase):
 
             self.assertEqual(first, second)
             self.assertEqual(first.execution_feedback, feedback)
-            self.assertEqual(first.stop_point, feedback)
+            self.assertEqual(first.stop_point, stop_point)
             self.assertIn("source_conflict", first.integrity_warnings)
             self.assertEqual(len(first.executor_invocations), 1)
             self.assertEqual(len(first.tool_attempts), 1)

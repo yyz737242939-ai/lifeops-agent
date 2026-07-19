@@ -15,7 +15,7 @@ from app.executor.models import (
 )
 from app.observability.logger import LlmInteractionSink
 from app.runtime.models import RuntimeRequest
-from app.tools.models import ConfirmedAction, ToolCall, ToolDefinition
+from app.tools.models import ConfirmedAction, ToolCall, ToolDefinition, ToolEffect
 
 
 class ExecutorModelClient(Protocol):
@@ -73,6 +73,10 @@ class ExecutorFeedbackSink(Protocol):
         self,
         step_or_result: ExecutorFeedbackItem,
         *,
+        run_id: str | None = None,
+        executor_invocation_id: str | None = None,
+        source_span_id: str | None = None,
+        tool_effect: ToolEffect | None = None,
         plan_step: PlanStepExecutionInput | None = None,
     ) -> None:
         ...

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+
 from app.context.models import (
     ContextAssembly,
     ContextContributionKind,
@@ -15,7 +17,7 @@ from app.executor.models import (
     PlanStepExecutionInput,
 )
 from app.runtime.models import RuntimeRequest
-from app.tools.models import ConfirmedAction, ToolCall, ToolDefinition
+from app.tools.models import ConfirmedAction, ToolCall, ToolDefinition, ToolEffect
 
 
 class EmptyExecutorContextProvider:
@@ -139,6 +141,36 @@ class NoOpExecutorFeedbackSink:
         self,
         step_or_result: ExecutorFeedbackItem,
         *,
+        run_id: str | None = None,
+        executor_invocation_id: str | None = None,
+        source_span_id: str | None = None,
+        tool_effect: ToolEffect | None = None,
         plan_step: PlanStepExecutionInput | None = None,
     ) -> None:
         return None
+
+
+def record_executor_feedback(
+    sink,
+    item: ExecutorFeedbackItem,
+    **context,
+) -> None:
+    """Call new and legacy feedback sinks without retrying a failed sink body."""
+
+    method = sink.record
+    try:
+        parameters = inspect.signature(method).parameters.values()
+    except (TypeError, ValueError):
+        method(item, **context)
+        return
+    accepts_extra = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
+    accepted_names = {parameter.name for parameter in parameters}
+    selected = (
+        context
+        if accepts_extra
+        else {name: value for name, value in context.items() if name in accepted_names}
+    )
+    method(item, **selected)

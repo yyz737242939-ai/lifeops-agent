@@ -704,6 +704,18 @@ Derived trace index不是第四种事实源。它只复制canonical files中的�
 
 DAG的parent-child和dependency必须分开：scheduler是parent，node spans是children；`depends_on` links才表达A→B/C→D。serial diamond fixture中C失败后D为blocked，但B的成功与evidence仍保留。这个fixture验证Trace/Reader/Report表达能力，不等于已经实现scheduler、并发或恢复执行。
 
+### Execution Feedback 与解释型 Recovery
+
+Execution Feedback解决的是“这次执行安全地发生了什么”，不是“模型最后说了什么”。`ToolResult`/`ExecutionEvidence`仍是Tool与Gateway事实，`PlanRun`/`PlanStep`仍是Planner lifecycle事实；`ExecutionFeedback`把这些已完成事实投影为一次run的durable safe outcome，并保存Direct/Planning path、ordered actions、completed/failed/not-run Step、evidence source identity、validation结果和stop point。assistant final text、Trace event和Annotation都不能反推或改写成功事实。
+
+模型通过structured claim声明“哪个call或Step成功”以及“引用了哪些evidence”。validator只接受current run/session/scope内确实succeeded/completed的identity；WRITE success必须引用同action/Step的durable evidence。failed、denied、requires-confirmation、not-run、unknown、cross-scope、伪造evidence或有execution action却漏报claim都会fail-closed。fallback不会重试模型或执行Tool，只按已验证事实列出成功、失败、未执行和安全下一步。
+
+`partial`不是模糊的中间状态，而是保留局部成功的终态分类。同一run只要同时存在verified success与failed/denied/requires-confirmation/not-run fact，Feedback就是partial；已经提交的副作用和evidence不能因后续失败被抹掉，最终Plan完成也不能覆盖早先action failure。这让面试时可以清楚解释“没有全局rollback，但也没有false success”。
+
+Recovery解决的是“重启后如何解释停点”，不是恢复执行。它按session读取durable Feedback historical snapshot，构造bounded immutable RecoveryContext，再生成deterministic explanation。Recovery请求创建新的Trace，并用`recovery_of`链接source Trace；其中只有RUNTIME和RECOVERY spans，没有Tool、Policy、confirmation、Executor、Planner或Guardrail。RecoveryContext不是授权源，不会恢复旧AllowedToolSet、ToolCall、confirmation或WRITE权限。
+
+checkpoint/replay处理的是durable workflow state与重新执行：checkpoint之后的LLM/API/interrupt可能再次触发，因此还需要idempotency、pending writes和side-effect task边界。当前V1明确不承担这些能力；它用canonical outcome snapshot实现可解释、可审计、不可执行的Recovery。这是一个较小但完整的产品闭环，而不是未完成的checkpoint平台。
+
 ### 解决什么问题
 
 Observability 让 runtime 行为可以被解释和复盘。它回答“这次 run 经过了哪些阶段、哪里失败、LLM 原始请求和响应是什么”。

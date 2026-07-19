@@ -20,6 +20,8 @@ from app.memory.models import MemoryWriteContext
 from app.memory.repository import SqliteMemoryRepository
 from app.memory.service import MemoryService
 from app.planning.models import PlanCommand, PlanCommandAction
+from app.recovery.models import RecoveryOutputMode
+from app.recovery.runtime import build_recovery_runtime
 from app.runtime.bootstrap import build_runtime_service
 from app.runtime.models import RuntimeRequest, RuntimeStatus
 from app.storage.migrations import migrate
@@ -53,7 +55,11 @@ class LiveUserE2ETest(unittest.TestCase):
                 RuntimeStatus.OK,
                 msg=_result_debug(result, env),
             )
-            self.assertIn("huggingface.co/papers/", result.message.lower())
+            self.assertIn(
+                "huggingface.co/papers/",
+                result.message.lower(),
+                msg=_result_debug(result, env),
+            )
             events = env.events()
             self.assertEqual(
                 _tool_names(events, "tool.call.requested"),
@@ -70,11 +76,14 @@ class LiveUserE2ETest(unittest.TestCase):
             self.assertEqual(env.count("memory_index"), 0)
             self.assertTrue(env.llm_rows())
             self.assertTrue(env.application_logs())
-            _assert_shared_trace(
+            trace_id = _assert_shared_trace(
                 self,
                 env,
                 request.run_id,
                 required_span_kinds={"RUNTIME", "LLM", "TOOL", "GUARDRAIL"},
+            )
+            _assert_feedback_and_recovery(
+                self, env, request.run_id, trace_id, expected_path="direct"
             )
 
     def test_02_real_plan_preview_executes_research_then_saved_trip_read(self) -> None:
@@ -170,6 +179,13 @@ class LiveUserE2ETest(unittest.TestCase):
                 env,
                 result.run_id,
                 required_span_kinds={"RUNTIME", "PLANNER", "EXECUTOR", "LLM", "TOOL"},
+            )
+            _assert_feedback_and_recovery(
+                self,
+                env,
+                result.run_id,
+                confirm_trace_id,
+                expected_path="planning",
             )
             continuation_links = [
                 row
@@ -348,14 +364,13 @@ class LiveUserE2ETest(unittest.TestCase):
                     )
                 )
                 self.assertEqual(read.status, RuntimeStatus.OK, _result_debug(read, env))
-                unavailable = runtime.handle(
-                    env.request(
+                unavailable_request = env.request(
                         "Use the travel skill and call travel.search_places exactly "
                         f"once for trip_id {trip_id}, query museums, limit 3. If the "
                         "provider is unavailable, report that honestly and stop.",
                         "unavailable",
                     )
-                )
+                unavailable = runtime.handle(unavailable_request)
                 self.assertEqual(
                     unavailable.status,
                     RuntimeStatus.OK,
@@ -370,6 +385,20 @@ class LiveUserE2ETest(unittest.TestCase):
             self.assertEqual(env.count("travel_itineraries"), 0)
             events = env.events()
             self.assertIn("travel.search_places", _tool_names(events, "tool.call.failed"))
+            failure_trace_id = _assert_shared_trace(
+                self,
+                env,
+                unavailable_request.run_id,
+                required_span_kinds={"RUNTIME", "LLM", "TOOL", "GUARDRAIL"},
+            )
+            _assert_feedback_and_recovery(
+                self,
+                env,
+                unavailable_request.run_id,
+                failure_trace_id,
+                expected_path="direct",
+                expected_statuses={"failed", "partial"},
+            )
 
             denied = _ScriptedUserConfirmationProvider(())
             denied_runtime = build_runtime_service(
@@ -392,6 +421,85 @@ class LiveUserE2ETest(unittest.TestCase):
                 env.scalar("SELECT status FROM trips WHERE id = ?", (trip_id,)),
                 "active",
             )
+
+    def test_06_real_planning_partial_feedback_and_restart_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = _LiveEnvironment(Path(tmpdir), "planning_partial")
+            confirmations = _ScriptedUserConfirmationProvider(
+                ("travel.create_trip",)
+            )
+            runtime = build_runtime_service(
+                env.config_path,
+                confirmation_provider=confirmations,
+            )
+            try:
+                created = runtime.handle(
+                    env.request(
+                        "Use the travel skill and call travel.create_trip exactly "
+                        "once with title LIVE-PARTIAL-9064. Then stop.",
+                        "create",
+                    )
+                )
+                self.assertEqual(created.status, RuntimeStatus.OK, _result_debug(created, env))
+                trip_id = env.scalar(
+                    "SELECT id FROM trips WHERE title = ?",
+                    ("LIVE-PARTIAL-9064",),
+                )
+                goal = (
+                    "Use the research and travel skills for two dependent steps and "
+                    "return an execution preview before any Tool runs. First call "
+                    "research.search_papers exactly once for agent runtime. Then call "
+                    "travel.search_places exactly once for "
+                    f"trip_id {trip_id}, query museums, limit 3. The travel provider "
+                    "may be unavailable; preserve the completed research result and "
+                    "report the failed later step honestly. Do not persist results."
+                )
+                preview = runtime.handle(env.request(goal, "preview"))
+                self.assertEqual(
+                    preview.status,
+                    RuntimeStatus.REQUIRES_CONFIRMATION,
+                    _result_debug(preview, env),
+                )
+                confirm_request = env.request(goal, "confirm")
+                result = runtime.handle_plan_command(
+                    PlanCommand(
+                        "command_live_partial",
+                        preview.tool_result["plan_id"],
+                        env.session_id,
+                        preview.tool_result["revision"],
+                        PlanCommandAction.CONFIRM,
+                    ),
+                    confirm_request,
+                )
+            finally:
+                runtime.close()
+
+            trace_id = _assert_shared_trace(
+                self,
+                env,
+                confirm_request.run_id,
+                required_span_kinds={"RUNTIME", "PLANNER", "EXECUTOR", "LLM", "TOOL"},
+            )
+            _assert_feedback_and_recovery(
+                self,
+                env,
+                confirm_request.run_id,
+                trace_id,
+                expected_path="planning",
+                expected_statuses={"partial"},
+            )
+            outcomes = {
+                row[0]
+                for row in env.rows(
+                    """SELECT outcome FROM execution_feedback_plan_steps
+                       WHERE feedback_id = (
+                           SELECT id FROM execution_feedback WHERE run_id = ?
+                       )""",
+                    (confirm_request.run_id,),
+                )
+            }
+            self.assertIn("completed", outcomes)
+            self.assertTrue(outcomes.intersection({"failed", "not_run"}))
 
 
 class _ScriptedUserConfirmationProvider:
@@ -652,6 +760,73 @@ def _assert_shared_trace(
     return trace_id
 
 
+def _assert_feedback_and_recovery(
+    test: unittest.TestCase,
+    env: _LiveEnvironment,
+    run_id: str,
+    trace_id: str,
+    *,
+    expected_path: str,
+    expected_statuses: set[str] | None = None,
+) -> None:
+    feedback_rows = env.rows(
+        """SELECT trace_id, path, overall_status, validation_claim_status
+           FROM execution_feedback WHERE run_id = ?""",
+        (run_id,),
+    )
+    test.assertEqual(len(feedback_rows), 1)
+    feedback_trace_id, path, status, claim_status = feedback_rows[0]
+    test.assertEqual(feedback_trace_id, trace_id)
+    test.assertEqual(path, expected_path)
+    test.assertIn(claim_status, {"valid", "invalid"})
+    if expected_statuses is not None:
+        test.assertIn(status, expected_statuses)
+
+    source_artifacts = [
+        row
+        for row in env.trace_rows()
+        if row["record_type"] == "artifact_reference"
+        and row["trace_id"] == trace_id
+        and row["artifact_type"] == "execution_feedback"
+    ]
+    test.assertEqual(len(source_artifacts), 1)
+    test.assertEqual(source_artifacts[0]["sensitivity"], "internal")
+
+    recovery = build_recovery_runtime(env.config_path)
+    try:
+        result = recovery.explain(env.session_id, run_id)
+    finally:
+        recovery.close()
+    test.assertEqual(result.context.source_run_id, run_id)
+    test.assertEqual(result.context.source_trace_id, trace_id)
+    test.assertEqual(result.output_mode, RecoveryOutputMode.DETERMINISTIC)
+
+    rows = env.trace_rows()
+    links = [
+        row
+        for row in rows
+        if row["record_type"] == "span_link"
+        and row["link_type"] == "recovery_of"
+        and row["target_trace_id"] == trace_id
+    ]
+    test.assertEqual(len(links), 1)
+    recovery_trace_id = links[0]["source_trace_id"]
+    recovery_kinds = {
+        row["lifeops_span_kind"]
+        for row in rows
+        if row["record_type"] == "span" and row["trace_id"] == recovery_trace_id
+    }
+    test.assertEqual(recovery_kinds, {"RUNTIME", "RECOVERY"})
+    recovery_artifacts = [
+        row
+        for row in rows
+        if row["record_type"] == "artifact_reference"
+        and row["trace_id"] == recovery_trace_id
+        and row["artifact_type"] == "recovery_context"
+    ]
+    test.assertEqual(len(recovery_artifacts), 1)
+
+
 def _result_debug(result, env: _LiveEnvironment) -> str:
     events = env.events() if env.log_root.exists() else []
     llm_rows = env.llm_rows() if env.log_root.exists() else []
@@ -664,11 +839,22 @@ def _result_debug(result, env: _LiveEnvironment) -> str:
         )
         for row in llm_rows
     )
+    feedback = (
+        env.rows(
+            """SELECT overall_status, validation_claim_status,
+                      validation_output_mode, validation_reason_codes_json,
+                      validation_accepted_claim_ids_json
+               FROM execution_feedback WHERE run_id = ?""",
+            (result.run_id,),
+        )
+        if env.database_path.exists()
+        else []
+    )
     return (
         f"status={result.status.value} error={result.error_code} "
         f"tools={_tool_names(events, 'tool.call.requested')} "
         f"failed={_tool_names(events, 'tool.call.failed')} "
-        f"llm={llm_skeleton}"
+        f"llm={llm_skeleton} feedback={feedback}"
     )
 
 

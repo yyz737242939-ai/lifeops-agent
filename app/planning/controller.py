@@ -92,6 +92,7 @@ class PlanControlResult:
     steps: tuple[PlanStep, ...]
     final_message: str | None = None
     used_finalizer_fallback: bool = False
+    finalizer_output: PlanFinalizerOutput | None = None
 
 
 class PlanController:
@@ -220,6 +221,7 @@ class PlanController:
                         steps,
                         final_message=final_output.message,
                         used_finalizer_fallback=used_fallback,
+                        finalizer_output=final_output,
                     )
                 stopped = self._repository.finish_plan(
                     run.session_id,

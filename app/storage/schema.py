@@ -352,6 +352,146 @@ CREATE INDEX IF NOT EXISTS idx_memory_content_hash
 ON memory_index(content_hash);
 """
 
+V5_SCHEMA = """
+CREATE TABLE IF NOT EXISTS execution_feedback (
+    id TEXT PRIMARY KEY,
+    trace_id TEXT NOT NULL,
+    run_id TEXT NOT NULL UNIQUE,
+    session_id TEXT NOT NULL,
+    path TEXT NOT NULL CHECK (path IN ('direct', 'planning')),
+    goal_summary TEXT NOT NULL,
+    overall_status TEXT NOT NULL CHECK (
+        overall_status IN (
+            'completed', 'partial', 'failed', 'denied',
+            'requires_confirmation', 'not_run'
+        )
+    ),
+    stop_reason TEXT,
+    error_code TEXT,
+    executor_invocation_ids_json TEXT NOT NULL,
+    plan_id TEXT,
+    revision INTEGER CHECK (revision IS NULL OR revision >= 1),
+    stop_step_id TEXT,
+    validation_claim_status TEXT NOT NULL CHECK (
+        validation_claim_status IN ('valid', 'invalid')
+    ),
+    validation_output_mode TEXT NOT NULL CHECK (
+        validation_output_mode IN ('model', 'deterministic_fallback')
+    ),
+    validation_reason_codes_json TEXT NOT NULL,
+    validation_accepted_claim_ids_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    CHECK (
+        (path = 'direct' AND plan_id IS NULL AND revision IS NULL AND stop_step_id IS NULL)
+        OR
+        (path = 'planning' AND plan_id IS NOT NULL AND revision IS NOT NULL)
+    ),
+    FOREIGN KEY (run_id) REFERENCES run_records(id) ON DELETE CASCADE,
+    FOREIGN KEY (plan_id) REFERENCES plan_runs(id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_execution_feedback_session_created
+ON execution_feedback(session_id, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_execution_feedback_plan
+ON execution_feedback(plan_id, revision);
+
+CREATE TABLE IF NOT EXISTS execution_feedback_actions (
+    feedback_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL CHECK (sequence >= 1),
+    executor_invocation_id TEXT NOT NULL,
+    source_span_id TEXT NOT NULL,
+    call_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    tool_effect TEXT NOT NULL CHECK (
+        tool_effect IN ('read', 'write', 'external_read')
+    ),
+    outcome TEXT NOT NULL CHECK (
+        outcome IN ('succeeded', 'failed', 'denied', 'requires_confirmation')
+    ),
+    error_code TEXT,
+    retryable INTEGER CHECK (retryable IS NULL OR retryable IN (0, 1)),
+    plan_revision INTEGER CHECK (plan_revision IS NULL OR plan_revision >= 1),
+    plan_step_id TEXT,
+    PRIMARY KEY (feedback_id, sequence),
+    UNIQUE (feedback_id, call_id),
+    CHECK ((plan_revision IS NULL) = (plan_step_id IS NULL)),
+    FOREIGN KEY (feedback_id) REFERENCES execution_feedback(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_execution_feedback_actions_call
+ON execution_feedback_actions(call_id);
+
+CREATE TABLE IF NOT EXISTS execution_feedback_evidence (
+    feedback_id TEXT NOT NULL,
+    action_sequence INTEGER NOT NULL,
+    source_evidence_index INTEGER NOT NULL CHECK (source_evidence_index >= 0),
+    evidence_type TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    reference TEXT,
+    source_call_id TEXT NOT NULL,
+    PRIMARY KEY (feedback_id, action_sequence, source_evidence_index),
+    FOREIGN KEY (feedback_id, action_sequence)
+        REFERENCES execution_feedback_actions(feedback_id, sequence)
+        ON DELETE CASCADE
+);
+"""
+
+V6_SCHEMA = """
+CREATE TABLE IF NOT EXISTS execution_feedback_plan_steps (
+    feedback_id TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK (revision >= 1),
+    step_id TEXT NOT NULL,
+    position INTEGER NOT NULL CHECK (position >= 1),
+    objective TEXT NOT NULL,
+    expected_outcome TEXT NOT NULL,
+    original_status TEXT NOT NULL CHECK (
+        original_status IN (
+            'pending', 'running', 'completed', 'failed', 'stopped',
+            'goal_not_achieved', 'superseded', 'cancelled'
+        )
+    ),
+    outcome TEXT NOT NULL CHECK (
+        outcome IN (
+            'completed', 'failed', 'denied',
+            'requires_confirmation', 'not_run'
+        )
+    ),
+    stop_reason TEXT,
+    error_code TEXT,
+    safe_result_summary TEXT,
+    evidence_refs_json TEXT NOT NULL,
+    PRIMARY KEY (feedback_id, revision, step_id),
+    UNIQUE (feedback_id, revision, position),
+    FOREIGN KEY (feedback_id) REFERENCES execution_feedback(id) ON DELETE CASCADE
+);
+
+INSERT OR IGNORE INTO execution_feedback_plan_steps (
+    feedback_id, revision, step_id, position, objective, expected_outcome,
+    original_status, outcome, stop_reason, error_code, safe_result_summary,
+    evidence_refs_json
+)
+SELECT
+    feedback.id, step.revision, step.step_id, step.position,
+    step.objective, step.expected_outcome, step.status,
+    CASE
+        WHEN step.status = 'completed' THEN 'completed'
+        WHEN step.status = 'stopped' AND step.stop_reason = 'safety_denied'
+            THEN 'denied'
+        WHEN step.status = 'stopped' AND step.stop_reason = 'confirmation_required'
+            THEN 'requires_confirmation'
+        WHEN step.status IN ('pending', 'superseded', 'cancelled') THEN 'not_run'
+        ELSE 'failed'
+    END,
+    step.stop_reason, step.error_code, step.safe_result_summary,
+    step.evidence_refs_json
+FROM execution_feedback AS feedback
+JOIN plan_steps AS step
+  ON step.plan_id = feedback.plan_id
+ AND step.revision <= feedback.revision
+WHERE feedback.path = 'planning';
+"""
+
 MIGRATIONS = (
     SchemaMigration(
         version=1,
@@ -372,6 +512,16 @@ MIGRATIONS = (
         version=4,
         name="memory_index",
         sql=V4_SCHEMA,
+    ),
+    SchemaMigration(
+        version=5,
+        name="execution_feedback",
+        sql=V5_SCHEMA,
+    ),
+    SchemaMigration(
+        version=6,
+        name="execution_feedback_plan_step_snapshots",
+        sql=V6_SCHEMA,
     ),
 )
 

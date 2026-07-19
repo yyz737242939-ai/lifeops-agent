@@ -50,14 +50,17 @@ class FileTraceStore:
         self.log_root = Path(log_root)
         self.index_path = Path(index_path) if index_path is not None else None
         self._warnings: dict[str, tuple[str, ...]] = {}
+        self._read_sources: dict[str, str] = {}
 
     def load_records(self, trace_id: str) -> tuple[TraceRecordItem, ...]:
         indexed = self._load_index_records(trace_id)
         if indexed:
             self._warnings[trace_id] = ()
+            self._read_sources[trace_id] = "index"
             return indexed
         records, warnings = self._scan_records(trace_id)
         self._warnings[trace_id] = warnings
+        self._read_sources[trace_id] = "file"
         return records
 
     def load_annotations(self, trace_id: str) -> tuple[AnnotationRecord, ...]:
@@ -75,6 +78,11 @@ class FileTraceStore:
 
     def load_warnings(self, trace_id: str) -> tuple[str, ...]:
         return self._warnings.get(trace_id, ())
+
+    def load_source(self, trace_id: str) -> str | None:
+        """Report whether the latest canonical read used the index or files."""
+
+        return self._read_sources.get(trace_id)
 
     def find_trace_ids_by_run(self, run_id: str) -> tuple[str, ...]:
         indexed = self._index_values(

@@ -22,6 +22,55 @@ from tests.helpers import create_test_skill_service
 
 
 class ContextRuntimeLifecycleTest(unittest.TestCase):
+    def test_validated_outcome_precedes_completed_event_and_assistant_turn(self) -> None:
+        order: list[str] = []
+        repository = _Repository(order)
+        assembler = _Assembler(order)
+        orchestrator = _Orchestrator(order)
+        finalizer = _OutcomeFinalizer(order)
+        service = _service(
+            repository,
+            assembler,
+            orchestrator,
+            outcome_finalizer=finalizer,
+        )
+
+        result = service.handle(
+            RuntimeRequest("hello", "session_1", turn_id="turn_1", run_id="run_1")
+        )
+
+        self.assertEqual(result.message, "validated")
+        self.assertEqual(repository.turns[-1].content, "validated")
+        self.assertEqual(
+            order,
+            [
+                "load",
+                "append",
+                "assemble",
+                "orchestrate",
+                "finalize_outcome",
+                "load",
+                "append",
+            ],
+        )
+
+    def test_additive_finalizer_context_keeps_legacy_finalizer_compatible(self) -> None:
+        order: list[str] = []
+        repository = _Repository(order)
+        service = _service(
+            repository,
+            _Assembler(order),
+            _Orchestrator(order),
+            outcome_finalizer=_LegacyOutcomeFinalizer(order),
+        )
+
+        result = service.handle(
+            RuntimeRequest("hello", "session_1", turn_id="turn_1", run_id="run_1")
+        )
+
+        self.assertEqual(result.message, "legacy validated")
+        self.assertEqual(order.count("finalize_outcome"), 1)
+
     def test_user_turn_is_appended_then_assembled_once_before_orchestration(self) -> None:
         order: list[str] = []
         repository = _Repository(order)
@@ -290,12 +339,60 @@ class _Orchestrator:
         }
 
 
-def _service(repository, assembler, orchestrator) -> RuntimeService:
+class _OutcomeFinalizer:
+    def __init__(self, order: list[str]) -> None:
+        self.order = order
+
+    def finalize(
+        self,
+        request,
+        draft,
+        *,
+        trace_id,
+        trace=None,
+        gate_outcome=None,
+        plan_finalizer_output=None,
+    ):
+        self.order.append("finalize_outcome")
+        return RuntimeResult(
+            draft.run_id,
+            draft.session_id,
+            draft.status,
+            "validated",
+            draft.tool_result,
+            draft.error_code,
+        )
+
+
+class _LegacyOutcomeFinalizer:
+    def __init__(self, order: list[str]) -> None:
+        self.order = order
+
+    def finalize(self, request, draft, *, trace_id):
+        self.order.append("finalize_outcome")
+        return RuntimeResult(
+            draft.run_id,
+            draft.session_id,
+            draft.status,
+            "legacy validated",
+            draft.tool_result,
+            draft.error_code,
+        )
+
+
+def _service(
+    repository,
+    assembler,
+    orchestrator,
+    *,
+    outcome_finalizer=None,
+) -> RuntimeService:
     service = RuntimeService(
         create_test_skill_service(),
         conversation_repository=repository,
         context_assembler=assembler,
         context_budget=ContextBudget(100, 4, 20, 0, 0, 0, 40),
+        outcome_finalizer=outcome_finalizer,
     )
     service._orchestrator = orchestrator
     return service

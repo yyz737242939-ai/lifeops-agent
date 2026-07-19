@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import json
+import inspect
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
@@ -43,11 +44,14 @@ from app.observability.telemetry import (
 from app.observability.trace_reader import FileTraceStore
 from app.observability.trace_vocabulary import SpanLinkType, TraceStatus
 from app.orchestration.graph import RuntimeOrchestrator
+from app.orchestration.state import GraphRoute, GraphState
 from app.planning.controller import PlanController
 from app.planning.models import PlanCommand, PlanningLimits
 from app.planning.ports import PlanningRouteClient
 from app.planning.service import PlanningService
 from app.policy.service import PolicyService
+from app.recovery.finalizer import RuntimeOutcomeFinalizerPort
+from app.recovery.models import RunGateOutcome
 from app.runtime.models import RuntimeRequest, RuntimeResult, RuntimeStatus
 from app.runtime.run_store import fail_run_record, finish_run_record, insert_run_record
 from app.skills.service import SkillService
@@ -74,6 +78,7 @@ class RuntimeService:
         conversation_repository: ConversationRepository | None = None,
         context_assembler: ContextAssembler | None = None,
         context_budget: ContextBudget | None = None,
+        outcome_finalizer: RuntimeOutcomeFinalizerPort | None = None,
     ) -> None:
         self._intent_service = intent_service or IntentService()
         self._policy_service = policy_service or PolicyService()
@@ -107,6 +112,7 @@ class RuntimeService:
             max_memory_tokens=500,
             max_current_input_tokens=2000,
         )
+        self._outcome_finalizer = outcome_finalizer
         ensure_application_logger()
         self._logger = logging.getLogger("lifeops.runtime")
 
@@ -249,6 +255,13 @@ class RuntimeService:
         result = final_state["result"]
         if result is None:
             raise RuntimeError("runtime graph completed without a result.")
+        result = self._finalize_outcome(
+            request,
+            result,
+            trace,
+            gate_outcome=self._gate_outcome(final_state),
+            plan_finalizer_output=getattr(result, "plan_finalizer_output", None),
+        )
 
         if result.error_code is not None:
             trace.append(
@@ -291,6 +304,12 @@ class RuntimeService:
             trace=trace,
         )
         if isinstance(prepared, RuntimeResult):
+            prepared = self._finalize_outcome(
+                request,
+                prepared,
+                trace,
+                gate_outcome=RunGateOutcome.NOT_RUN,
+            )
             self._append_context_failure(prepared, trace)
             return prepared
         result = self._handle_core(
@@ -324,6 +343,13 @@ class RuntimeService:
         result = final_state["result"]
         if result is None:
             raise RuntimeError("plan command completed without a result.")
+        result = self._finalize_outcome(
+            request,
+            result,
+            trace,
+            gate_outcome=self._gate_outcome(final_state),
+            plan_finalizer_output=getattr(result, "plan_finalizer_output", None),
+        )
         if result.error_code is not None:
             trace.append(
                 "runtime.run.failed",
@@ -362,6 +388,12 @@ class RuntimeService:
             trace=trace,
         )
         if isinstance(prepared, RuntimeResult):
+            prepared = self._finalize_outcome(
+                request,
+                prepared,
+                trace,
+                gate_outcome=RunGateOutcome.NOT_RUN,
+            )
             self._append_context_failure(prepared, trace)
             return prepared
         result = self._handle_plan_command_core(
@@ -523,6 +555,51 @@ class RuntimeService:
                 error_code,
             )
 
+    def _finalize_outcome(
+        self,
+        request: RuntimeRequest,
+        draft: RuntimeResult,
+        trace: TraceSink,
+        *,
+        gate_outcome: RunGateOutcome | None,
+        plan_finalizer_output=None,
+    ) -> RuntimeResult:
+        if self._outcome_finalizer is None:
+            if type(draft) is RuntimeResult:
+                return draft
+            return RuntimeResult(
+                draft.run_id,
+                draft.session_id,
+                draft.status,
+                draft.message,
+                draft.tool_result,
+                draft.error_code,
+            )
+        trace_context = getattr(trace, "trace_context", None)
+        trace_id = getattr(trace_context, "trace_id", None)
+        if not isinstance(trace_id, str) or not trace_id:
+            return draft
+        return _invoke_outcome_finalizer(
+            self._outcome_finalizer,
+            request,
+            draft,
+            trace_id=trace_id,
+            trace=trace,
+            gate_outcome=gate_outcome,
+            plan_finalizer_output=plan_finalizer_output,
+        )
+
+    @staticmethod
+    def _gate_outcome(state: GraphState) -> RunGateOutcome | None:
+        if state.get("route") is GraphRoute.DENY:
+            return RunGateOutcome.DENIED
+        if state.get("route") is GraphRoute.REQUIRES_CONFIRMATION:
+            return RunGateOutcome.REQUIRES_CONFIRMATION
+        result = state.get("result")
+        if result is not None and result.error_code is not None:
+            return RunGateOutcome.NOT_RUN
+        return None
+
     @staticmethod
     def _context_report_payload(assembly: ContextAssembly) -> dict[str, Any]:
         report = assembly.report
@@ -676,3 +753,24 @@ class RuntimeService:
         configure_application_logging(session_log.session_dir)
         self._session_logs[request.session_id] = session_log
         return session_log
+
+
+def _invoke_outcome_finalizer(finalizer, request, draft, **context):
+    """Pass additive finalizer context without breaking older implementations."""
+
+    method = finalizer.finalize
+    try:
+        parameters = inspect.signature(method).parameters.values()
+    except (TypeError, ValueError):
+        return method(request, draft, **context)
+    accepts_extra = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
+    accepted_names = {parameter.name for parameter in parameters}
+    selected = (
+        context
+        if accepts_extra
+        else {name: value for name, value in context.items() if name in accepted_names}
+    )
+    return method(request, draft, **selected)

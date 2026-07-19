@@ -9,7 +9,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 
-from app.executor.adapters import NoOpExecutorFeedbackSink
+from app.executor.adapters import NoOpExecutorFeedbackSink, record_executor_feedback
 from app.executor.models import (
     ExecutionLimits,
     ExecutorContextContribution,
@@ -19,6 +19,7 @@ from app.executor.models import (
     ExecutorStatus,
     ExecutorStopReason,
     FinalAnswerDecision,
+    FinalAnswerActionClaim,
     GoalNotAchievedDecision,
     PlanStepExecutionInput,
     ToolActionDecision,
@@ -28,7 +29,7 @@ from app.executor.errors import InvalidExecutorModelActionError
 from app.executor.ports import ExecutorFeedbackSink, ExecutorModelClient
 from app.executor.routes import route_after_decision, route_after_tool
 from app.executor.state import ExecutorState
-from app.tools.models import ToolCall, ToolCallStatus, ToolResult
+from app.tools.models import ToolCall, ToolCallStatus, ToolEffect, ToolResult
 from app.observability.logger import LlmInteractionSink, TraceSink
 
 
@@ -55,6 +56,10 @@ class ExecutorGraphContext:
     feedback_sink: ExecutorFeedbackSink = field(
         default_factory=NoOpExecutorFeedbackSink
     )
+    run_id: str | None = None
+    executor_invocation_id: str | None = None
+    source_span_id: str | None = None
+    tool_effects: tuple[tuple[str, ToolEffect], ...] = ()
     trace: TraceSink | None = None
     llm_log: LlmInteractionSink | None = None
     plan_step_input: PlanStepExecutionInput | None = None
@@ -190,6 +195,7 @@ def _decide(
             status=ExecutorStatus.COMPLETED,
             stop_reason=ExecutorStopReason.FINAL_ANSWER,
             final_message=decision.message,
+            final_answer_claims=decision.action_claims,
         )
     if decision.call.tool_name in blocked_tool_names:
         return _finish_failure(
@@ -284,8 +290,14 @@ def _execute_tool(
     )
     _trace_observation(context.trace, observation)
     try:
-        context.feedback_sink.record(
-            observation, plan_step=context.plan_step_input
+        record_executor_feedback(
+            context.feedback_sink,
+            observation,
+            run_id=context.run_id,
+            executor_invocation_id=context.executor_invocation_id,
+            source_span_id=context.source_span_id,
+            tool_effect=_tool_effect(context, observation.tool_name),
+            plan_step=context.plan_step_input,
         )
     except Exception:
         _trace_hook_failure(context.trace, "feedback")
@@ -342,6 +354,7 @@ def _finish(
     final_message: str | None = None,
     error_code: str | None = None,
     last_tool_result: ToolResult | None = None,
+    final_answer_claims: tuple[FinalAnswerActionClaim, ...] = (),
 ) -> ExecutorState:
     if last_tool_result is None and state["observations"]:
         last_tool_result = _tool_result_from(state["observations"][-1])
@@ -354,6 +367,7 @@ def _finish(
         observations=tuple(state["observations"]),
         last_tool_result=last_tool_result,
         error_code=error_code,
+        final_answer_claims=final_answer_claims,
     )
     return _updated(state, result=result, error_code=error_code)
 
@@ -415,3 +429,12 @@ def _trace_hook_failure(trace: TraceSink | None, hook: str) -> None:
             "executor.hook.failed",
             {"hook": hook, "error_code": "executor_hook_failed"},
         )
+
+
+def _tool_effect(
+    context: ExecutorGraphContext, tool_name: str
+) -> ToolEffect | None:
+    return next(
+        (effect for name, effect in context.tool_effects if name == tool_name),
+        None,
+    )

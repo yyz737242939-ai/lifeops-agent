@@ -10,6 +10,7 @@ from app.executor.adapters import (
     NoOpActionConfirmationProvider,
     NoOpExecutorFeedbackSink,
     NoOpExecutorRecoveryHook,
+    record_executor_feedback,
 )
 from app.executor.models import (
     ExecutorContextContribution,
@@ -57,7 +58,15 @@ class ExecutorPortsTest(unittest.TestCase):
                 "tool_definition",
             ),
             ExecutorRecoveryHook.on_stop: ("self", "result", "plan_step"),
-            ExecutorFeedbackSink.record: ("self", "step_or_result", "plan_step"),
+            ExecutorFeedbackSink.record: (
+                "self",
+                "step_or_result",
+                "run_id",
+                "executor_invocation_id",
+                "source_span_id",
+                "tool_effect",
+                "plan_step",
+            ),
         }
         for method, parameters in expected.items():
             with self.subTest(method=method.__qualname__):
@@ -167,6 +176,50 @@ class ExecutorPortsTest(unittest.TestCase):
         self.assertEqual(feedback.items, [result])
         self.assertEqual(recovery.plan_steps, [plan_step])
         self.assertEqual(feedback.plan_steps, [plan_step])
+
+    def test_feedback_adapter_keeps_legacy_sink_compatible(self) -> None:
+        sink = _LegacyFeedbackSink()
+        result = _completed_result()
+        plan_step = PlanStepExecutionInput(
+            "plan_1", 1, "step_1", "goal", "objective", "outcome"
+        )
+
+        record_executor_feedback(
+            sink,
+            result,
+            run_id="run_1",
+            executor_invocation_id="execinv_1",
+            source_span_id="span_1",
+            tool_effect=None,
+            plan_step=plan_step,
+        )
+
+        self.assertEqual(sink.calls, [(result, plan_step)])
+
+    def test_feedback_adapter_does_not_retry_sink_body_type_error(self) -> None:
+        sink = _TypeErrorFeedbackSink()
+
+        with self.assertRaisesRegex(TypeError, "sink body failed"):
+            record_executor_feedback(sink, _completed_result(), run_id="run_1")
+
+        self.assertEqual(sink.call_count, 1)
+
+
+class _LegacyFeedbackSink:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def record(self, item, *, plan_step=None) -> None:
+        self.calls.append((item, plan_step))
+
+
+class _TypeErrorFeedbackSink:
+    def __init__(self) -> None:
+        self.call_count = 0
+
+    def record(self, item, **context) -> None:
+        self.call_count += 1
+        raise TypeError("sink body failed")
 
 
 def _completed_result() -> ExecutorResult:

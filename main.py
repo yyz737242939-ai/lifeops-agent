@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from collections.abc import Sequence
 
 from app.common.config import DEFAULT_CONFIG_PATH
@@ -12,10 +13,16 @@ from app.runtime.bootstrap import build_runtime_service
 from app.runtime.confirmation import CliActionConfirmationProvider
 from app.runtime.models import RuntimeRequest, RuntimeResult, RuntimeStatus
 from app.planning.models import PlanCommand, PlanCommandAction
+from app.recovery.runtime import build_recovery_runtime
+from app.inspection.cli import run_inspector_cli
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run interactive CLI requests through the current runtime skeleton."""
+
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    if raw_argv and raw_argv[0].lower() == "inspect":
+        return run_inspector_cli(raw_argv[1:])
 
     parser = argparse.ArgumentParser(description="Run the LifeOps runtime CLI.")
     parser.add_argument(
@@ -23,16 +30,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=str(DEFAULT_CONFIG_PATH),
         help="Path to the runtime config JSON file.",
     )
-    args = parser.parse_args(argv)
+    parser.add_argument(
+        "--session-id",
+        help="Reuse an existing session for explicit read-only Recovery.",
+    )
+    args = parser.parse_args(raw_argv)
 
     runtime = None
+    recovery_runtime = None
     had_error = False
     try:
-        runtime = build_runtime_service(
-            args.config,
-            confirmation_provider=CliActionConfirmationProvider(),
-        )
-        session_id = new_id("session")
+        session_id = args.session_id or new_id("session")
         current_plan: dict[str, object] | None = None
 
         print("LifeOps CLI. Type exit or quit to stop.")
@@ -49,6 +57,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                 break
 
             try:
+                recovery_command = _parse_recovery_command(user_input)
+                if recovery_command is not _NOT_RECOVERY:
+                    if recovery_runtime is None:
+                        recovery_runtime = build_recovery_runtime(args.config)
+                    recovery_result = recovery_runtime.explain(
+                        session_id,
+                        recovery_command,
+                    )
+                    print(recovery_result.explanation)
+                    continue
+                if runtime is None:
+                    runtime = build_runtime_service(
+                        args.config,
+                        confirmation_provider=CliActionConfirmationProvider(),
+                    )
                 command = _parse_plan_command(user_input, session_id, current_plan)
                 if command is None:
                     request = RuntimeRequest(
@@ -79,8 +102,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     finally:
         if runtime is not None:
             runtime.close()
+        if recovery_runtime is not None:
+            recovery_runtime.close()
 
     return 1 if had_error else 0
+
+
+_NOT_RECOVERY = object()
+
+
+def _parse_recovery_command(user_input: str) -> object | str | None:
+    """Return source run id, None for latest, or a private non-command sentinel."""
+
+    parts = user_input.split()
+    if not parts or parts[0].lower() not in {"recover", "recover-last"}:
+        return _NOT_RECOVERY
+    if parts[0].lower() == "recover-last":
+        if len(parts) != 1:
+            raise ValueError("Usage: recover-last")
+        return None
+    if len(parts) != 2:
+        raise ValueError("Usage: recover <run_id>")
+    return parts[1]
 
 
 def _parse_plan_command(

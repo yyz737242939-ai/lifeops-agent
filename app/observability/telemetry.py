@@ -404,10 +404,16 @@ def add_span_event(
 ) -> None:
     add = getattr(trace, "add_event", None)
     if callable(add):
-        add(SpanEventInput(name=name, attributes=attributes or {}))
+        try:
+            add(SpanEventInput(name=name, attributes=attributes or {}))
+        except Exception:
+            pass
 
 
 def add_span_link(trace: TraceSink | None, link: SpanLinkInput) -> None:
     add = getattr(trace, "add_link", None)
     if callable(add):
-        add(link)
+        try:
+            add(link)
+        except Exception:
+            pass

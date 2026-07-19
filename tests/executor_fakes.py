@@ -12,7 +12,7 @@ from app.executor.models import (
     PlanStepExecutionInput,
 )
 from app.runtime.models import RuntimeRequest
-from app.tools.models import ConfirmedAction, ToolCall, ToolDefinition
+from app.tools.models import ConfirmedAction, ToolCall, ToolDefinition, ToolEffect
 from app.tools.models import ToolResult
 
 
@@ -112,12 +112,24 @@ class RecordingExecutorFeedbackSink:
     def __init__(self) -> None:
         self.items: list[ExecutorFeedbackItem] = []
         self.plan_steps: list[PlanStepExecutionInput | None] = []
+        self.run_ids: list[str | None] = []
+        self.executor_invocation_ids: list[str | None] = []
+        self.source_span_ids: list[str | None] = []
+        self.tool_effects: list[ToolEffect | None] = []
 
     def record(
         self,
         step_or_result: ExecutorFeedbackItem,
         *,
+        run_id: str | None = None,
+        executor_invocation_id: str | None = None,
+        source_span_id: str | None = None,
+        tool_effect: ToolEffect | None = None,
         plan_step: PlanStepExecutionInput | None = None,
     ) -> None:
         self.items.append(step_or_result)
         self.plan_steps.append(plan_step)
+        self.run_ids.append(run_id)
+        self.executor_invocation_ids.append(executor_invocation_id)
+        self.source_span_ids.append(source_span_id)
+        self.tool_effects.append(tool_effect)

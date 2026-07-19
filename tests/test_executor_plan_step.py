@@ -79,6 +79,9 @@ class ExecutorPlanStepTest(unittest.TestCase):
         self.assertEqual(context.plan_steps, [step_input])
         self.assertEqual(memory.plan_steps, [step_input])
         self.assertEqual(feedback.plan_steps, [step_input])
+        self.assertEqual(feedback.run_ids, ["run_1"])
+        self.assertTrue(feedback.executor_invocation_ids[0])
+        self.assertEqual(feedback.tool_effects, [None])
         self.assertEqual(recovery.plan_steps, [step_input])
 
     def test_plan_step_limit_is_capped_by_executor_composition(self) -> None:

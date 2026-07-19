@@ -6,7 +6,10 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from app.common.validation import require_non_empty_string
+from app.common.validation import (
+    require_non_empty_string,
+    require_unique_non_empty_strings,
+)
 from app.runtime.models import RuntimeRequest
 from app.skills.models import PromptContribution
 from app.tools.models import (
@@ -63,13 +66,33 @@ class ToolActionDecision:
 
 
 @dataclass(frozen=True)
+class FinalAnswerActionClaim:
+    """Request-local model claim about one action in this Executor invocation."""
+
+    claim_id: str
+    call_id: str
+    evidence_refs: tuple[str, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        require_non_empty_string(self.claim_id, "claim_id")
+        require_non_empty_string(self.call_id, "call_id")
+        require_unique_non_empty_strings(self.evidence_refs, "evidence_refs")
+
+
+@dataclass(frozen=True)
 class FinalAnswerDecision:
     """A model decision returning a non-empty user-facing answer."""
 
     message: str
+    action_claims: tuple[FinalAnswerActionClaim, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         require_non_empty_string(self.message, "message")
+        _require_tuple_of(self.action_claims, FinalAnswerActionClaim, "action_claims")
+        if len({item.claim_id for item in self.action_claims}) != len(
+            self.action_claims
+        ):
+            raise ValueError("action_claims must have unique claim_id values.")
 
 
 @dataclass(frozen=True)
@@ -298,6 +321,9 @@ class ExecutorResult:
     observations: tuple[ToolObservation, ...] = field(default_factory=tuple)
     last_tool_result: ToolResult | None = None
     error_code: str | None = None
+    final_answer_claims: tuple[FinalAnswerActionClaim, ...] = field(
+        default_factory=tuple
+    )
 
     def __post_init__(self) -> None:
         require_non_empty_string(self.run_id, "run_id")
@@ -329,6 +355,13 @@ class ExecutorResult:
             raise ValueError("last_tool_result must be a ToolResult when provided.")
         if self.error_code is not None:
             require_non_empty_string(self.error_code, "error_code")
+        _require_tuple_of(
+            self.final_answer_claims,
+            FinalAnswerActionClaim,
+            "final_answer_claims",
+        )
+        if self.status is not ExecutorStatus.COMPLETED and self.final_answer_claims:
+            raise ValueError("only a completed result may contain final_answer_claims.")
 
 
 ExecutorFeedbackItem = ToolObservation | ExecutorResult

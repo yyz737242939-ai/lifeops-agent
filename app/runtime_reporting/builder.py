@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from app.observability.trace_reader import TraceGraph
-from app.observability.trace_vocabulary import AnnotationKind, LifeOpsSpanKind
+from app.observability.trace_vocabulary import (
+    AnnotationKind,
+    LifeOpsSpanKind,
+    SpanLinkType,
+)
 from app.runtime_reporting.models import (
     EvidenceReport,
     FactProjection,
@@ -35,7 +39,7 @@ class RuntimeReportBuilder:
             for span in spans
             if span.lifeops_span_kind is LifeOpsSpanKind.TOOL
         )
-        evidence = tuple(
+        trace_evidence = tuple(
             EvidenceReport(
                 source_kind="artifact_reference",
                 source_id=artifact.artifact_id,
@@ -44,7 +48,8 @@ class RuntimeReportBuilder:
             )
             for artifact in trace.artifacts
             if artifact.artifact_type == "tool_evidence"
-        ) + facts.evidence_reports
+        )
+        evidence = _merge_evidence(trace_evidence, facts.evidence_reports)
         diagnostic = tuple(
             item
             for item in trace.annotations
@@ -75,14 +80,27 @@ class RuntimeReportBuilder:
             execution_feedback=facts.execution_feedback,
             recovery_report=facts.recovery_result,
             evidence=evidence,
-            final_answer_validation=None,
-            stop_point=facts.execution_feedback,
+            final_answer_validation=facts.final_answer_validation,
+            stop_point=facts.stop_point,
             diagnostic_annotations=diagnostic,
             evaluation_annotations=evaluation,
             integrity_warnings=tuple(
                 sorted(
                     set(trace.integrity_warnings + facts.fact_source_warnings)
                 )
+            ),
+            workflow_dependencies=tuple(
+                FactProjection(
+                    source_kind="trace_link:depends_on",
+                    source_id=link.link_id,
+                    status="linked",
+                    attributes={
+                        "source_span_id": link.source_span_id,
+                        "target_span_id": link.target_span_id or "unavailable",
+                    },
+                )
+                for link in trace.links
+                if link.link_type is SpanLinkType.DEPENDS_ON
             ),
         )
 
@@ -114,3 +132,20 @@ def _workflow_projection(spans) -> FactProjection | None:
         None,
     )
     return _span_projection(scheduler) if scheduler is not None else None
+
+
+def _merge_evidence(*groups: tuple[EvidenceReport, ...]) -> tuple[EvidenceReport, ...]:
+    merged: list[EvidenceReport] = []
+    seen: set[tuple[str, ...]] = set()
+    for group in groups:
+        for item in group:
+            identity = (
+                ("reference", item.reference)
+                if item.reference is not None
+                else ("source", item.source_kind, item.source_id)
+            )
+            if identity in seen:
+                continue
+            seen.add(identity)
+            merged.append(item)
+    return tuple(merged)

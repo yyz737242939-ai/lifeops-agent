@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from app.context.models import ContextAssembly
 from app.context.projection import project_context_contributions
 from app.executor.adapters import (
@@ -16,6 +18,7 @@ from app.planning.models import (
     NeedUserRoute,
     PlanCommand,
     PlanCommandAction,
+    PlanFinalizerOutput,
     PlanPreview,
     PlanRoute,
     PlannerInput,
@@ -28,6 +31,13 @@ from app.planning.service import PlanningService
 from app.runtime.models import RuntimeRequest, RuntimeResult, RuntimeStatus
 from app.tools.authorization import resolve_allowed_tools
 from app.tools.runtime import ToolRuntime
+
+
+@dataclass(frozen=True)
+class PlanningRuntimeDraft(RuntimeResult):
+    """Request-local PlanFinalizer handoff; projected to RuntimeResult before IO."""
+
+    plan_finalizer_output: PlanFinalizerOutput | None = None
 
 
 def route_planning(
@@ -275,7 +285,8 @@ def runtime_result_from_control(
         status = RuntimeStatus.ERROR
         message = "Plan execution stopped."
         error_code = result.run.last_error_code or "plan_execution_stopped"
-    return RuntimeResult(
+    result_type = PlanningRuntimeDraft if result.finalizer_output is not None else RuntimeResult
+    return result_type(
         request.run_id,
         request.session_id,
         status,
@@ -287,6 +298,11 @@ def runtime_result_from_control(
             "plan_status": result.run.status.value,
         },
         error_code=error_code,
+        **(
+            {"plan_finalizer_output": result.finalizer_output}
+            if result.finalizer_output is not None
+            else {}
+        ),
     )
 
 

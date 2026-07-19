@@ -39,6 +39,10 @@ class CompositeRuntimeFactProvider:
             workflow_state=_one_optional(bundles, "workflow_state"),
             execution_feedback=_one_optional(bundles, "execution_feedback"),
             recovery_result=_one_optional(bundles, "recovery_result"),
+            final_answer_validation=_one_optional(
+                bundles, "final_answer_validation"
+            ),
+            stop_point=_one_optional(bundles, "stop_point"),
             execution_feedback_evidence=_combine(
                 bundles, "execution_feedback_evidence"
             ),

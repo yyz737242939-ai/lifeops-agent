@@ -7,6 +7,7 @@ from app.observability.file_logs import SessionLogWriter
 from app.observability.logger import OptionalLogAppender
 from app.observability.recovery_trace import (
     record_execution_feedback_reference,
+    record_recovery_context_reference,
     record_recovery_of,
 )
 from app.observability.telemetry import RequestTelemetry, optional_span
@@ -45,6 +46,9 @@ class RecoveryTraceSemanticsTest(unittest.TestCase):
             with optional_span(
                 telemetry, name="recovery.explain", kind=LifeOpsSpanKind.RECOVERY
             ):
+                record_recovery_context_reference(
+                    telemetry, safe_reference="recovery-context/run_source"
+                )
                 record_recovery_of(
                     telemetry,
                     source_trace_id="trace_source",
@@ -65,6 +69,14 @@ class RecoveryTraceSemanticsTest(unittest.TestCase):
             self.assertTrue(
                 kinds.isdisjoint({"TOOL", "POLICY", "EXECUTOR", "PLANNER", "GUARDRAIL"})
             )
+            context = next(
+                row
+                for row in rows
+                if row["record_type"] == "artifact_reference"
+            )
+            self.assertEqual(context["artifact_type"], "recovery_context")
+            self.assertNotIn("goal", context)
+            self.assertNotIn("evidence", context)
 
     def test_append_only_fake_keeps_feedback_and_recovery_projection_optional(self) -> None:
         fake = OptionalLogAppender(None)
@@ -72,6 +84,36 @@ class RecoveryTraceSemanticsTest(unittest.TestCase):
             record_execution_feedback_reference(fake, safe_reference="feedback/run_1")
         )
         record_recovery_of(fake, source_trace_id="trace_source")
+
+    def test_projection_recorder_failure_is_non_intrusive(self) -> None:
+        exploding = _ExplodingRecorder()
+        self.assertIsNone(
+            record_execution_feedback_reference(
+                exploding, safe_reference="feedback/run_1"
+            )
+        )
+        self.assertIsNone(
+            record_recovery_context_reference(
+                exploding, safe_reference="recovery-context/run_1"
+            )
+        )
+        record_recovery_of(exploding, source_trace_id="trace_source")
+
+
+class _ExplodingRecorder:
+    @property
+    def trace_context(self):
+        class Context:
+            trace_id = "trace_1"
+            current_span_id = "span_1"
+
+        return Context()
+
+    def add_artifact_reference(self, _artifact) -> None:
+        raise RuntimeError("export failed with sensitive diagnostic")
+
+    def add_link(self, _link) -> None:
+        raise RuntimeError("export failed with sensitive diagnostic")
 
 
 if __name__ == "__main__":

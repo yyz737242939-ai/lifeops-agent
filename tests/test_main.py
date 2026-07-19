@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import main as cli
@@ -9,6 +10,23 @@ from app.runtime.models import RuntimeRequest, RuntimeResult, RuntimeStatus
 
 
 class MainCliTest(unittest.TestCase):
+    def test_inspect_command_uses_independent_dispatch_only(self) -> None:
+        with (
+            patch.object(cli, "run_inspector_cli", return_value=0) as inspect,
+            patch.object(cli, "build_runtime_service") as build_normal,
+            patch.object(cli, "build_recovery_runtime") as build_recovery,
+        ):
+            exit_code = cli.main(
+                ["inspect", "--run-id", "run_1", "--view", "summary,tree"]
+            )
+
+        self.assertEqual(exit_code, 0)
+        inspect.assert_called_once_with(
+            ["--run-id", "run_1", "--view", "summary,tree"]
+        )
+        build_normal.assert_not_called()
+        build_recovery.assert_not_called()
+
     def test_reuses_one_session_id_across_turns_and_closes_runtime(self) -> None:
         runtime = _RecordingRuntime()
 
@@ -71,6 +89,43 @@ class MainCliTest(unittest.TestCase):
 
         self.assertIsNone(cli._updated_current_plan(current, result))
 
+    def test_recovery_only_command_does_not_build_normal_runtime(self) -> None:
+        recovery = _RecordingRecoveryRuntime()
+        with (
+            patch.object(cli, "build_runtime_service") as build_normal,
+            patch.object(cli, "build_recovery_runtime", return_value=recovery) as build,
+            patch("builtins.input", side_effect=["recover run_source", "exit"]),
+            patch("builtins.print") as output,
+        ):
+            exit_code = cli.main(
+                ["--config", "config/test.json", "--session-id", "session_existing"]
+            )
+
+        self.assertEqual(exit_code, 0)
+        build_normal.assert_not_called()
+        build.assert_called_once_with("config/test.json")
+        self.assertEqual(recovery.requests, [("session_existing", "run_source")])
+        self.assertTrue(recovery.closed)
+        output.assert_any_call("read-only explanation")
+
+    def test_recover_last_is_session_scoped_and_invalid_syntax_fails_closed(self) -> None:
+        recovery = _RecordingRecoveryRuntime()
+        with (
+            patch.object(cli, "build_runtime_service") as build_normal,
+            patch.object(cli, "build_recovery_runtime", return_value=recovery),
+            patch(
+                "builtins.input",
+                side_effect=["recover-last extra", "recover-last", "exit"],
+            ),
+            patch("builtins.print") as output,
+        ):
+            exit_code = cli.main(["--session-id", "session_existing"])
+
+        self.assertEqual(exit_code, 1)
+        build_normal.assert_not_called()
+        self.assertEqual(recovery.requests, [("session_existing", None)])
+        output.assert_any_call("error: Usage: recover-last")
+
 
 class _RecordingRuntime:
     def __init__(self, *, error: AppError | None = None) -> None:
@@ -88,6 +143,19 @@ class _RecordingRuntime:
             status=RuntimeStatus.OK,
             message=f"handled: {request.user_input}",
         )
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _RecordingRecoveryRuntime:
+    def __init__(self) -> None:
+        self.requests: list[tuple[str, str | None]] = []
+        self.closed = False
+
+    def explain(self, session_id: str, run_id: str | None = None):
+        self.requests.append((session_id, run_id))
+        return SimpleNamespace(explanation="read-only explanation")
 
     def close(self) -> None:
         self.closed = True

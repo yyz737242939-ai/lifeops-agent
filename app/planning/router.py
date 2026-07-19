@@ -62,6 +62,10 @@ plan for multiple goals, explicit dependencies, or work that must use an
 intermediate result in a later step. Return need_user only when a missing fact
 prevents safe routing.
 
+A request for exactly one Tool call, one lookup, or one bounded read remains
+direct even when it explicitly names a Skill, Tool, provider, or output format.
+Delegating a single Tool call is not a reason to create a plan.
+
 The three output shapes are mutually exclusive:
 - direct: route="direct", reason_code is a short stable string, question=null.
 - plan: route="plan", reason_code is a short stable string, question=null.

@@ -34,6 +34,9 @@ from app.memory.retriever import DeterministicMemoryRetriever
 from app.memory.service import MemoryService
 from app.memory.tools import build_memory_tools
 from app.policy.service import PolicyService
+from app.recovery.collector import RequestExecutionFeedbackCollector
+from app.recovery.finalizer import RuntimeOutcomeFinalizer
+from app.recovery.repository import SqliteExecutionFeedbackRepository
 from app.planning.controller import PlanController
 from app.planning.finalizer import OpenAIPlanFinalizerClient
 from app.planning.models import PlanningLimits
@@ -70,9 +73,11 @@ def build_runtime_service(
     limits = PlanningLimits()
     planner = OpenAIPlannerModelClient()
     repository = SqlitePlanRepository(conn)
+    feedback_collector = RequestExecutionFeedbackCollector()
     executor = ReactExecutor(
         OpenAIExecutorModelClient(),
         confirmation_provider=confirmation_provider,
+        feedback_sink=feedback_collector,
     )
     conversation_repository = JsonlConversationRepository(
         config.database_path.parent / "conversations"
@@ -122,6 +127,11 @@ def build_runtime_service(
         conversation_repository=conversation_repository,
         context_assembler=context_assembler,
         context_budget=ContextBudget(4000, 8, 1000, 500, 5, 500, 2000),
+        outcome_finalizer=RuntimeOutcomeFinalizer(
+            feedback_collector,
+            SqliteExecutionFeedbackRepository(conn),
+            plan_repository=repository,
+        ),
     )
 
 

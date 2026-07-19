@@ -22,8 +22,8 @@
 - 阶段 4：LangGraph Orchestration 骨架已完成，详见 `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md`。
 - 当前阶段：阶段 5 功能实现与稳定化均已完成；`STAGE5_STABILIZATION_PLAN.md` 已关闭全部 blocking findings，并在 `240/240` 统一离线回归后给出 Stage 6 `go`。
 - 当前阶段：阶段 7 Plan-and-Execute Planner 步骤 1-16 已全部完成；Planner 聚焦回归 `79/79`、统一离线回归 `379/379` 通过，Direct/Plan/NeedUser 与 Research happy-path 真实模型验证已有证据。
-- 当前阶段：Stage 9A Context Engine 与 Stage 9B Long-term Memory 均已完成并取得独立 `go`；整个 Stage 9 已关闭，下一阶段为面试实践导向的 Stage 10 Execution Feedback / Recovery。
-- Stage 10 前置共享 Trace 标准步骤 1-16 已完成并取得 `go`：纯v1 models、TraceContext、兼容telemetry/exporter、Runtime到Guardrail instrumentation、Planning continuation、LLM artifact/token metadata、derived index、TraceReader/TraceGraph、独立runtime_reporting、sample annotations、serial diamond fixture、离线回归与真实 Direct/Planning smoke均已验证；ExecutionFeedback / Recovery产品逻辑仍按`RECOVERY_PLAN.md`单独实施，正式Eval Harness与DAG scheduler仍未实现。
+- 当前阶段：Stage 9 Context / Memory、Stage 10 Execution Feedback / Recovery与Stage 11A Inspector / Runtime Debugger V1均已完成并取得`go`。Inspector已验证shared Trace/RuntimeReport只读消费、deterministic views/diagnosis、privacy/failure isolation、compiled artifacts与CLI独立dispatch；下一施工入口为Stage 11B Eval Harness或之后独立DAG Scheduler。
+- Stage 10继续保持解释型恢复边界：不实现checkpoint、replay、resume、rollback、time travel或权限恢复。Eval Harness与DAG scheduler仍未实现，按各自模块计划推进；未来正式serial DAG compiled artifact必须回归Inspector共享消费契约，但不反向改变Stage 11A关闭状态。
 
 核心执行链路：
 
@@ -1008,6 +1008,8 @@ docs/RUNTIME_CONCEPTS.md
 
 现有 Planner 可以读取结构化失败事实用于解释，但 Stage 10 不扩展 Planner 控制流；
 恢复输出只能说明事实和建议下一步，不能声称建议动作已经执行。
+
+完成状态：步骤1-17已于2026-07-17完成，`RECOVERY_PLAN.md`最终gate为`go`。真实Direct success、Planning completed、Tool failure/confirmation denial与Planning partial smoke，以及`696/696`统一离线回归均通过。
 
 ### 阶段 11：Inspector / Eval / DAG
 

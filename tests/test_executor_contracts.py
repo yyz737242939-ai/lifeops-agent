@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app.executor.models import (
     ExecutionLimits,
+    FinalAnswerActionClaim,
     ExecutorResult,
     ExecutorStatus,
     ExecutorStopReason,
@@ -32,7 +33,11 @@ class ExecutorContractTest(unittest.TestCase):
         )
         self.assertEqual(
             tuple(item.name for item in fields(FinalAnswerDecision)),
-            ("message",),
+            ("message", "action_claims"),
+        )
+        self.assertEqual(
+            tuple(item.name for item in fields(FinalAnswerActionClaim)),
+            ("claim_id", "call_id", "evidence_refs"),
         )
         self.assertEqual(
             tuple(item.name for item in fields(GoalNotAchievedDecision)),
@@ -78,6 +83,7 @@ class ExecutorContractTest(unittest.TestCase):
                 "observations",
                 "last_tool_result",
                 "error_code",
+                "final_answer_claims",
             ),
         )
 

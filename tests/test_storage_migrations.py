@@ -23,7 +23,7 @@ class StorageMigrationsTest(unittest.TestCase):
 
         self.assertEqual(report.previous_version, 0)
         self.assertEqual(report.current_version, CURRENT_SCHEMA_VERSION)
-        self.assertEqual(report.applied_versions, (1, 2, 3, 4))
+        self.assertEqual(report.applied_versions, (1, 2, 3, 4, 5, 6))
         self.assertEqual(get_schema_version(self.conn), CURRENT_SCHEMA_VERSION)
         self.assert_tables_exist(
             "schema_migrations",
@@ -46,26 +46,30 @@ class StorageMigrationsTest(unittest.TestCase):
             "plan_runs",
             "plan_steps",
             "memory_index",
+            "execution_feedback",
+            "execution_feedback_actions",
+            "execution_feedback_evidence",
+            "execution_feedback_plan_steps",
         )
 
     def test_migrate_is_idempotent(self) -> None:
         first = migrate(self.conn)
         second = migrate(self.conn)
 
-        self.assertEqual(first.applied_versions, (1, 2, 3, 4))
+        self.assertEqual(first.applied_versions, (1, 2, 3, 4, 5, 6))
         self.assertEqual(second.previous_version, CURRENT_SCHEMA_VERSION)
         self.assertEqual(second.current_version, CURRENT_SCHEMA_VERSION)
         self.assertEqual(second.applied_versions, ())
 
         rows = self.conn.execute("SELECT COUNT(*) AS count FROM schema_migrations").fetchone()
-        self.assertEqual(rows["count"], 4)
+        self.assertEqual(rows["count"], 6)
 
     def test_v1_database_migrates_to_current_without_rewriting_v1(self) -> None:
         first = migrate(self.conn, MIGRATIONS[:1])
         second = migrate(self.conn)
 
         self.assertEqual(first.applied_versions, (1,))
-        self.assertEqual(second.applied_versions, (2, 3, 4))
+        self.assertEqual(second.applied_versions, (2, 3, 4, 5, 6))
         self.assertEqual(get_schema_version(self.conn), CURRENT_SCHEMA_VERSION)
         self.assert_tables_exist("plan_runs", "plan_steps")
         self.assertIn("confirmed_constraints_json", self.column_names("plan_runs"))
@@ -81,7 +85,7 @@ class StorageMigrationsTest(unittest.TestCase):
         after_sql = self.conn.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'plan_steps'"
         ).fetchone()["sql"]
-        self.assertEqual(report.applied_versions, (3, 4))
+        self.assertEqual(report.applied_versions, (3, 4, 5, 6))
         self.assertEqual(before_sql, after_sql)
         self.assertIn("confirmed_constraints_json", self.column_names("plan_runs"))
 
@@ -96,7 +100,7 @@ class StorageMigrationsTest(unittest.TestCase):
         after_sql = self.conn.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'plan_runs'"
         ).fetchone()["sql"]
-        self.assertEqual(report.applied_versions, (4,))
+        self.assertEqual(report.applied_versions, (4, 5, 6))
         self.assertEqual(before_sql, after_sql)
         self.assertEqual(
             self.column_names("memory_index"),
@@ -120,6 +124,106 @@ class StorageMigrationsTest(unittest.TestCase):
             ),
         )
         self.assertNotIn("content", self.column_names("memory_index"))
+
+    def test_v4_database_adds_only_safe_execution_feedback_tables(self) -> None:
+        migrate(self.conn, MIGRATIONS[:4])
+        plan_sql = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'plan_steps'"
+        ).fetchone()["sql"]
+        memory_sql = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_index'"
+        ).fetchone()["sql"]
+
+        report = migrate(self.conn)
+
+        self.assertEqual(report.applied_versions, (5, 6))
+        self.assert_tables_exist(
+            "execution_feedback",
+            "execution_feedback_actions",
+            "execution_feedback_evidence",
+            "execution_feedback_plan_steps",
+        )
+        self.assertEqual(
+            plan_sql,
+            self.conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'plan_steps'"
+            ).fetchone()["sql"],
+        )
+        self.assertEqual(
+            memory_sql,
+            self.conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_index'"
+            ).fetchone()["sql"],
+        )
+        feedback_columns = self.column_names("execution_feedback")
+        action_columns = self.column_names("execution_feedback_actions")
+        evidence_columns = self.column_names("execution_feedback_evidence")
+        step_columns = self.column_names("execution_feedback_plan_steps")
+        for forbidden in (
+            "assistant_text",
+            "arguments",
+            "output",
+            "confirmation",
+            "allowed_tools",
+            "prompt",
+        ):
+            self.assertNotIn(forbidden, feedback_columns)
+            self.assertNotIn(forbidden, action_columns)
+            self.assertNotIn(forbidden, evidence_columns)
+            self.assertNotIn(forbidden, step_columns)
+
+    def test_v5_planning_feedback_is_backfilled_with_historical_step_snapshot(self) -> None:
+        migrate(self.conn, MIGRATIONS[:5])
+        timestamp = "2026-07-17T00:00:00Z"
+        self.conn.execute(
+            "INSERT INTO run_records (id, started_at, status, created_at) VALUES (?, ?, ?, ?)",
+            ("run_1", timestamp, "completed", timestamp),
+        )
+        self.conn.execute(
+            """INSERT INTO plan_runs (
+                   id, session_id, goal, status, current_revision, replan_count,
+                   executor_steps_used, created_at, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("plan_1", "session_1", "goal", "completed", 1, 0, 1, timestamp, timestamp),
+        )
+        self.conn.execute(
+            """INSERT INTO plan_steps (
+                   plan_id, revision, step_id, position, objective, expected_outcome,
+                   dependency_step_ids_json, status, safe_result_summary,
+                   evidence_refs_json, executor_steps_used
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "plan_1", 1, "step_1", 1, "objective", "expected", "[]",
+                "completed", "safe result", '["evidence/ref_1"]', 1,
+            ),
+        )
+        self.conn.execute(
+            """INSERT INTO execution_feedback (
+                   id, trace_id, run_id, session_id, path, goal_summary,
+                   overall_status, executor_invocation_ids_json, plan_id, revision,
+                   validation_claim_status, validation_output_mode,
+                   validation_reason_codes_json, validation_accepted_claim_ids_json,
+                   created_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "feedback_1", "trace_1", "run_1", "session_1", "planning",
+                "goal", "completed", '["execinv_1"]', "plan_1", 1,
+                "valid", "model", "[]", "[]", timestamp,
+            ),
+        )
+        self.conn.commit()
+
+        report = migrate(self.conn)
+
+        self.assertEqual(report.applied_versions, (6,))
+        row = self.conn.execute(
+            "SELECT * FROM execution_feedback_plan_steps WHERE feedback_id = ?",
+            ("feedback_1",),
+        ).fetchone()
+        self.assertEqual(row["step_id"], "step_1")
+        self.assertEqual(row["original_status"], "completed")
+        self.assertEqual(row["outcome"], "completed")
+        self.assertEqual(row["evidence_refs_json"], '["evidence/ref_1"]')
 
     def test_squashed_v1_has_the_final_research_and_travel_shapes(self) -> None:
         migrate(self.conn)

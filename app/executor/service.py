@@ -13,6 +13,7 @@ from app.executor.adapters import (
     NoOpActionConfirmationProvider,
     NoOpExecutorFeedbackSink,
     NoOpExecutorRecoveryHook,
+    record_executor_feedback,
 )
 from app.executor.graph import (
     ExecutorGraphContext,
@@ -84,15 +85,16 @@ class ReactExecutor:
         context_provider: ExecutorContextProvider | None = None,
         memory_provider: ExecutorMemoryProvider | None = None,
     ) -> ExecutorResult:
+        invocation_id = new_id("execinv")
         with optional_span(
             trace,
             name="executor.invoke",
             kind=LifeOpsSpanKind.EXECUTOR,
             attributes={
-                "lifeops.executor.invocation_id": new_id("execinv"),
+                "lifeops.executor.invocation_id": invocation_id,
                 "lifeops.runtime.run_id": request.run_id,
             },
-        ):
+        ) as span:
             return self._execute(
                 request,
                 prompt_contributions,
@@ -104,6 +106,12 @@ class ReactExecutor:
                 limits=self._limits,
                 context_provider=context_provider,
                 memory_provider=memory_provider,
+                executor_invocation_id=invocation_id,
+                source_span_id=(
+                    span.handle.context.current_span_id
+                    if span.handle is not None
+                    else None
+                ),
             )
 
     def execute_step(
@@ -124,18 +132,19 @@ class ReactExecutor:
         effective_limits = ExecutionLimits(
             max_steps=min(self._limits.max_steps, step_input.max_steps)
         )
+        invocation_id = new_id("execinv")
         with optional_span(
             trace,
             name="executor.invoke_plan_step",
             kind=LifeOpsSpanKind.EXECUTOR,
             attributes={
-                "lifeops.executor.invocation_id": new_id("execinv"),
+                "lifeops.executor.invocation_id": invocation_id,
                 "lifeops.runtime.run_id": request.run_id,
                 "lifeops.plan.id": step_input.plan_id,
                 "lifeops.plan.revision": step_input.revision,
                 "lifeops.plan.step.id": step_input.step_id,
             },
-        ):
+        ) as span:
             return self._execute(
                 request,
                 prompt_contributions,
@@ -147,6 +156,12 @@ class ReactExecutor:
                 limits=effective_limits,
                 context_provider=context_provider,
                 memory_provider=memory_provider,
+                executor_invocation_id=invocation_id,
+                source_span_id=(
+                    span.handle.context.current_span_id
+                    if span.handle is not None
+                    else None
+                ),
             )
 
     def _execute(
@@ -162,6 +177,8 @@ class ReactExecutor:
         limits: ExecutionLimits,
         context_provider: ExecutorContextProvider | None,
         memory_provider: ExecutorMemoryProvider | None,
+        executor_invocation_id: str,
+        source_span_id: str | None,
     ) -> ExecutorResult:
         if not isinstance(request, RuntimeRequest):
             raise ValueError("request must be a RuntimeRequest.")
@@ -193,6 +210,8 @@ class ReactExecutor:
                 ),
                 trace,
                 plan_step_input,
+                executor_invocation_id,
+                source_span_id,
             )
 
         state = invoke_executor_graph(
@@ -218,6 +237,16 @@ class ReactExecutor:
                 trace=trace,
                 llm_log=llm_log,
                 plan_step_input=plan_step_input,
+                run_id=request.run_id,
+                executor_invocation_id=executor_invocation_id,
+                source_span_id=source_span_id,
+                tool_effects=tuple(
+                    (
+                        tool_name,
+                        execution_scope.registry.get(tool_name).effect,
+                    )
+                    for tool_name in allowed_tools.tool_names
+                ),
             ),
         )
         result = state["result"]
@@ -234,17 +263,34 @@ class ReactExecutor:
                 ),
                 trace,
                 plan_step_input,
+                executor_invocation_id,
+                source_span_id,
             )
-        return self._complete(result, trace, plan_step_input)
+        return self._complete(
+            result,
+            trace,
+            plan_step_input,
+            executor_invocation_id,
+            source_span_id,
+        )
 
     def _complete(
         self,
         result: ExecutorResult,
         trace: TraceSink | None,
         plan_step: PlanStepExecutionInput | None,
+        executor_invocation_id: str,
+        source_span_id: str | None,
     ) -> ExecutorResult:
         try:
-            self._feedback_sink.record(result, plan_step=plan_step)
+            record_executor_feedback(
+                self._feedback_sink,
+                result,
+                run_id=result.run_id,
+                executor_invocation_id=executor_invocation_id,
+                source_span_id=source_span_id,
+                plan_step=plan_step,
+            )
             add_span_event(
                 trace,
                 "execution.feedback.observed",

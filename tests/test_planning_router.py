@@ -17,12 +17,20 @@ from app.planning.models import (
 from app.planning.router import (
     FakePlanningRouteClient,
     OpenAIPlanningRouteClient,
+    PLANNING_ROUTE_SYSTEM_PROMPT,
     parse_planning_route,
 )
 from app.runtime.models import RuntimeRequest
 
 
 class PlanningRouterTest(unittest.TestCase):
+    def test_single_named_tool_call_is_explicitly_direct_in_route_contract(self) -> None:
+        self.assertIn("exactly one Tool call", PLANNING_ROUTE_SYSTEM_PROMPT)
+        self.assertIn(
+            "Delegating a single Tool call is not a reason to create a plan",
+            PLANNING_ROUTE_SYSTEM_PROMPT,
+        )
+
     def test_fake_returns_direct_plan_and_need_user_without_side_effects(self) -> None:
         fake = FakePlanningRouteClient(
             DirectRoute("single_goal"),

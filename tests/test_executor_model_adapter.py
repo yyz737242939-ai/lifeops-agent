@@ -15,6 +15,7 @@ from app.executor.models import (
     ExecutorContextContribution,
     ExecutorMemoryContribution,
     ExecutorModelInput,
+    FinalAnswerActionClaim,
     FinalAnswerDecision,
     GoalNotAchievedDecision,
     PlanStepDependencyResult,
@@ -42,6 +43,24 @@ _CATALOG = (
 
 
 class OpenAIExecutorModelClientTest(unittest.TestCase):
+    def test_prompt_requires_claim_for_successful_observation_used_in_answer(self) -> None:
+        self.assertIn(
+            "each successful call whose result is\n  used or described by the answer",
+            EXECUTOR_SYSTEM_PROMPT,
+        )
+        self.assertIn(
+            "all\n  observed Tool actions failed",
+            EXECUTOR_SYSTEM_PROMPT,
+        )
+        self.assertIn(
+            "evidence reference or use an observation id",
+            EXECUTOR_SYSTEM_PROMPT,
+        )
+        self.assertIn(
+            "successful READ with no non-null\n  evidence reference",
+            EXECUTOR_SYSTEM_PROMPT,
+        )
+
     @patch("app.executor.model_adapter.load_dotenv")
     @patch("app.executor.model_adapter.OpenAI")
     def test_function_call_uses_only_filtered_catalog_and_typed_input(
@@ -68,7 +87,10 @@ class OpenAIExecutorModelClientTest(unittest.TestCase):
         call = api.responses.calls[0]
         self.assertFalse(call["parallel_tool_calls"])
         self.assertEqual(call["max_tool_calls"], 1)
-        self.assertEqual([item["name"] for item in call["tools"]], ["travel.search_places"])
+        self.assertEqual(
+            [item["name"] for item in call["tools"]],
+            ["travel.search_places", "lifeops_submit_final_answer"],
+        )
         self.assertNotIn("previous_response_id", call)
         self.assertTrue(call["instructions"].startswith(EXECUTOR_SYSTEM_PROMPT))
         self.assertIn("Do not also emit a", call["instructions"])
@@ -101,6 +123,46 @@ class OpenAIExecutorModelClientTest(unittest.TestCase):
         decision = client.decide(_model_input())
 
         self.assertEqual(decision, FinalAnswerDecision("这是最终回答。"))
+
+    @patch("app.executor.model_adapter.load_dotenv")
+    @patch("app.executor.model_adapter.OpenAI")
+    def test_structured_final_answer_preserves_action_claims(
+        self, openai_type: Any, _load_dotenv: Any
+    ) -> None:
+        openai_type.return_value = _FakeOpenAIClient(
+            _response(
+                calls=[
+                    _function_call(
+                        "final_1",
+                        "lifeops_submit_final_answer",
+                        {
+                            "message": "已保存。",
+                            "execution_claims": [
+                                {
+                                    "claim_id": "claim_1",
+                                    "call_id": "call_1",
+                                    "evidence_refs": ["source/ref_1"],
+                                }
+                            ],
+                        },
+                    )
+                ]
+            )
+        )
+
+        decision = _configured_client().decide(_model_input())
+
+        self.assertEqual(
+            decision,
+            FinalAnswerDecision(
+                "已保存。",
+                (
+                    FinalAnswerActionClaim(
+                        "claim_1", "call_1", ("source/ref_1",)
+                    ),
+                ),
+            ),
+        )
 
     @patch("app.executor.model_adapter.load_dotenv")
     @patch("app.executor.model_adapter.OpenAI")

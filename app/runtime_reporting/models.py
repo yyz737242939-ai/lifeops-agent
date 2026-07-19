@@ -66,6 +66,8 @@ class RuntimeFactBundle:
     workflow_state: FactProjection | None = None
     execution_feedback: FactProjection | None = None
     recovery_result: FactProjection | None = None
+    final_answer_validation: FactProjection | None = None
+    stop_point: FactProjection | None = None
     execution_feedback_evidence: tuple[FactProjection, ...] = ()
     evidence_reports: tuple[EvidenceReport, ...] = ()
     fact_source_warnings: tuple[str, ...] = ()
@@ -102,3 +104,4 @@ class RuntimeReport:
     diagnostic_annotations: tuple[AnnotationRecord, ...]
     evaluation_annotations: tuple[AnnotationRecord, ...]
     integrity_warnings: tuple[str, ...]
+    workflow_dependencies: tuple[FactProjection, ...] = ()

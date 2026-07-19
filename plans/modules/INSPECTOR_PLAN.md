@@ -1,6 +1,6 @@
 # Stage 11A Inspector / Runtime Debugger 模块计划
 
-文档状态：范围已确认，已完成与共享标准、Eval计划及当前代码依赖方向的适配审查，待实施。本计划严格依赖共享 Trace Contract 与 `app/runtime_reporting` 的`RuntimeReport`，不重新定义执行事实、trace storage 或 Eval 标准。
+文档状态：已完成并关闭，Inspector V1 于2026-07-17取得 `go`。步骤1-12、14-15均已完成并逐步验证；原步骤13的正式serial DAG compiled artifact按产品顺序延后为未来DAG模块的跨模块兼容性回归，不再阻塞Stage 11A关闭，也不代表Scheduler已经实现。本计划严格依赖共享 Trace Contract 与 `app/runtime_reporting` 的`RuntimeReport`，不重新定义执行事实、trace storage 或 Eval 标准。
 
 ## 1. 模块背景与面试学习目标
 
@@ -12,7 +12,7 @@ LifeOps 已有 semantic events、LLM interaction logs、application logs、Plan 
 
 ## 2. 共享标准与前置条件
 
-本模块只有在以下共享标准步骤完成并通过 gate 后才开始生产接线：
+本模块只有在以下共享标准步骤完成并通过 gate 后才开始 shared read-model 接线：
 
 - `TraceRecord`、`SpanRecord`、`SpanEventRecord`、`SpanLinkRecord`、`ArtifactReference`、`AnnotationRecord`；
 - `trace_id/span_id/parent_span_id/executor_invocation_id` 与 Plan/DAG correlation；
@@ -24,15 +24,23 @@ LifeOps 已有 semantic events、LLM interaction logs、application logs、Plan 
 
 Inspector不拥有或复制这些models。低层Trace/Reader位于`app/observability/`，高层FactProvider/RuntimeReport位于`app/runtime_reporting/`；`app/inspection/`只依赖二者公开Protocol/models。`app/evals/`直接依赖相同边界，不反向依赖Inspector。
 
+2026-07-17 审计结论：上述 shared prerequisite 已由共享标准步骤1-16及其`go` gate满足；ExecutionFeedback / Recovery产品模块也已完成并关闭。正式serial DAG Scheduler及其compiled artifact尚未实现，但shared serial diamond fixture已经冻结tree containment、`depends_on`、partial evidence和blocked语义。经阶段关闭决策，正式Scheduler case归未来DAG模块完成后的Inspector兼容性回归，不再作为Inspector V1自身的关闭前置。
+
 ## 3. 当前实现基线
 
-- `events.jsonl` 有统一 envelope 和 request-local sequence，可还原线性路径。
-- `llm.jsonl` 保存敏感 provider interactions；`application.log` 保存工程诊断。
-- `PlanRun/PlanStep` durable，可读取 revision、status、stop/evidence；Direct observations仍主要 request-local。
-- Stage 10 计划把 Direct/Planning results收敛为 durable `ExecutionFeedback`，并把 Feedback作为 trace artifact、Recovery作为 linked trace。
-- 当前没有 `TraceGraph`、`RuntimeReport`、trace index/query、Inspector CLI、diagnosis rules 或 artifact access policy。
-- 当前 `main.py` 是 Runtime CLI；不应为 Inspector 改造 outer graph或把 inspect command送入 Agent natural-language route。
-- `tool_calls` 历史表未写入，不能作为 Inspector事实源。
+- `LifeOps Trace Contract v1` 已实现immutable Trace/Span/Event/Link/Artifact/Annotation models、append-only `traces.jsonl` / `annotations.jsonl` 与legacy `events.jsonl` compatibility。
+- `TraceIndexBuilder`、derived SQLite index、freshness检查和canonical file fallback已实现；index可删除重建，且不是执行或业务事实源。
+- `FileTraceStore` / `TraceReader` / immutable `TraceGraph` 已实现；Reader是schema、identity、parent/cycle、event sequence、link、artifact和annotation target完整性的唯一graph reconstruction边界。
+- 独立`app/runtime_reporting`已提供typed `RuntimeFactProvider` / `RuntimeFactBundle`、唯一`RuntimeReportBuilder`和Inspector/Eval共享的immutable `RuntimeReport`。
+- Stage 10已将Direct/Planning结果收敛为durable canonical `ExecutionFeedback`，完成structured claim/evidence validation，并由deterministic-only `RecoveryRuntime`提供restart-safe只读解释；Feedback artifact、validation/stop/evidence projection与`recovery_of` trace link均已接入shared contract。
+- shared deterministic sample annotations与serial diamond fixture已实现；fixture明确tree containment不同于`depends_on` dependency，保留B evidence、C failed、D blocked且D零Tool attempt，但不代表正式Scheduler已实现。
+- `app/inspection`现已提供immutable query/result contracts、stable errors、InspectorService、shared reader composition、text/JSON renderer、10条deterministic diagnosis rules、metadata-only ArtifactReference/Evidence view、独立CLI dispatch及可选shared AnnotationSink persistence；结果直接持有shared `TraceGraph` / `RuntimeReport` / `AnnotationRecord`，没有shadow facts。
+- shared `RuntimeReport`以additive `workflow_dependencies`投影`depends_on` links，让Inspector diagnosis与未来Eval不回读raw logs或猜边。
+- 当前CLI composition默认使用shared `EmptyRuntimeFactProvider`保持trace-only、零业务storage边界；`InspectorService`可注入现有typed `RuntimeFactProvider`消费canonical ExecutionFeedback/Plan projection。Inspector不自行打开业务SQLite，也不把trace补充信息升级为执行事实。
+- sensitive artifact content reader明确未配置；`include_sensitive`仍只返回metadata-only和`not_configured`，不会读取prompt、Tool arguments/output、Memory/Profile或异常原文。
+- 正式serial DAG Scheduler及`DAG_SCHEDULER_PLAN.md`仍不存在；shared diamond fixture只作为步骤5/6开发证据。
+- 当前`main.py`已有普通Runtime与Recovery CLI；不应为Inspector改造outer graph或把inspect command送入Agent natural-language route。
+- `tool_calls`历史表未作为当前事实源；Inspector只能消费shared RuntimeReport，不得启用该表或直接读取raw业务表。
 
 ## 4. V0 / legacy 决策
 
@@ -129,17 +137,19 @@ InspectionQuery
   views
   span_id?
   include_sensitive=false
-  output_format=text|json
 
 InspectionResult
   target
-  runtime_report
-  rendered_sections
+  views
+  trace_graphs
+  runtime_reports
+  span_id?
+  include_sensitive=false
   diagnostic_annotations
   warnings
 ```
 
-不新增 `InspectorAction`、`InspectorEvidence`、`InspectorPlanStep`。renderer直接消费`RuntimeReport`中的shared typed projections。
+`trace_graphs` / `runtime_reports`使用对齐tuple以容纳`plan_id`可能关联的多个trace，同时直接持有shared `TraceGraph` / `RuntimeReport`，不定义任何graph/report变体。本步骤不把renderer output放进result；后续renderer直接消费这些shared read models。不新增 `InspectorAction`、`InspectorEvidence`、`InspectorPlanStep`。
 
 ## 10. 对外接口
 
@@ -411,21 +421,21 @@ smoke只运行Inspector读取，不再次调用provider、Tool或用户数据库
 
 ## 27. 分阶段实施步骤
 
-1. **确认Inspector范围与shared prerequisite gate。** 冻结CLI、views、diagnosis rules、不做项和依赖矩阵。
-2. **实现Inspector-owned query/view models与errors。** 不接storage/CLI。
-3. **实现InspectorService with fakes。** 只调用shared TraceReader和`app/runtime_reporting` FactProvider/RuntimeReportBuilder，不直接从TraceStore records组图。
-4. **实现summary/tree/timeline/details JSON renderer。** 先用pure fixtures。
-5. **实现Planning/DAG graph renderer。** 先使用shared diamond fixture，读取shared links/outcomes，不引入scheduler依赖。
-6. **实现deterministic diagnosis registry。** 10条rules、AnnotationRecord和failure isolation。
-7. **接入shared derived index与file fallback。** 不扫描未知目录，不写业务SQLite。
-8. **接入safe ArtifactReference details。** 默认metadata-only，敏感读取可延后。
-9. **增加结构化CLI command。** 独立dispatch，不接Agent route。
-10. **补齐privacy、integrity、source conflict与annotation persistence。**
-11. **运行focused tests和10条compiled E2E。**
-12. **运行统一离线回归、compileall、diff check和架构审计。**
-13. **接入正式serial DAG compiled artifact。** Scheduler计划完成后，用真实node outcomes/depends_on links作为production gate证据。
-14. **对已有真实artifacts运行4条read-only smoke。**
-15. **同步文档并执行Inspector go/no-go gate。**
+1. **确认Inspector范围与shared prerequisite gate（2026-07-17 已完成）。** shared Trace/RuntimeReport与Stage 10前置均为`go`；正式Scheduler最初被识别为步骤13的外部前置，关闭决策已将其调整为未来DAG模块的兼容性回归，依赖矩阵和不做项无ownership冲突。
+2. **实现Inspector-owned query/view/result models与stable validation errors（2026-07-17 已完成）。** 新增最小`app/inspection` package，只引用shared `RuntimeReport` / `AnnotationRecord`；6项聚焦测试与17项TraceReader/runtime_reporting compatibility tests通过，不接storage、CLI、renderer或diagnosis。`output_format`留给renderer/CLI步骤，不提前进入pure query contract。
+3. **实现InspectorService with fakes（2026-07-17 已完成）。** 只调用shared TraceReader和`app/runtime_reporting` FactProvider/RuntimeReportBuilder，不直接从TraceStore records组图。
+4. **实现summary/tree/timeline/details JSON/text renderer（2026-07-17 已完成）。** renderer直接消费对齐的shared TraceGraph/RuntimeReport。
+5. **实现Planning/DAG graph renderer（2026-07-17 已完成）。** shared diamond证明tree containment与`depends_on`分离，不引入scheduler依赖。
+6. **实现deterministic diagnosis registry（2026-07-17 已完成）。** 10条rules、stable AnnotationRecord、单rule failure isolation；新增shared RuntimeReport dependency projection。
+7. **接入shared derived index与file fallback（2026-07-17 已完成）。** index删除后file结果等价并显式`index_unavailable`，不写业务SQLite。
+8. **接入safe ArtifactReference details（2026-07-17 已完成）。** metadata-only；敏感content reader未配置。
+9. **增加结构化CLI command（2026-07-17 已完成）。** `main.py inspect`独立dispatch，不构造普通Runtime/Recovery或接Agent route。
+10. **补齐privacy、integrity、source conflict与annotation persistence（2026-07-17 已完成）。** defensive redaction、safe degradation、views和optional shared sink均有聚焦测试。
+11. **运行focused tests和10条compiled E2E（2026-07-17 已完成）。** 新增`tests/test_inspection_compiled_e2e.py`覆盖Direct final-only、Tool success/failure、Planning continuation/partial、Recovery零执行、Eval annotations、serial diamond、index delete/fallback/rebuild及corrupt/incomplete/privacy degradation；compiled E2E `10/10`、Inspector与shared compatibility slice `56/56`通过。
+12. **运行统一离线回归、compileall、diff check和架构审计（2026-07-17 已完成）。** unittest discovery记录`730`项，其中`709`项通过、`21`项按既有live/platform环境开关跳过，零失败/错误；完整compileall、diff check和双向依赖扫描通过。Inspector不反向进入Runtime/Planner/Executor/Policy/Recovery/Tool/Domain，`app/inspection`不自行打开/解析raw JSONL。
+13. **延后正式serial DAG compiled artifact（2026-07-17 已决策）。** 当前仓库尚无Scheduler计划或实现；正式node outcomes/depends_on links验证移交未来DAG模块，届时作为Inspector跨模块兼容性回归，不重开或反向阻塞已关闭的Inspector V1。
+14. **运行4条read-only canonical artifact smoke（2026-07-17 已完成）。** 当前`logs/sessions`中的15个历史session早于Trace Contract且没有`traces.jsonl`，不能作为有效Inspector证据；改用当前`RequestTelemetry + FileTraceExporter`真实落盘生成的Direct、Planning、Recovery、Eval artifacts逐条验证，`4/4`通过。Inspect阶段零Tool/model/Policy/Planner/Executor调用，不修改source artifacts。
+15. **同步文档并执行Inspector go/no-go gate（2026-07-17 已完成）。** 当前范围结论为`go`并关闭；正式DAG compiled case和未来真实field artifacts只作为后续兼容性/可用性回归，不代表当前已有Scheduler或可读取旧pre-contract sessions。
 
 ## 28. 每一步完成条件
 
@@ -441,9 +451,9 @@ smoke只运行Inspector读取，不再次调用provider、Tool或用户数据库
 - 步骤10：source conflict/incomplete/corrupt/annotation failure安全降级成立。
 - 步骤11：10条compiled E2E全通过，Inspector除shared annotations外零写。
 - 步骤12：统一离线零意外失败，compileall/diff/architecture checks通过。
-- 步骤13：正式serial DAG artifact的tree/graph与scheduler facts一致，不靠event顺序猜edge。
-- 步骤14：真实artifact smoke零provider/Tool调用，报告与source facts一致。
-- 步骤15：文档只记录已实现事实，Inspector gate有直接结论。
+- 步骤13：延期事实、未来owner与回归条件明确；fixture不冒充正式Scheduler artifact。
+- 步骤14：四类canonical file artifact smoke零Tool/model执行，报告与source facts一致；旧pre-contract sessions明确排除。
+- 步骤15：文档只记录已实现事实，Inspector V1 gate有直接结论和后续兼容性入口。
 
 ## 29. 最终 go/no-go gate
 
@@ -451,7 +461,7 @@ smoke只运行Inspector读取，不再次调用provider、Tool或用户数据库
 
 - Inspector和未来Eval确实共享同一`TraceReader + RuntimeReportBuilder + RuntimeReport`；
 - Inspector没有shadow action/evidence/plan/trace models；
-- Direct、Planning、Recovery与正式serial DAG compiled artifact均可稳定展示；fixture只作为前期开发证据；
+- Direct、Planning、Recovery与Eval canonical artifacts可稳定展示；serial diamond fixture只证明当前共享契约兼容，正式Scheduler artifact归未来DAG模块回归；
 - tree、timeline、dependency graph和details可定位到trace/span/fact identity；
 - 10条deterministic rules输出stable annotations，first failure不把downstream blocked误当root cause；
 - index可重建且file fallback成立；
@@ -483,4 +493,4 @@ smoke只运行Inspector读取，不再次调用provider、Tool或用户数据库
 5. 默认只显示safe metadata，敏感LLM/artifact view可在后续步骤决定是否实现。
 6. diagnosis只追加shared annotations，不建立Inspector database。
 7. Inspector不改Runtime/Planner/Executor/Gateway框架，只增加独立CLI dispatch与shared-reader composition。
-8. serial DAG graph view纳入首版；fixture可用于前期开发，但Inspector最终production gate等待独立DAG计划提供正式compiled artifact。
+8. serial DAG graph view纳入首版并由shared fixture冻结消费契约；独立DAG计划完成后必须用正式compiled artifact重跑跨模块兼容性验证，但不反向改变Inspector V1关闭状态。
