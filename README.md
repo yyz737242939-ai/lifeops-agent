@@ -8,7 +8,9 @@ LifeOps Agent 是一个本地 Python 项目，用来学习和构建 Agent Runtim
 
 Stage 10 Execution Feedback / Recovery 已完成并通过 `go` gate：Direct与Planning执行会在Runtime最终输出前形成durable canonical `ExecutionFeedback`，使用structured claims/evidence校验模型成功声明，并通过独立、session-scoped、deterministic-only的`RecoveryRuntime`在重启后只读解释completed/partial/failed/denied/requires-confirmation/not-run事实。Feedback ArtifactReference、validation/stop/evidence RuntimeReport projection、Recovery `recovery_of` link和零执行Recovery topology均已接入LifeOps Trace Contract v1。真实Direct success、Planning completed、Tool failure/confirmation denial和Planning partial smoke通过；统一离线回归`696/696`通过（`21`项环境开关测试跳过）。本阶段不包含checkpoint、replay、resume、rollback、time travel或权限恢复。
 
-Stage 11A Inspector / Runtime Debugger V1 已完成并通过 `go` gate：独立只读`app/inspection`通过shared `TraceReader + RuntimeReportBuilder + RuntimeReport`提供结构化查询、tree/timeline/details/dependency graph、evidence/integrity/annotation views和10条deterministic diagnosis rules；默认不读取敏感artifact内容，不解析raw JSONL，不触发任何执行或授权路径。compiled E2E `10/10`、Inspector/shared聚焦回归`44/44`与此前统一离线回归均通过。正式serial DAG Scheduler仍未实现，其compiled artifact在未来DAG模块完成后作为Inspector兼容性回归，不阻塞已关闭的Stage 11A；下一施工入口为Stage 11B Eval Harness或之后独立DAG Scheduler。
+Stage 11A Inspector / Runtime Debugger V1 已完成并通过 `go` gate：独立只读`app/inspection`通过shared `TraceReader + RuntimeReportBuilder + RuntimeReport`提供结构化查询、tree/timeline/details/dependency graph、evidence/integrity/annotation views和10条deterministic diagnosis rules；默认不读取敏感artifact内容，不解析raw JSONL，不触发任何执行或授权路径。compiled E2E `10/10`、Inspector/shared聚焦回归`44/44`与此前统一离线回归均通过。正式serial DAG Scheduler仍未实现，其compiled artifact在未来DAG模块完成后作为Inspector兼容性回归，不阻塞已关闭的Stage 11A。
+
+Stage 11B Eval Harness V0 已完成并通过 `go` gate：独立 `app/evals` 提供严格 versioned manifests、isolated per-case workspace、typed target/fact adapters、10类 deterministic graders、shared evaluation annotations、text/JSON report、稳定 exit contract、11条 compiled E2E、历史 regression suite 与显式 `--live` real-LLM composition。最终统一离线回归 `787` 项零失败（`22` 项 live/platform gates 跳过），Direct READ、Planning preview/confirm、Recovery explain、Policy stop 四份 real-LLM Eval 报告全部通过。Eval 不读取真实用户数据、不授权或执行额外动作、不建设 hosted platform，也未实现通用 LLM-as-judge；正式 DAG Scheduler 仍是后续独立模块。
 
 ## 项目目标
 
@@ -63,6 +65,19 @@ CLI 入口是：
 
 ```powershell
 uv run python main.py
+```
+
+本地 compiled Eval：
+
+```powershell
+uv run python main.py eval --suite runtime_core
+```
+
+真实模型 Eval 必须显式启用 gate，并建议通过单 case hard-timeout runner 运行：
+
+```powershell
+$env:LIFEOPS_RUN_EVAL_REAL_LLM_SMOKE='1'
+uv run python tests/run_eval_live_smoke.py live-direct-read --timeout-seconds 300
 ```
 
 ## 当前方向

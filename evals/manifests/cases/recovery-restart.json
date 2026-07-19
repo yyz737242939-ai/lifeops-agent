@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "case_id": "recovery-restart",
+  "title": "Restart-safe Recovery explanation",
+  "description": "A fresh Recovery runtime explains a durable partial source run without Tool, Policy, confirmation, or Executor authority.",
+  "execution_mode": "recovery",
+  "fixture_ref": "recovery-restart",
+  "input": {"fixture": "recovery-restart"},
+  "expectations": {
+    "execution_path": {"equals": "recovery"},
+    "tool_calls": {"count": 0},
+    "state_changes": {"count": 0},
+    "trace_contract": {"status": "ok", "required_spans": ["RUNTIME", "RECOVERY"], "required_links": ["recovery_of"], "forbidden_spans": ["POLICY", "EXECUTOR", "TOOL", "EVALUATOR"]},
+    "privacy": {"forbidden_fields": ["api_key", "confirmation_token", "raw_prompt", "raw_output"]}
+  },
+  "grader_ids": ["execution-path", "tool-call", "state-change", "trace-contract", "privacy"],
+  "tags": ["offline", "compiled", "recovery"]
+}

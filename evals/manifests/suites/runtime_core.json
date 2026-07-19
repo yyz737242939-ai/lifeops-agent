@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "suite_id": "runtime_core",
+  "version": "1.0.0",
+  "description": "Deterministic Direct, Planning, Recovery, and shared trace fixture cases.",
+  "case_refs": [
+    "direct-final-only",
+    "direct-read-success",
+    "direct-write-confirmed",
+    "direct-failure-false-success",
+    "direct-deny-zero-write",
+    "planning-preview",
+    "planning-confirm",
+    "planning-partial",
+    "recovery-restart",
+    "serial-diamond"
+  ],
+  "default_grader_ids": []
+}

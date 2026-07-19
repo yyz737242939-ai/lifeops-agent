@@ -15,6 +15,7 @@ from app.context.models import (
     ConversationTurnKind,
 )
 from app.context.repository import JsonlConversationRepository
+from app.domains.travel.repository import TravelRepository
 from app.memory.document_store import MemoryDocumentStore
 from app.memory.models import MemoryWriteContext
 from app.memory.repository import SqliteMemoryRepository
@@ -335,38 +336,14 @@ class LiveUserE2ETest(unittest.TestCase):
             self.assertEqual(denied.tool_names, [])
             self.assertEqual(_tool_names(env.events(), "tool.call.requested"), ())
 
-    def test_05_real_travel_failure_and_confirmation_denial_fail_closed(self) -> None:
+    def test_05a_real_travel_provider_failure_is_reported_honestly(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             env = _LiveEnvironment(Path(tmpdir), "safety")
-            approved = _ScriptedUserConfirmationProvider(("travel.create_trip",))
-            runtime = build_runtime_service(
-                env.config_path,
-                confirmation_provider=approved,
-            )
+            runtime = build_runtime_service(env.config_path)
             try:
-                created = runtime.handle(
-                    env.request(
-                        "Use the travel skill and call travel.create_trip exactly once "
-                        "with title LIVE-TRIP-SAFETY-4826. Then stop.",
-                        "create",
-                    )
-                )
-                self.assertEqual(created.status, RuntimeStatus.OK, _result_debug(created, env))
-                trip_id = env.scalar(
-                    "SELECT id FROM trips WHERE title = ?",
-                    ("LIVE-TRIP-SAFETY-4826",),
-                )
-                read = runtime.handle(
-                    env.request(
-                        "Use the travel skill and call travel.get_trip exactly once for "
-                        f"trip_id {trip_id}. This is read-only.",
-                        "get",
-                    )
-                )
-                self.assertEqual(read.status, RuntimeStatus.OK, _result_debug(read, env))
                 unavailable_request = env.request(
                         "Use the travel skill and call travel.search_places exactly "
-                        f"once for trip_id {trip_id}, query museums, limit 3. If the "
+                        "once for destination Testville and query museums. If the "
                         "provider is unavailable, report that honestly and stop.",
                         "unavailable",
                     )
@@ -384,7 +361,11 @@ class LiveUserE2ETest(unittest.TestCase):
             self.assertEqual(env.count("plan_runs"), 0)
             self.assertEqual(env.count("travel_itineraries"), 0)
             events = env.events()
-            self.assertIn("travel.search_places", _tool_names(events, "tool.call.failed"))
+            self.assertIn(
+                "travel.search_places",
+                _tool_names(events, "tool.call.failed"),
+                _result_debug(unavailable, env),
+            )
             failure_trace_id = _assert_shared_trace(
                 self,
                 env,
@@ -400,6 +381,10 @@ class LiveUserE2ETest(unittest.TestCase):
                 expected_statuses={"failed", "partial"},
             )
 
+    def test_05b_real_archive_confirmation_denial_keeps_trip_active(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = _LiveEnvironment(Path(tmpdir), "policy_stop")
+            trip_id = _seed_trip(env, "LIVE-TRIP-SAFETY-4826")
             denied = _ScriptedUserConfirmationProvider(())
             denied_runtime = build_runtime_service(
                 env.config_path,
@@ -416,7 +401,11 @@ class LiveUserE2ETest(unittest.TestCase):
                 )
             finally:
                 denied_runtime.close()
-            self.assertNotEqual(denied_result.status, RuntimeStatus.OK)
+            self.assertNotEqual(
+                denied_result.status,
+                RuntimeStatus.OK,
+                _result_debug(denied_result, env),
+            )
             self.assertEqual(
                 env.scalar("SELECT status FROM trips WHERE id = ?", (trip_id,)),
                 "active",
@@ -425,32 +414,14 @@ class LiveUserE2ETest(unittest.TestCase):
     def test_06_real_planning_partial_feedback_and_restart_recovery(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             env = _LiveEnvironment(Path(tmpdir), "planning_partial")
-            confirmations = _ScriptedUserConfirmationProvider(
-                ("travel.create_trip",)
-            )
-            runtime = build_runtime_service(
-                env.config_path,
-                confirmation_provider=confirmations,
-            )
+            runtime = build_runtime_service(env.config_path)
             try:
-                created = runtime.handle(
-                    env.request(
-                        "Use the travel skill and call travel.create_trip exactly "
-                        "once with title LIVE-PARTIAL-9064. Then stop.",
-                        "create",
-                    )
-                )
-                self.assertEqual(created.status, RuntimeStatus.OK, _result_debug(created, env))
-                trip_id = env.scalar(
-                    "SELECT id FROM trips WHERE title = ?",
-                    ("LIVE-PARTIAL-9064",),
-                )
                 goal = (
                     "Use the research and travel skills for two dependent steps and "
                     "return an execution preview before any Tool runs. First call "
                     "research.search_papers exactly once for agent runtime. Then call "
                     "travel.search_places exactly once for "
-                    f"trip_id {trip_id}, query museums, limit 3. The travel provider "
+                    "destination Testville and query museums. The travel provider "
                     "may be unavailable; preserve the completed research result and "
                     "report the failed later step honestly. Do not persist results."
                 )
@@ -499,7 +470,10 @@ class LiveUserE2ETest(unittest.TestCase):
                 )
             }
             self.assertIn("completed", outcomes)
-            self.assertTrue(outcomes.intersection({"failed", "not_run"}))
+            self.assertTrue(
+                outcomes.intersection({"failed", "not_run"}),
+                f"unexpected plan-step outcomes: {sorted(outcomes)}",
+            )
 
 
 class _ScriptedUserConfirmationProvider:
@@ -658,6 +632,15 @@ def _seed_verified_memory(env: _LiveEnvironment, marker: str) -> None:
                 "tool-evidence://fixture/memory",
             ),
         )
+    finally:
+        conn.close()
+
+
+def _seed_trip(env: _LiveEnvironment, title: str) -> str:
+    conn = connect_sqlite(env.database_path)
+    try:
+        migrate(conn)
+        return TravelRepository(conn).create_trip(title).trip_id
     finally:
         conn.close()
 

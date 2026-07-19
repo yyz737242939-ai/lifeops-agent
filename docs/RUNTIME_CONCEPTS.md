@@ -777,6 +777,72 @@ Observability 不负责授权写入，不负责改变业务状态，也不把 as
 - 本项目：`app/observability/`
 - 本项目：`plans/modules/OBSERVABILITY_LOGGING_PLAN.md`
 
+## Eval Harness（Stage 11B 已完成）
+
+### 解决什么问题
+
+普通测试回答“某个函数或固定路径是否符合断言”；Eval Harness回答“一组代表性任务在同一Runtime contract下，route、Tool、state、evidence、Feedback、trace和最终声明是否整体正确，而且失败能定位到哪一层”。它不是另一套执行Runtime，也不是把模型回答做字符串比较。
+
+### 核心概念
+
+- `EvalSuite/EvalCase`：versioned dataset与单个任务、期望、grader集合。
+- `EvalRun/CaseResult/GradeResult/EvalReport`：一次experiment及其稳定lineage、分类和安全诊断。
+- deterministic grader：只根据typed`RuntimeReport`、`TraceGraph`和白名单state delta评分，相同事实产生相同结果。
+- real-LLM smoke：少量真实模型/provider路径，用于发现prompt、schema、Tool selection和API现实偏差，不替代离线gate。
+- LLM-as-judge：适合清晰度、帮助性等难以确定性评价的维度；权限、Tool、state、confirmation、evidence与success claim不能交给judge裁决。
+
+### 当前 runtime 实现
+
+`app/evals`把core contracts/runner/graders与`compiled.py`、`live.py` composition分开。严格manifest只接受注册过的stable fixture/grader ID；Runner为每个case创建独立workspace，执行现有Runtime/Planning/Recovery公共入口，再通过shared`TraceReader + RuntimeFactProvider + RuntimeReportBuilder`形成唯一EvaluationSubject。每个GradeResult还会投影为带eval lineage与source fingerprint的shared evaluation annotation。
+
+当前10类grader覆盖execution path、plan lifecycle、workflow dependency、Tool call、state change、evidence、execution feedback、final-answer grounding、trace contract和privacy。compiled`runtime_core`是主gate，`regression`保存历史最小行为，`real_llm_smoke`独立验证Direct、Planning、Recovery与Policy stop。
+
+### 输入 / 输出 / 不负责什么
+
+输入是本地versioned suite ref、可选case ref、显式workspace/report路径与retention选项。输出是text或JSON EvalReport、稳定exit code以及shared evaluation annotations。
+
+Eval不读取真实Profile/Memory/user database，不从manifest执行任意代码，不修改target事实，不授权Tool，不恢复confirmation，不自动retry，也不建设hosted platform。V0不实现通用LLM-as-judge；未来judge也只能追加独立annotation，不能覆盖deterministic failure。
+
+### Failure 分类
+
+- `grade/product failure`：target事实存在，但required grader与期望不匹配，exit `1`。
+- `harness/config error`：manifest、workspace、reader、grader或report lifecycle失败，exit `2`。
+- `environment unavailable`：required live provider/config/timeout不可用，exit `3`，不能算pass。
+- expected safety stop：例如confirmation缺失导致零WRITE；只要事实符合case期望，case本身应通过。
+
+optional grader失败只产生warning；annotation sink失败不改写即时grade；target trace缺失使trace-dependent grader返回error，不能从其他raw日志猜测。
+
+### 如何测试和观察
+
+离线入口：
+
+```powershell
+uv run python main.py eval --suite runtime_core
+uv run python main.py eval --suite regression
+```
+
+真实模型必须显式启用gate，并使用单case外层hard timeout：
+
+```powershell
+$env:LIFEOPS_RUN_EVAL_REAL_LLM_SMOKE='1'
+uv run python tests/run_eval_live_smoke.py live-direct-read --timeout-seconds 300
+```
+
+报告应检查suite/version/environment fingerprint、counts、case status、failure classification、grader reason、target/evaluator trace identity和Inspector查询identity，而不是只看进程是否退出。
+
+### 面试解释
+
+可以概括为：“我没有把Eval做成另一套业务执行框架，而是让它消费Runtime已经拥有的Trace和typed facts。离线compiled suite负责确定性回归，少量real-LLM smoke负责现实偏差；权限和成功声明始终由deterministic graders裁决。每个case隔离存储，provider失败与产品失败分开，评价结论只写annotation，不能反向改变执行。”
+
+### 相关项目文件
+
+- `app/evals/`
+- `evals/manifests/`
+- `tests/test_eval_compiled_e2e.py`
+- `tests/test_eval_live_smoke.py`
+- `tests/run_eval_live_smoke.py`
+- `plans/modules/EVAL_HARNESS_PLAN.md`
+
 ## SQLite Local Persistence
 
 ### 解决什么问题

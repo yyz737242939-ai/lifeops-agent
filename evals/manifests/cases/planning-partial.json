@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "case_id": "planning-partial",
+  "title": "Planning partial outcome",
+  "description": "The plan distinguishes completed, goal-not-achieved, and pending steps without losing prior evidence.",
+  "execution_mode": "plan_command_sequence",
+  "fixture_ref": "planning-partial",
+  "input": {"fixture": "planning-partial"},
+  "expectations": {
+    "execution_path": {"equals": "planning"},
+    "plan_lifecycle": {"status_by_id": {"step-1": "completed", "step-2": "goal_not_achieved", "step-3": "pending"}},
+    "tool_calls": {"count": 0},
+    "state_changes": {"count": 0},
+    "execution_feedback": {"equals": "partial", "stop_status": "partial"},
+    "trace_contract": {"status": "error", "required_spans": ["RUNTIME", "EXECUTOR"], "required_links": ["plan_continuation"], "forbidden_spans": ["TOOL", "EVALUATOR"]},
+    "privacy": {"forbidden_fields": ["api_key", "confirmation_token", "raw_prompt", "raw_output"]}
+  },
+  "grader_ids": ["execution-path", "plan-lifecycle", "tool-call", "state-change", "execution-feedback", "trace-contract", "privacy"],
+  "tags": ["offline", "compiled", "planning"]
+}

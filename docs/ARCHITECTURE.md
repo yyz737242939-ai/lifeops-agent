@@ -51,12 +51,14 @@ legacy_v0/app/
 
 ```text
 main
--> runtime
--> orchestration
--> intent / policy
--> context / planning / execution / inspector
--> tools / domains / memory / recovery / integrations
--> storage / observability / common
+├─> runtime -> orchestration -> intent / policy
+│              -> context / planning / execution
+│              -> tools / domains / memory / integrations
+├─> inspection -> observability / runtime_reporting
+└─> evals -> runtime / planning / recovery
+           -> observability / runtime_reporting / storage
+
+all branches -> common
 ```
 
 默认禁止：
@@ -303,6 +305,18 @@ final answer只通过结构化`call_id`/PlanStep/evidence references声明执行
 
 `RecoveryRuntime`是独立、session-scoped、deterministic-only的只读composition。它只读取durable Feedback historical snapshot并构造immutable `RecoveryContext`/`RecoveryResult`，不初始化或调用ToolRuntime、Gateway、Policy、confirmation、Executor、Planner、Controller或模型，也不保存第二份Feedback。CLI显式入口为`recover-last`与`recover <run_id>`。它不能恢复旧AllowedToolSet、ToolCall、confirmation或WRITE权限，也不提供checkpoint、replay、resume、rollback或time travel。
 
+## Eval Harness
+
+Stage 11B Eval Harness位于`app/evals/`，通过独立`main.py eval` dispatch主动运行，不进入普通Runtime request lifecycle。Eval core只拥有case/suite/run/grade/report contracts、manifest loader、workspace lifecycle、runner、deterministic graders、aggregation、renderers和evaluation annotation projection；compiled与real-LLM composition分别位于`compiled.py`和`live.py`，避免provider、fixture与核心评分契约混合。
+
+每个case使用`EvalWorkspaceFactory`创建独立临时root、SQLite、session logs、Context、Memory和report目录。manifest只能引用代码注册的fixture与grader stable ID，不能提供path、import、callable、shell或secret。fixture setup与target execution分离；live Policy case的seed只写隔离数据库，不能接触默认配置或真实用户store。
+
+Target仍通过现有`RuntimeService.handle(...)`、`handle_plan_command(...)`和`RecoveryRuntime.explain(...)`执行。Eval使用shared`TraceReader + RuntimeFactProvider + RuntimeReportBuilder + RuntimeReport`评分，不从assistant措辞或raw event顺序反推Tool、Plan、Feedback、evidence与state事实。evaluation使用独立`source=eval` trace并以`evaluation_of`链接target；annotation是派生结论，不能授权、重试、rollback或修改target事实。
+
+V0提供10类deterministic graders：execution path、plan lifecycle、workflow dependency、Tool call、state change、evidence、execution feedback、final-answer grounding、trace contract和privacy。required/optional grade、product failure、harness error与environment unavailable保持分离；CLI exit code固定为`0=passed`、`1=grade failure`、`2=harness/config error`、`3=required environment unavailable`。
+
+`runtime_core`是主要离线gate，`regression`保存历史最小失败行为，`real_llm_smoke`只保留Direct READ、Planning preview/confirm、Recovery explain与Policy stop四条现实偏差检查。真实模型suite必须显式`--live`和环境gate，使用provider自身timeout及外层hard-timeout runner，不内部retry、不多数投票、不把重跑结果覆盖为首次通过。通用LLM-as-judge与hosted eval platform不属于V0。
+
 ## Runtime 不变量
 
 - 用户数据安全优先。业务写入必须来自用户当前输入中的明确授权。
@@ -314,6 +328,7 @@ final answer只通过结构化`call_id`/PlanStep/evidence references声明执行
 - LangGraph checkpoint state、Planner 输出和 Recovery Context 不是业务事实来源，也不是写入授权来源。
 - `TraceSink` 是运行依赖，不进入 `GraphState`；event payload 不写完整 GraphState 或原始用户输入。
 - Trace/Span/Annotation 是 telemetry 或派生判断，不是执行、业务事实或写入授权来源。
+- Eval grade/report/annotation不能授权Tool、修改Domain事实、恢复confirmation或触发target Runtime重试。
 - 修改 Runtime 行为、Context 处理、Memory、写入安全或工具执行时，需要聚焦的回归测试。
 
 ## PlanRun vs Domain Facts

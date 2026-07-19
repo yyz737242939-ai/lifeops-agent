@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "case_id": "serial-diamond",
+  "title": "Shared serial diamond trace fixture",
+  "description": "A shared read-model fixture proves dependency links and outcomes without claiming a Scheduler implementation.",
+  "execution_mode": "runtime_request",
+  "fixture_ref": "serial-diamond",
+  "input": {"fixture": "shared-serial-diamond", "scheduler_implemented": false},
+  "expectations": {
+    "workflow_dependencies": {"status_by_id": {"A": "succeeded", "B": "succeeded", "C": "failed", "D": "blocked"}, "linked_to": {"B": ["A"], "C": ["A"], "D": ["B", "C"]}},
+    "tool_calls": {"count": 0},
+    "state_changes": {"count": 0},
+    "evidence": {"count": 1},
+    "trace_contract": {"status": "ok", "required_spans": ["RUNTIME", "PLANNER", "EXECUTOR"], "required_links": ["depends_on"], "forbidden_spans": ["TOOL", "EVALUATOR"]},
+    "privacy": {"forbidden_fields": ["api_key", "confirmation_token", "raw_prompt", "raw_output"]}
+  },
+  "grader_ids": ["workflow-dependency", "tool-call", "state-change", "evidence", "trace-contract", "privacy"],
+  "tags": ["offline", "compiled", "trace-fixture"]
+}

@@ -20,7 +20,7 @@
 - `TRACE_INSPECTION_EVAL_STANDARD_PLAN.md`（步骤 1-16 已完成；shared-standard gate 为 `go`）
 - `RECOVERY_PLAN.md`（Stage 10步骤1-17已完成；最终gate为`go`）
 - `INSPECTOR_PLAN.md`（Stage 11A步骤1-12、14-15已完成并关闭；正式DAG artifact归未来兼容性回归）
-- `EVAL_HARNESS_PLAN.md`
+- `EVAL_HARNESS_PLAN.md`（Stage 11B步骤1-17已完成并关闭；最终gate为`go`）
 
 `plans/RUNTIME_REFACTOR_PLAN.md` 保持为总路线图。实现模块前，使用 `MODULE_PLAN_TEMPLATE.md` 在这里创建或更新模块计划。
 

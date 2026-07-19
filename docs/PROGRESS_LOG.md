@@ -37,6 +37,11 @@
 - Inspector compiled E2E `10/10`、Inspector/shared compatibility slice `56/56`通过；统一离线discovery记录`730`项，其中`709`项通过、`21`项按既有环境开关跳过，零失败/错误，完整compileall、diff与依赖审计通过。Direct、Planning、Recovery、Eval四类由当前`RequestTelemetry + FileTraceExporter`真实落盘的canonical artifacts又完成`4/4`只读smoke；现存15个历史session早于Trace Contract且没有`traces.jsonl`，未作为有效Inspector证据。
 - Stage 11A gate结论为`go`。正式serial DAG Scheduler仍未规划或实现；shared diamond fixture只冻结tree containment、`depends_on`、partial evidence和blocked语义。正式Scheduler compiled artifact改由未来DAG模块完成后执行Inspector跨模块兼容性回归，不反向阻塞已关闭的Inspector V1，也不表示整个runtime路线图的DAG项目已经完成。
 
+- Stage 11B Eval Harness V0已于2026-07-19完成并关闭：新增独立`app/evals`、immutable suite/case/run/grade/report contracts、strict allowlisted manifest loader、per-case isolated workspace、typed Runtime/Planning/Recovery target adapters、state probes、shared RuntimeReport fact adapters、10类deterministic graders、aggregation/renderers、shared evaluation annotations和独立`main.py eval` dispatch。compiled runtime、regression与real-LLM smoke保持三种独立suite，不把普通unittest、真实模型变异性和确定性产品gate混成一个结果。
+- Stage 11B compiled E2E `11/11`覆盖Direct final/READ/WRITE/failure/deny、Planning preview/confirm/partial、Recovery零执行权限、serial diamond、历史regression、restart/index rebuild和failure isolation。Eval聚焦回归`56/56`通过；最终统一离线discovery `787`项零失败、`22`项按live/platform gate跳过，architecture dependency、privacy、`compileall`与`git diff --check`均通过。
+- Stage 11B real-LLM gate通过：Direct READ、Planning preview/confirm、Recovery explain与Policy stop各自使用独立temp workspace、相同deterministic graders、provider/model fingerprint和300秒外层hard timeout，四份最终JSON报告均为`passed`。真实WRITE只发生在隔离fixture且Policy stop验证零archive；provider/config/timeout单独归为environment unavailable，不通过内部retry或多数投票隐藏失败。
+- Stage 11B gate结论为`go`。V0不实现hosted eval platform、通用LLM-as-judge、自动retry、真实用户数据库读取或正式DAG Scheduler；未来DAG模块完成后必须复用serial diamond grader做兼容性回归，但不反向阻塞已关闭的Eval Harness。
+
 - Storage schema 开发基线已在 2026-07-14 从旧 V1-V8 压缩为单一 canonical V1：新空库一次建立当前 Runtime、Research、Travel 的最终表、约束和索引，不再保留开发期 `ALTER` / 临时表搬运。迁移聚焦测试 `6/6`、统一离线回归 `299/299` 与 compileall 通过；本地旧库先备份并升级到最终结构，再重标 V1，`PRAGMA integrity_check=ok` 且原有 `7` 条 run record 保留。未来真实 schema 变化从 V2 开始追加。
 
 - Stage 6 Executor 实施步骤 2 已完成：新增 `ExecutionLimits`、互斥的 model decisions、`ToolObservation` 安全投影、冻结的 status / stop reason、结构化 `ExecutorResult` 和最小 request-local `ExecutorState`；models 不保存 private reasoning，不依赖 Domain、repository、storage、LangGraph 或 provider SDK。新增 Executor models/contracts 与 Stage 5 architecture/runtime/tool/domain 公共契约共 `26/26` 通过。
@@ -127,7 +132,7 @@
 - Observability 文件日志已完成阶段 3.5 初版。
 - LangGraph Orchestration 已完成阶段 4 初版。
 - 阶段 5 的 Skill System、Tool System、Research、Travel 与稳定化步骤 1-15 均已完成，Stage 6 gate 为 `go`。
-- 阶段 6 ReAct Executor、阶段 7 Plan-and-Execute Planner、Stage 8 Research MCP、Stage 9 Context / Memory、Stage 10 Execution Feedback / Recovery与Stage 11A Inspector均已完成并关闭；下一施工入口为Stage 11B Eval Harness或之后独立DAG Scheduler。
+- 阶段 6 ReAct Executor、阶段 7 Plan-and-Execute Planner、Stage 8 Research MCP、Stage 9 Context / Memory、Stage 10 Execution Feedback / Recovery、Stage 11A Inspector与Stage 11B Eval Harness均已完成并关闭；下一施工入口为独立DAG Scheduler或Stage 12面试收口。
 - 旧 runtime 已归档到 `legacy_v0/app/`。
 - 当前代码放在 `app/`。
 - 当前计划放在 `plans/`。

@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "case_id": "direct-final-only",
+  "title": "Direct final only",
+  "description": "A bounded Direct request returns a final answer without Tool or state activity.",
+  "execution_mode": "runtime_request",
+  "fixture_ref": "direct-final-only",
+  "input": {"fixture": "direct-final-only"},
+  "expectations": {
+    "execution_path": {"equals": "final_only"},
+    "tool_calls": {"count": 0},
+    "state_changes": {"count": 0},
+    "trace_contract": {"status": "ok", "required_spans": ["RUNTIME", "EXECUTOR"], "forbidden_spans": ["EVALUATOR"]},
+    "privacy": {"forbidden_fields": ["api_key", "confirmation_token", "raw_prompt", "raw_output"]}
+  },
+  "grader_ids": ["execution-path", "tool-call", "state-change", "trace-contract", "privacy"],
+  "tags": ["offline", "compiled"]
+}

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "suite_id": "real_llm_smoke",
+  "version": "1.0.0",
+  "description": "Four explicitly-gated real-model smoke cases with deterministic Eval Harness grading.",
+  "case_refs": [
+    "live-direct-read",
+    "live-planning-confirm",
+    "live-recovery-explain",
+    "live-policy-stop"
+  ],
+  "default_grader_ids": []
+}

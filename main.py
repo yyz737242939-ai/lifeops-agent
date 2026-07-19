@@ -15,6 +15,7 @@ from app.runtime.models import RuntimeRequest, RuntimeResult, RuntimeStatus
 from app.planning.models import PlanCommand, PlanCommandAction
 from app.recovery.runtime import build_recovery_runtime
 from app.inspection.cli import run_inspector_cli
+from app.evals.cli import run_eval_cli
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -23,6 +24,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
     if raw_argv and raw_argv[0].lower() == "inspect":
         return run_inspector_cli(raw_argv[1:])
+    if raw_argv and raw_argv[0].lower() == "eval":
+        return run_eval_cli(raw_argv[1:])
 
     parser = argparse.ArgumentParser(description="Run the LifeOps runtime CLI.")
     parser.add_argument(

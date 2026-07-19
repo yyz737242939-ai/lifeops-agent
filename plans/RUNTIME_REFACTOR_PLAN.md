@@ -22,8 +22,8 @@
 - 阶段 4：LangGraph Orchestration 骨架已完成，详见 `plans/modules/LANGGRAPH_ORCHESTRATION_PLAN.md`。
 - 当前阶段：阶段 5 功能实现与稳定化均已完成；`STAGE5_STABILIZATION_PLAN.md` 已关闭全部 blocking findings，并在 `240/240` 统一离线回归后给出 Stage 6 `go`。
 - 当前阶段：阶段 7 Plan-and-Execute Planner 步骤 1-16 已全部完成；Planner 聚焦回归 `79/79`、统一离线回归 `379/379` 通过，Direct/Plan/NeedUser 与 Research happy-path 真实模型验证已有证据。
-- 当前阶段：Stage 9 Context / Memory、Stage 10 Execution Feedback / Recovery与Stage 11A Inspector / Runtime Debugger V1均已完成并取得`go`。Inspector已验证shared Trace/RuntimeReport只读消费、deterministic views/diagnosis、privacy/failure isolation、compiled artifacts与CLI独立dispatch；下一施工入口为Stage 11B Eval Harness或之后独立DAG Scheduler。
-- Stage 10继续保持解释型恢复边界：不实现checkpoint、replay、resume、rollback、time travel或权限恢复。Eval Harness与DAG scheduler仍未实现，按各自模块计划推进；未来正式serial DAG compiled artifact必须回归Inspector共享消费契约，但不反向改变Stage 11A关闭状态。
+- 当前阶段：Stage 9 Context / Memory、Stage 10 Execution Feedback / Recovery、Stage 11A Inspector / Runtime Debugger V1与Stage 11B Eval Harness V0均已完成并取得`go`。Eval已验证shared Trace/RuntimeReport评分、deterministic graders、isolated workspace、regression、failure isolation、独立CLI与4条real-LLM smoke；下一施工入口为独立DAG Scheduler或Stage 12面试收口。
+- Stage 10继续保持解释型恢复边界：不实现checkpoint、replay、resume、rollback、time travel或权限恢复。Eval Harness不增加任何执行或授权能力，也不实现hosted platform或通用LLM-as-judge。DAG scheduler仍未实现；未来正式serial DAG compiled artifact必须复用Inspector与Eval的shared diamond兼容性回归，但不反向改变Stage 11A/11B关闭状态。
 
 核心执行链路：
 
@@ -1026,6 +1026,8 @@ docs/RUNTIME_CONCEPTS.md
 - eval runner。
 - 串行 DAG scheduler。
 - demo 场景。
+
+完成状态：Stage 11A Inspector与Stage 11B Eval Harness分别于2026-07-17、2026-07-19完成并取得`go`。Eval已交付versioned manifests、isolated runner、10类deterministic graders、text/JSON reports、shared annotations、compiled/regression/live suites；最终统一离线回归`787`项零失败（`22`项环境gate跳过），四条real-LLM报告全部通过。正式DAG Scheduler仍未实现，继续作为Stage 11剩余独立模块。
 
 ### 阶段 12：面试收口
 

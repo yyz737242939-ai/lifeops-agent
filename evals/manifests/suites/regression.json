@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "suite_id": "regression",
+  "version": "1.0.0",
+  "description": "Stable historical behavior regressions.",
+  "case_refs": ["regression-false-success"],
+  "default_grader_ids": []
+}
