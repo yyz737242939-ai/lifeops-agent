@@ -1,4 +1,4 @@
-# Byte-compiled / optimized / DLL files
+﻿# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
 *$py.class
@@ -43,7 +43,7 @@ htmlcov/
 .coverage
 .coverage.*
 .cache
-logs/
+/logs/
 nosetests.xml
 coverage.xml
 *.cover
@@ -100,6 +100,10 @@ ipython_config.py
 #   This is especially recommended for binary packages to ensure reproducibility, and is more
 #   commonly ignored for libraries.
 # uv.lock
+.uv-cache/
+.tmp/
+.codex/
+.agents/
 
 # poetry
 #   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
@@ -210,6 +214,17 @@ tempCodeRunnerFile.py
 # Local app state
 data/*.json
 data/**/*.json
+data/*.sqlite
+data/*.sqlite3
+data/**/*.sqlite
+data/**/*.sqlite3
+data/exports/
+legacy_v0/logs/*.log
+legacy_v0/logs/*.jsonl
+legacy_v0/logs/**/*.log
+legacy_v0/logs/**/*.jsonl
+legacy_v0/outputs/*
+!legacy_v0/outputs/README.md
 
 # PyPI configuration file
 .pypirc
@@ -221,3 +236,4 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+plans/modules/TRAVEL_DOMAIN_PLAN.md

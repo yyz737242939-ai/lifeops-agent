@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "query": {
+    "destination": "Tokyo",
+    "check_in": "2026-10-01",
+    "check_out": "2026-10-03",
+    "guest_count": 1
+  },
+  "observation": {
+    "observation_id": "travel-observation-lodging-tokyo",
+    "provider": "fixture-lodging",
+    "source_ref": "fixture:travel:lodging:tokyo",
+    "observed_at": "2026-07-13T00:00:00+00:00",
+    "expires_at": "2027-01-01T00:00:00+00:00",
+    "provenance": "fixture:travel:lodging:tokyo:v1"
+  },
+  "candidates": [
+    {
+      "candidate_id": "lodging-tokyo-shinjuku-1",
+      "destination": "Tokyo",
+      "name": "Fixture Shinjuku Hotel",
+      "check_in": "2026-10-01",
+      "check_out": "2026-10-03",
+      "price_minor": 180000,
+      "currency": "CNY"
+    }
+  ]
+}

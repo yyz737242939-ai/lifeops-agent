@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "query": {
+    "destination": "Tokyo",
+    "query": "historic places"
+  },
+  "observation": {
+    "observation_id": "travel-observation-places-tokyo",
+    "provider": "fixture-place",
+    "source_ref": "fixture:travel:places:tokyo",
+    "observed_at": "2026-07-13T00:00:00+00:00",
+    "expires_at": "2027-01-01T00:00:00+00:00",
+    "provenance": "fixture:travel:places:tokyo:v1"
+  },
+  "candidates": [
+    {
+      "candidate_id": "place-tokyo-sensoji",
+      "destination": "Tokyo",
+      "name": "Senso-ji",
+      "category": "temple",
+      "summary": "Fixture-backed historic place candidate."
+    }
+  ]
+}

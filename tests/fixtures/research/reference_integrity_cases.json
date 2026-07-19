@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"case_id": "missing_link_target", "expected_error": "ValueError"},
+    {"case_id": "unsaved_brief_source", "expected_error": "ValueError"},
+    {"case_id": "duplicate_source_url", "expected_code": "research_source_content_duplicate"}
+  ]
+}

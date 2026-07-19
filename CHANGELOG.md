@@ -1,6 +1,6 @@
-# Changelog
+# 变更日志
 
-本文件记录LifeOps Agent每个学习Milestone交付的主要能力。格式参考
+本文件记录LifeOps Agent每个学习里程碑交付的主要能力。格式参考
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，但版本号表示项目学习阶段，
 不等同于PyPI包的语义化版本。
 
@@ -25,9 +25,9 @@
 - Event、LLM I/O、Application三通道日志及本地Viewer。
 - 294项自动化回归测试。
 
-## [Milestone 1.2.2] - 2026-07-05
+## [里程碑 1.2.2] - 2026-07-05
 
-### Added
+### 新增
 
 - 新增 Interaction / Safety State v1：危险批量Todo删除、删除全部/多条/含糊Memory删除会先创建 pending confirmation，不直接暴露危险写工具。
 - 新增 `InteractionState`、`PendingConfirmation`、风险等级、确认/取消/修改/过期生命周期，以及 Agent 级自然语言确认闭环。
@@ -40,21 +40,21 @@
 - 新增 Recovery 行为规则和最终回答保护：没有本轮成功 Tool Observation 时，模型不能声称“已恢复执行”。
 - 新增 `.gitignore` 对 `data/**/*.json` 的忽略，避免 `data/recovery/runs.json` 等本地运行数据进入版本控制。
 
-### Changed
+### 变更
 
 - System Prompt 增加 Task State 和 Recovery 行为规则：查看/恢复任务是 READ，不等于授权写入；恢复上下文只解释上次状态，不自动 replay 工具。
 - Capability 继续默认隐藏 WRITE tools；Task WRITE 和恢复后的 WRITE 都必须来自当前用户输入明确授权。
 - `PROJECT_CONTEXT.md` 和 `LEARNING_PROGRESS.md` 更新为 Safety State、Task State 和 Recovery / Persistence v0 已完成核心闭环。
 
-### Fixed
+### 修复
 
 - 防止“继续上次任务”被误解为授权修改 Task State 或执行危险动作。
 - 防止模型只凭 Recovery Context 声称已经恢复执行；真实恢复执行仍需本轮成功 Tool Observation。
 - 防止 partial / interrupted run 被自动 replay；恢复后高风险或不确定 Action 仍需重新走当前输入授权和 Safety State。
 
-## [Milestone 1.2.1] - 2026-07-02
+## [里程碑 1.2.1] - 2026-07-02
 
-### Added
+### 新增
 
 - 新增独立本地产品 UI 入口 `product_ui.py`，默认启动 `http://127.0.0.1:8787`，不复用开发用 `log_viewer`。
 - 新增 `app/product_ui/*`，通过本地 HTTP API 调用现有 domain store，前端不直接读写业务 JSON 文件。
@@ -75,7 +75,7 @@
 - 新增全局 READ MCP Tool Bridge：`track_package_via_mcp`、`list_package_updates_via_mcp`、`estimate_delivery_window_via_mcp`。
 - 新增 Agent MCP 回归测试，验证自然语言对话中 MCP tools 通过 Capability、Executor、Adapter、MCP Server 和 Tool Observation 完成闭环。
 
-### Changed
+### 变更
 
 - `PROJECT_CONTEXT.md` 增加产品 UI 入口、模块职责、功能范围和边界说明。
 - Ask LifeOps 复用服务进程内 Agent 实例，在当前 UI 服务生命周期内保持对话连续性；重启后清空对话内存状态，业务数据仍由 domain JSON 持久化。
@@ -86,16 +86,16 @@
 - 全局 common capability 增加三个 MCP READ tools；它们默认可见，但仍经过 Runtime capability 和 executor 二次边界。
 - `PROJECT_CONTEXT.md`、`LEARNING_PROGRESS.md` 和 `plans/MCP_IMPLEMENTATION_PLAN.md` 更新为 MCP v1 已完成闭环状态。
 
-### Fixed
+### 修复
 
 - 避免把产品 UI 混入日志查看器：`app/log_viewer/*` 继续只作为开发观察工具，产品 UI 独立演进。
 - 避免前端凭 assistant 文本判断写入事实：Ask LifeOps 面板展示 Runtime Action 摘要，真实写入仍以成功 WRITE Action 或结构化表单提交为准。
 - 明确并测试 MCP package not found 不会被模型当作成功查询；Runtime 保留结构化 `package_not_found` 失败结果。
 - 明确 MCP 查询结果不会写入 Memory 或内部业务数据，保持外部 Tool Observation 与长期状态的边界。
 
-## [Milestone 1.2] - 2026-07-01
+## [里程碑 1.2] - 2026-07-01
 
-### Added
+### 新增
 
 - 新增 `ContextEngine` 作为本轮 LLM input 编译入口，`Agent._request_llm()` 不再直接发送完整 `Agent.messages`，而是通过 `ContextEngine.assemble()` 生成工作上下文。
 - 新增 Context Unit 化机制，将历史消息切分为 user、assistant、tool、protected system note 等单元，并保持 function call 与对应 tool observation 不被窗口切分。
@@ -110,13 +110,13 @@
 - 新增 Tool Observation 压缩策略：根据结果体积和列表数量选择 inline、summary、summary_reference 或 reference。
 - 新增 `ContextRefStore`，为大体积或可恢复的 Tool Result 保存完整 payload，并支持通过 `read_context_ref` 按需恢复。
 - 新增 Context Eval 自动化回归，覆盖压缩前后关键不变量，包括精确 Todo 后续操作、Expense 金额/日期恢复、失败 WRITE 摘要、protected 确认状态和 Ref 恢复。
-- 新增 Memory v1：`data/memory/profile.md` 只读 Profile、`data/memory/semantic_memories.json` Semantic Memory Store，以及 `MemoryItem` 数据模型。
+- 新增 Memory v1：`data/memory/profile.md` 只读Profile、`data/memory/semantic_memories.json` Semantic Memory Store，以及 `MemoryItem` 数据模型。
 - 新增 Memory 工具：`save_memory`、`list_memories`、`delete_memory`。保存和删除 Memory 必须经过当前用户输入明确授权，查看 Memory 作为 READ 工具可用。
 - 新增 Memory Retrieval：每轮 LLM 请求前，Runtime 按当前 `user_input` 从 active Semantic Memory 中用关键词、type 和 tag 做简单检索。
-- 新增 Memory Context 注入：Profile 和相关 Semantic Memory 会作为本轮只读 system context 插入局部 LLM input。
+- 新增 Memory Context 注入：Profile 和相关 Semantic Memory 会作为本轮只读system context 插入局部 LLM input。
 - 新增 Memory 相关回归测试，覆盖 Profile 只读加载、Semantic Memory 保存/列出/软删除、授权边界、工具读写、删除后不注入，以及 Memory 不进入 `Agent.messages`。
 
-### Changed
+### 变更
 
 - Context 阶段从简单 Tool Result 压缩，升级为完整的 conversation working context 管理：完整历史仍保留在 `Agent.messages` / `ContextStore`，但每轮发送给模型的是经过预算控制、摘要、召回和窗口选择后的工作输入。
 - 明确区分 Tool Observation 压缩与长期对话窗口管理：前者处理单次工具结果过大，后者处理跨轮历史持续增长。
@@ -128,7 +128,7 @@
 - `list_todos` 增加 `limit`、`status` 和 `sort` 参数，优先从工具源头减少 Observation 体积。
 - 项目状态从“准备进入最小 Memory State 设计”更新为“Context + Memory v1 已完成第一轮闭环”。
 
-### Fixed
+### 修复
 
 - 修复长对话下完整历史持续塞入 LLM input 的问题，避免窗口无限增长。
 - 修复 Function Call 与 Tool Observation 可能被窗口策略拆散的问题。
@@ -137,31 +137,31 @@
 - 修复被动 hard limit 压力下可能仍超预算的问题：assemble 阶段会继续收缩 recent window。
 - 修复删除后的 Memory 仍可能被使用的问题：Semantic Memory 采用 active/deleted 状态，默认查询和注入都排除 deleted items。
 
-## [Milestone 1.1] - 2026-06-24
+## [里程碑 1.1] - 2026-06-24
 
-### Added
+### 新增
 
 - 增加当前用户输入级别的写工具授权策略，未经明确授权不向模型暴露写能力。
 - 增加批量删除确认保护，以及最终回答的写入成功声明校验。
-- 日志Viewer支持发现和查看验收测试目录中的Session。
+- 日志 Viewer支持发现和查看验收测试目录中的Session。
 - Events页面增加单次Chat的LLM轮次、API请求数和工具执行尝试摘要。
 
-### Changed
+### 变更
 
 - RunState和ActionRecord字段明确区分单次Chat、LLM API请求和工具执行尝试的作用域。
 - LLM Response日志改为诊断字段投影，删除重复的instructions、tools和空字段。
 - 更新项目上下文和学习计划，下一阶段聚焦Context压缩与长期消息窗口。
 - 清理第一阶段一次性UAT Runner、计划和运行产物，保留自动化回归测试。
 
-### Fixed
+### 修复
 
 - 修复建议类请求可能被模型误当成健康状态写入授权的问题。
 - 防止模型在没有成功WRITE Action时声称数据已经保存或修改。
 - 修复验收日志在Viewer中出现无效Session ID、无法选择的问题。
 
-## [Milestone 1.0] - 2026-06-23
+## [里程碑 1.0] - 2026-06-23
 
-### Added
+### 新增
 
 - 增加确定性Skill Router，以及Skill继承、切换、清理和Ref-only多轮状态。
 - 增加按Skill动态构建Prompt、Tool Schema和授权集合的Capability机制。
@@ -172,15 +172,15 @@
 - 增加Tool Result的领域摘要、Reference压缩及 `read_context_ref`。
 - 增加Event、LLM I/O和Application三通道日志与本地Viewer。
 
-### Changed
+### 变更
 
 - 将Tool Registry、Executor、业务工具和公共JSON/时间工具拆分为清晰职责。
 - Skill正文改为选中后按需加载，避免无关正文持续占用Context。
 - SDK隐式重试改为Runtime显式管理和计数。
 
-## [Milestone 0.1] - 2026-06-22
+## [里程碑 0.1] - 2026-06-22
 
-### Added
+### 新增
 
 - 建立基础LLM聊天和Responses API调用链路。
 - 实现Function Call执行循环，将Tool Observation返回模型继续推理。

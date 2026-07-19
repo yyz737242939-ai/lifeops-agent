@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"case_id": "timeout", "expected_code": "research_source_fetch_failed"},
+    {"case_id": "http_503", "expected_code": "research_source_http_error"},
+    {"case_id": "empty_parse", "expected_code": "no_items_parsed"}
+  ]
+}

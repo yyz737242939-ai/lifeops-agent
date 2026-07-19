@@ -1,76 +1,119 @@
-from collections.abc import Callable
+"""In-memory Tool definition and handler registry."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Iterable
+from copy import deepcopy
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import Any
 
+from app.common.validation import require_non_empty_string
+from app.tools.errors import ToolNotFoundError, ToolRegistryError
+from app.tools.models import ToolCall, ToolDefinition, ToolResult
+from app.tools.schema import validate_tool_schema
 
-ToolParameters = dict[str, Any]
-ToolResult = dict[str, Any]
 
-
-class ToolEffect(StrEnum):
-    """Declare whether a tool can mutate external or persisted state."""
-
-    READ = "read"
-    WRITE = "write"
+ToolHandler = Callable[[ToolCall], ToolResult]
 
 
 @dataclass(frozen=True)
-class ToolDefinition:
-    """Registry entry shared by capability building and runtime execution."""
+class RegisteredTool:
+    """One validated Tool contract bound to its runtime handler."""
 
-    name: str
-    description: str
-    parameters: ToolParameters
-    function: Callable[..., ToolResult]
-    effect: ToolEffect
-    idempotent: bool
-    retryable: bool
-    timeout_seconds: float
-
-    def schema(self) -> dict[str, Any]:
-        return {
-            "type": "function",
-            "name": self.name,
-            "description": self.description,
-            "parameters": self.parameters,
-        }
-
-    def metadata(self) -> dict[str, Any]:
-        return {
-            "effect": self.effect.value,
-            "idempotent": self.idempotent,
-            "retryable": self.retryable,
-            "timeout_seconds": self.timeout_seconds,
-        }
+    definition: ToolDefinition
+    handler: ToolHandler
 
 
-TOOLS: dict[str, ToolDefinition] = {}
+class ToolRegistry:
+    """Validated startup registry used by authorization and gateway layers."""
 
+    def __init__(
+        self,
+        tools: Iterable[tuple[ToolDefinition, ToolHandler]] = (),
+    ) -> None:
+        self._by_name: dict[str, RegisteredTool] = {}
+        for definition, handler in tools:
+            self.register(definition, handler)
 
-def register_tool(
-    name: str,
-    description: str,
-    parameters: ToolParameters,
-    *,
-    effect: ToolEffect = ToolEffect.READ,
-    idempotent: bool = True,
-    retryable: bool = True,
-    timeout_seconds: float = 10.0,
-) -> Callable[[Callable[..., ToolResult]], Callable[..., ToolResult]]:
-    """Register a business function with its model and runtime contract."""
+    def register(self, definition: ToolDefinition, handler: ToolHandler) -> None:
+        """Validate and bind one Tool definition exactly once."""
 
-    def decorator(function: Callable[..., ToolResult]) -> Callable[..., ToolResult]:
-        TOOLS[name] = ToolDefinition(
-            name=name,
-            description=description,
-            parameters=parameters,
-            function=function,
-            effect=effect,
-            idempotent=idempotent,
-            retryable=retryable,
-            timeout_seconds=timeout_seconds,
+        if not isinstance(definition, ToolDefinition):
+            raise ToolRegistryError(
+                "Tool registry only accepts ToolDefinition values.",
+                code="tool_registry_invalid_definition",
+            )
+        if not callable(handler):
+            raise ToolRegistryError(
+                "Tool handler must be callable.",
+                code="tool_registry_invalid_handler",
+                details={"tool_name": definition.name},
+            )
+        if definition.name in self._by_name:
+            raise ToolRegistryError(
+                f"Duplicate Tool name: {definition.name}",
+                code="tool_registry_duplicate_name",
+                details={"tool_name": definition.name},
+            )
+
+        validate_tool_schema(definition.input_schema, "input_schema")
+        validate_tool_schema(definition.output_schema, "output_schema")
+        self._by_name[definition.name] = RegisteredTool(definition, handler)
+
+    def get(self, tool_name: str) -> ToolDefinition:
+        """Return one registered definition without exposing its handler."""
+
+        return self.resolve(tool_name).definition
+
+    def resolve(self, tool_name: str) -> RegisteredTool:
+        """Resolve definition and handler for the future Tool Gateway."""
+
+        try:
+            require_non_empty_string(tool_name, "tool_name")
+        except ValueError as exc:
+            raise ToolRegistryError(
+                str(exc), code="tool_registry_invalid_name"
+            ) from exc
+        try:
+            return self._by_name[tool_name]
+        except KeyError as exc:
+            raise ToolNotFoundError(
+                f"Tool is not registered: {tool_name}",
+                code="tool_not_found",
+                details={"tool_name": tool_name},
+            ) from exc
+
+    def list_definitions(self) -> tuple[ToolDefinition, ...]:
+        """Return definitions in deterministic Tool name order."""
+
+        return tuple(self._by_name[name].definition for name in sorted(self._by_name))
+
+    def model_catalog(
+        self, tool_names: Iterable[str] | None = None
+    ) -> tuple[dict[str, Any], ...]:
+        """Return a minimal model catalog, optionally limited by authorization."""
+
+        allowed_names = None if tool_names is None else set(tool_names)
+        if allowed_names is not None:
+            for tool_name in allowed_names:
+                self.get(tool_name)
+        return tuple(
+            {
+                "name": definition.name,
+                "description": definition.description,
+                "input_schema": deepcopy(definition.input_schema),
+                **(
+                    {"max_calls_per_run": definition.max_calls_per_run}
+                    if definition.max_calls_per_run is not None
+                    else {}
+                ),
+            }
+            for definition in self.list_definitions()
+            if allowed_names is None or definition.name in allowed_names
         )
-        return function
 
-    return decorator
+    def contains(self, tool_name: str) -> bool:
+        return tool_name in self._by_name
+
+    def __len__(self) -> int:
+        return len(self._by_name)

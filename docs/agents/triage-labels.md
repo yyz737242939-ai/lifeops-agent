@@ -1,9 +1,9 @@
-# Triage Labels
+# Triage 标签
 
-| Label in mattpocock/skills | Label in our tracker | Meaning |
+| mattpocock/skills 中的标签 | 本仓库 tracker 中的标签 | 含义 |
 | --- | --- | --- |
-| `needs-triage` | `needs-triage` | Maintainer needs to evaluate this issue |
-| `needs-info` | `needs-info` | Waiting on reporter for more information |
-| `ready-for-agent` | `ready-for-agent` | Fully specified, ready for an AFK agent |
-| `ready-for-human` | `ready-for-human` | Requires human implementation |
-| `wontfix` | `wontfix` | Will not be actioned |
+| `needs-triage` | `needs-triage` | 维护者需要评估该 issue |
+| `needs-info` | `needs-info` | 等待报告者提供更多信息 |
+| `ready-for-agent` | `ready-for-agent` | 已完整说明，可交给 AFK agent |
+| `ready-for-human` | `ready-for-human` | 需要人工实现 |
+| `wontfix` | `wontfix` | 不会处理 |

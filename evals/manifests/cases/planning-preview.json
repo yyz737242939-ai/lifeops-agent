@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "case_id": "planning-preview",
+  "title": "Planning preview",
+  "description": "A durable plan preview persists revision one with pending steps and performs no Tool or state write.",
+  "execution_mode": "plan_command_sequence",
+  "fixture_ref": "planning-preview",
+  "input": {"fixture": "planning-preview"},
+  "expectations": {
+    "execution_path": {"equals": "planning"},
+    "plan_lifecycle": {"status_by_id": {"step-1": "pending", "step-2": "pending"}},
+    "tool_calls": {"count": 0},
+    "state_changes": {"count": 0},
+    "trace_contract": {"status": "ok", "required_spans": ["RUNTIME", "PLANNER"], "forbidden_spans": ["TOOL", "EVALUATOR"]},
+    "privacy": {"forbidden_fields": ["api_key", "confirmation_token", "raw_prompt", "raw_output"]}
+  },
+  "grader_ids": ["execution-path", "plan-lifecycle", "tool-call", "state-change", "trace-contract", "privacy"],
+  "tags": ["offline", "compiled", "planning"]
+}

@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "case_id": "direct-deny-zero-write",
+  "title": "Catalog deny keeps zero write",
+  "description": "A scripted forbidden WRITE is outside the allowed catalog and never reaches its handler.",
+  "execution_mode": "runtime_request",
+  "fixture_ref": "direct-deny-zero-write",
+  "input": {"fixture": "direct-deny-zero-write"},
+  "expectations": {
+    "tool_calls": {"count": 0, "contains_none": ["fixture.write"]},
+    "state_changes": {"count": 0},
+    "evidence": {"count": 0},
+    "trace_contract": {"status": "ok", "required_spans": ["RUNTIME", "POLICY"], "forbidden_spans": ["EXECUTOR", "TOOL", "EVALUATOR"]},
+    "privacy": {"forbidden_fields": ["api_key", "confirmation_token", "raw_prompt", "raw_output"]}
+  },
+  "grader_ids": ["tool-call", "state-change", "evidence", "trace-contract", "privacy"],
+  "tags": ["offline", "compiled", "safety"]
+}

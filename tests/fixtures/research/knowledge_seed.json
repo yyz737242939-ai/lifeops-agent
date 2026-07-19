@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "counts": {
+    "sources": 120,
+    "notes": 240,
+    "briefs": 20
+  },
+  "templates": {
+    "source_title": "Seed Agent Source {index}",
+    "note_title": "Seed Agent Note {index}",
+    "brief_title": "Seed Agent Brief {index}"
+  }
+}

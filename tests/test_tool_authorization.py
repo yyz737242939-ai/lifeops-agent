@@ -1,210 +1,148 @@
-import json
+from __future__ import annotations
+
 import unittest
-from unittest.mock import patch
 
-from app.context.context_ref_store import save_context_ref
-from app.tools.capability_builder import build_capabilities
-from app.tools.tool import call_tool
+from app.policy.models import PolicyAction, PolicyDecision
+from app.tools.authorization import resolve_allowed_tools
+from app.tools.errors import ToolAuthorizationError
+from app.tools.models import (
+    ToolCall,
+    ToolCallStatus,
+    ToolDefinition,
+    ToolEffect,
+    ToolResult,
+    ToolRisk,
+)
+from app.tools.registry import ToolRegistry
 
 
-class ToolAuthorizationTests(unittest.TestCase):
-    def test_authorized_tool_executes_normally(self) -> None:
-        capability = build_capabilities(("todo",))
+_SCHEMA = {"type": "object", "properties": {}, "additionalProperties": False}
 
-        result = json.loads(
-            call_tool(
-                "get_current_time",
-                {},
-                allowed_tool_names=capability.allowed_tool_names,
+
+def _definition(
+    name: str,
+    *,
+    effect: ToolEffect = ToolEffect.READ,
+    skill_ids: tuple[str, ...] = (),
+) -> ToolDefinition:
+    return ToolDefinition(
+        name=name,
+        description=f"Tool {name}.",
+        input_schema=_SCHEMA,
+        output_schema=_SCHEMA,
+        effect=effect,
+        risk=ToolRisk.LOW,
+        skill_ids=skill_ids,
+    )
+
+
+def _handler(call: ToolCall) -> ToolResult:
+    return ToolResult(
+        call_id=call.call_id,
+        tool_name=call.tool_name,
+        status=ToolCallStatus.SUCCEEDED,
+        output={},
+    )
+
+
+class ToolAuthorizationTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.registry = ToolRegistry(
+            [
+                (_definition("runtime.help"), _handler),
+                (
+                    _definition(
+                        "research.sources_read",
+                        effect=ToolEffect.EXTERNAL_READ,
+                        skill_ids=("research",),
+                    ),
+                    _handler,
+                ),
+                (
+                    _definition(
+                        "travel.itinerary_write",
+                        effect=ToolEffect.WRITE,
+                        skill_ids=("travel",),
+                    ),
+                    _handler,
+                ),
+            ]
+        )
+
+    def test_skill_candidates_and_common_tools_are_filtered_by_effect(self) -> None:
+        allowed = resolve_allowed_tools(
+            ("research",),
+            PolicyDecision(
+                action=PolicyAction.ALLOW,
+                allowed_effects=["read", "external_read"],
+            ),
+            self.registry,
+        )
+
+        self.assertEqual(
+            allowed.tool_names,
+            ("research.sources_read", "runtime.help"),
+        )
+
+    def test_policy_effect_prevents_skill_candidate_write_exposure(self) -> None:
+        allowed = resolve_allowed_tools(
+            ("travel",),
+            PolicyDecision(
+                action=PolicyAction.ALLOW,
+                allowed_effects=["read", "external_read"],
+            ),
+            self.registry,
+        )
+
+        self.assertEqual(allowed.tool_names, ("runtime.help",))
+
+    def test_write_effect_exposes_matching_skill_write_tool(self) -> None:
+        allowed = resolve_allowed_tools(
+            ("travel",),
+            PolicyDecision(
+                action=PolicyAction.ALLOW,
+                allowed_effects=["write"],
+            ),
+            self.registry,
+        )
+
+        self.assertEqual(allowed.tool_names, ("travel.itinerary_write",))
+
+    def test_empty_effects_and_non_allow_policy_fail_closed(self) -> None:
+        self.assertEqual(
+            resolve_allowed_tools(
+                ("research",), PolicyDecision(action=PolicyAction.ALLOW), self.registry
+            ).tool_names,
+            (),
+        )
+        self.assertEqual(
+            resolve_allowed_tools(
+                ("research",), PolicyDecision(action=PolicyAction.DENY), self.registry
+            ).tool_names,
+            (),
+        )
+
+    def test_invalid_skill_ids_are_rejected(self) -> None:
+        with self.assertRaises(ToolAuthorizationError) as caught:
+            resolve_allowed_tools(
+                ("",), PolicyDecision(action=PolicyAction.ALLOW), self.registry
             )
+
+        self.assertEqual(caught.exception.code, "tool_authorization_invalid_skill_id")
+
+    def test_allowed_tool_set_filters_model_catalog(self) -> None:
+        allowed = resolve_allowed_tools(
+            ("research",),
+            PolicyDecision(
+                action=PolicyAction.ALLOW,
+                allowed_effects=["external_read"],
+            ),
+            self.registry,
         )
 
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["action"], "get_current_time")
+        catalog = self.registry.model_catalog(allowed.tool_names)
 
-    def test_unauthorized_tool_is_rejected_without_execution(self) -> None:
-        capability = build_capabilities(("todo",))
-
-        with patch("app.tools.tool.expense_store.add_expense") as add_expense:
-            result = json.loads(
-                call_tool(
-                    "record_expense",
-                    {
-                        "amount": 35,
-                        "category": "food",
-                        "description": "lunch",
-                    },
-                    allowed_tool_names=capability.allowed_tool_names,
-                )
-            )
-
-        self.assertFalse(result["ok"])
-        self.assertEqual(result["error"]["type"], "permission_denied")
-        self.assertEqual(result["error"]["code"], "tool_not_allowed")
-        self.assertNotIn("record_expense", result["allowed_tools"])
-        add_expense.assert_not_called()
-
-    def test_unknown_tool_remains_distinct_from_denied_tool(self) -> None:
-        result = json.loads(
-            call_tool(
-                "does_not_exist",
-                {},
-                allowed_tool_names=frozenset(),
-            )
-        )
-
-        self.assertEqual(result["error"]["type"], "not_found")
-        self.assertEqual(result["error"]["code"], "tool_not_found")
-
-    def test_skill_reference_requires_news_skill_capability(self) -> None:
-        capability = build_capabilities(())
-
-        result = json.loads(
-            call_tool(
-                "read_skill_reference",
-                {"ref_id": "briefing_policy"},
-                allowed_tool_names=capability.allowed_tool_names,
-            )
-        )
-
-        self.assertFalse(result["ok"])
-        self.assertEqual(result["error"]["type"], "permission_denied")
-        self.assertEqual(result["error"]["code"], "tool_not_allowed")
-
-    def test_skill_reference_reads_declared_news_markdown(self) -> None:
-        capability = build_capabilities(("news",))
-
-        result = json.loads(
-            call_tool(
-                "read_skill_reference",
-                {"ref_id": "briefing_policy"},
-                allowed_tool_names=capability.allowed_tool_names,
-            )
-        )
-
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["action"], "read_skill_reference")
-        self.assertEqual(result["skill"], "news")
-        self.assertEqual(result["path"], "references/briefing_policy.md")
-        self.assertIn("Briefing Policy", result["content"])
-
-    def test_skill_reference_rejects_undeclared_ref_id(self) -> None:
-        capability = build_capabilities(("news",))
-
-        result = json.loads(
-            call_tool(
-                "read_skill_reference",
-                {"ref_id": "../PROJECT_CONTEXT.md"},
-                allowed_tool_names=capability.allowed_tool_names,
-            )
-        )
-
-        self.assertFalse(result["ok"])
-        self.assertEqual(result["error"]["type"], "not_found")
-        self.assertEqual(result["error"]["code"], "skill_reference_not_found")
-
-    def test_news_source_requires_news_skill_capability(self) -> None:
-        capability = build_capabilities(())
-
-        result = json.loads(
-            call_tool(
-                "fetch_news_source",
-                {"source_id": "hf_blog"},
-                allowed_tool_names=capability.allowed_tool_names,
-            )
-        )
-
-        self.assertFalse(result["ok"])
-        self.assertEqual(result["error"]["type"], "permission_denied")
-        self.assertEqual(result["error"]["code"], "tool_not_allowed")
-
-    def test_news_helper_requires_news_skill_capability(self) -> None:
-        capability = build_capabilities(())
-
-        result = json.loads(
-            call_tool(
-                "run_news_helper",
-                {
-                    "helper_id": "parse_hf_blog",
-                    "arguments": {"html": "<html></html>", "limit": 1},
-                },
-                allowed_tool_names=capability.allowed_tool_names,
-            )
-        )
-
-        self.assertFalse(result["ok"])
-        self.assertEqual(result["error"]["type"], "permission_denied")
-        self.assertEqual(result["error"]["code"], "tool_not_allowed")
-
-    def test_news_helper_runs_declared_read_only_helper(self) -> None:
-        capability = build_capabilities(("news",))
-
-        result = json.loads(
-            call_tool(
-                "run_news_helper",
-                {
-                    "helper_id": "parse_hf_blog",
-                    "arguments": {
-                        "html": '<a href="/blog/test">Agent workflow update</a>',
-                        "limit": 2,
-                    },
-                },
-                allowed_tool_names=capability.allowed_tool_names,
-            )
-        )
-
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["action"], "run_news_helper")
-        self.assertEqual(result["result"][0]["source_id"], "hf_blog")
-
-    def test_news_helper_can_parse_runtime_source_ref(self) -> None:
-        capability = build_capabilities(("news",))
-        ref_id = save_context_ref(
-            tool_name="fetch_news_source",
-            full_result={
-                "ok": True,
-                "action": "fetch_news_source",
-                "source_id": "hf_blog",
-                "content": '<a href="/blog/test">Agent workflow update</a>',
-            },
-            summary={"source_id": "hf_blog"},
-        )
-
-        result = json.loads(
-            call_tool(
-                "run_news_helper",
-                {
-                    "helper_id": "parse_hf_blog",
-                    "arguments": {"source_ref_id": ref_id, "limit": 2},
-                },
-                allowed_tool_names=capability.allowed_tool_names,
-            )
-        )
-
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["result"][0]["source_id"], "hf_blog")
-
-    def test_news_helper_rejects_non_source_ref(self) -> None:
-        capability = build_capabilities(("news",))
-        ref_id = save_context_ref(
-            tool_name="list_todos",
-            full_result={"ok": True, "todos": []},
-            summary={"count": 0},
-        )
-
-        result = json.loads(
-            call_tool(
-                "run_news_helper",
-                {
-                    "helper_id": "parse_hf_blog",
-                    "arguments": {"source_ref_id": ref_id, "limit": 2},
-                },
-                allowed_tool_names=capability.allowed_tool_names,
-            )
-        )
-
-        self.assertFalse(result["ok"])
-        self.assertEqual(result["error"]["code"], "invalid_source_ref")
+        self.assertEqual(tuple(item["name"] for item in catalog), allowed.tool_names)
 
 
 if __name__ == "__main__":

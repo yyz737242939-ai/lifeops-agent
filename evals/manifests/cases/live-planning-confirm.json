@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "case_id": "live-planning-confirm",
+  "title": "Real-model Planning preview and confirm",
+  "description": "A real model previews and confirms two dependent successful READ steps over an isolated paper search and seeded trip.",
+  "execution_mode": "plan_command_sequence",
+  "fixture_ref": "live-planning-confirm",
+  "input": {"scenario": "research-then-seeded-trip-read"},
+  "expectations": {
+    "execution_path": {"equals": "planning"},
+    "tool_calls": {"contains_all": ["research.search_papers", "travel.get_trip"], "count": 2},
+    "state_changes": {"count": 0},
+    "execution_feedback": {"equals": "completed", "stop_status": "completed"},
+    "trace_contract": {"status": "ok", "required_spans": ["RUNTIME", "PLANNER", "EXECUTOR", "LLM", "TOOL"], "required_links": ["plan_continuation"], "forbidden_spans": ["EVALUATOR"]},
+    "privacy": {"forbidden_fields": ["api_key", "confirmation_token", "raw_prompt", "raw_output"]}
+  },
+  "grader_ids": ["execution-path", "tool-call", "state-change", "execution-feedback", "trace-contract", "privacy"],
+  "tags": ["live", "real-llm", "planning"],
+  "timeout_seconds": 240
+}

@@ -1,0 +1,26 @@
+[
+  {
+    "paper_id": "2601.00001",
+    "title": "Tool-Using Agents with Bounded Context",
+    "authors": ["Ada Example", "Lin Example"],
+    "summary": "A study of agent tool use and bounded context assembly.",
+    "published_at": "2026-01-02T00:00:00+00:00",
+    "url": "https://huggingface.co/papers/2601.00001"
+  },
+  {
+    "paper_id": "2601.00002",
+    "title": "Reliable MCP Process Lifecycles",
+    "authors": ["Morgan Example"],
+    "summary": "Research on reliable subprocess shutdown for MCP clients.",
+    "published_at": "2026-01-03T00:00:00+00:00",
+    "url": "https://huggingface.co/papers/2601.00002"
+  },
+  {
+    "paper_id": "2601.00003",
+    "title": "Unrelated Vision Benchmark",
+    "authors": [],
+    "summary": "A computer vision benchmark.",
+    "published_at": null,
+    "url": "https://huggingface.co/papers/2601.00003"
+  }
+]

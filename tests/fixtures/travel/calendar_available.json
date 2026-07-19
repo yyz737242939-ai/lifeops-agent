@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "query": {
+    "starts_at": "2026-10-01T00:00:00+09:00",
+    "ends_at": "2026-10-03T00:00:00+09:00",
+    "timezone": "Asia/Tokyo",
+    "minimum_duration_minutes": 120
+  },
+  "observation": {
+    "observation_id": "travel-observation-calendar-tokyo-october",
+    "provider": "fixture-calendar",
+    "source_ref": "fixture:travel:calendar:tokyo-october",
+    "observed_at": "2026-07-13T00:00:00+00:00",
+    "expires_at": "2027-01-01T00:00:00+00:00",
+    "provenance": "fixture:travel:calendar:tokyo-october:v1"
+  },
+  "candidates": [
+    {
+      "candidate_id": "calendar-slot-tokyo-1",
+      "starts_at": "2026-10-01T09:00:00+09:00",
+      "ends_at": "2026-10-01T12:00:00+09:00",
+      "timezone": "Asia/Tokyo"
+    }
+  ]
+}

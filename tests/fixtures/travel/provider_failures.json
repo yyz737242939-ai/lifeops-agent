@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "cases": {
+    "success": {},
+    "no_results": {},
+    "timeout": {
+      "code": "timeout",
+      "message": "Fixture provider timed out.",
+      "retryable": true
+    },
+    "rate_limit": {
+      "code": "rate_limit",
+      "message": "Fixture provider rate limit was reached.",
+      "retryable": true
+    },
+    "expired": {
+      "code": "expired",
+      "message": "Fixture provider quote expired.",
+      "retryable": true,
+      "expires_at": "2026-07-12T23:00:00+00:00"
+    },
+    "partial_failure": {
+      "code": "provider_error",
+      "message": "One fixture provider partition failed.",
+      "retryable": false
+    }
+  }
+}

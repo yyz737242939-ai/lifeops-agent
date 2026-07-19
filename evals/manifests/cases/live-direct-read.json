@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "case_id": "live-direct-read",
+  "title": "Real-model Direct READ",
+  "description": "A real model performs one isolated public paper search and grounds the final answer in Tool evidence.",
+  "execution_mode": "runtime_request",
+  "fixture_ref": "live-direct-read",
+  "input": {"scenario": "public-paper-read"},
+  "expectations": {
+    "execution_path": {"equals": "direct"},
+    "tool_calls": {"contains_all": ["research.search_papers"], "count": 1},
+    "state_changes": {"count": 0},
+    "execution_feedback": {"equals": "completed", "stop_status": "completed"},
+    "final_answer": {"equals": "valid", "min_accepted_claim_count": 1, "max_reason_count": 0},
+    "trace_contract": {"status": "ok", "required_spans": ["RUNTIME", "LLM", "TOOL", "GUARDRAIL"], "forbidden_spans": ["EVALUATOR"]},
+    "privacy": {"forbidden_fields": ["api_key", "confirmation_token", "raw_prompt", "raw_output"]}
+  },
+  "grader_ids": ["execution-path", "tool-call", "state-change", "execution-feedback", "final-answer-grounding", "trace-contract", "privacy"],
+  "tags": ["live", "real-llm", "direct", "read"],
+  "timeout_seconds": 240
+}

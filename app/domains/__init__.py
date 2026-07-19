@@ -1,1 +1,1 @@
-
+"""Business domain packages."""
